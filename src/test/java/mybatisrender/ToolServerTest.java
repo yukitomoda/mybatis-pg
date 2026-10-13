@@ -26,14 +26,15 @@ import com.google.gson.JsonObject;
 class ToolServerTest {
 
   private static final String TOKEN = "test-token";
+  private static MapperWorkspace workspace;
   private static ToolServer server;
   private static String host;
 
   @BeforeAll
   static void start() throws Exception {
     Path res = Paths.get("src/test/resources");
-    MapperWorkspace ws = new MapperWorkspace(Arrays.asList(res.resolve("mappers"), res.resolve("params")));
-    server = ToolServer.start(ws, 0, TOKEN);
+    workspace = MapperWorkspace.ofPaths(Arrays.asList(res.resolve("mappers"), res.resolve("params")));
+    server = ToolServer.start(workspace, 0, TOKEN);
     host = "127.0.0.1:" + server.getPort();
   }
 
@@ -122,6 +123,29 @@ class ToolServerTest {
         headers("Host", host, "X-Auth-Token", TOKEN, "Content-Type", "text/plain"), "{}");
     assertEquals(415, wrongType.status);
     api("GET", "/api/render", null, 405);
+  }
+
+  @Test
+  void 変更待ちは世代番号が進むまで応答を保留する() throws Exception {
+    long current = api("GET", "/api/statements", null, 200).get("generation").getAsLong();
+
+    // 古い世代番号を渡すとすぐ応答する
+    assertEquals(current, api("GET", "/api/changes?since=" + (current - 1), null, 200).get("generation").getAsLong());
+
+    // 現在の世代番号を渡すと、読み込み直されるまで待つ
+    java.util.concurrent.CompletableFuture<JsonObject> pending = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+      try {
+        return api("GET", "/api/changes?since=" + current, null, 200);
+      } catch (Exception e) {
+        throw new IllegalStateException(e);
+      }
+    });
+    Thread.sleep(300);
+    assertFalse(pending.isDone());
+    workspace.reload();
+    assertEquals(current + 1, pending.get(5, java.util.concurrent.TimeUnit.SECONDS).get("generation").getAsLong());
+
+    api("GET", "/api/changes?since=abc", null, 400);
   }
 
   // ---- HTTP（Host ヘッダを自由に設定するため、ソケットで直接やりとりする） ----

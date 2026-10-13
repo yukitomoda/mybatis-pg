@@ -55,7 +55,7 @@ class LoadErrorTest {
     write(dir, "logback.xml", "<?xml version=\"1.0\"?>\n<configuration/>\n");
     write(dir, "B.txt", "<mapper namespace=\"b\"/>");
 
-    MapperWorkspace ws = new MapperWorkspace(Collections.singletonList(dir));
+    MapperWorkspace ws = MapperWorkspace.ofPaths(Collections.singletonList(dir));
 
     assertEquals(Collections.singletonList(dir.resolve("sub/A.xml")), ws.mapperFiles());
     assertEquals(Collections.singletonList("a.x"), ws.renderer().statementIds());

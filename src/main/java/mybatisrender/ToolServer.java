@@ -42,6 +42,8 @@ public final class ToolServer {
 
   static final String TOKEN_HEADER = "X-Auth-Token";
   private static final int MAX_BODY_BYTES = 1024 * 1024;
+  /** /api/changes で変更を待つ最大時間 */
+  private static final long CHANGES_TIMEOUT_MILLIS = 25_000;
   private static final Map<String, String> CONTENT_TYPES = new HashMap<>();
 
   static {
@@ -70,7 +72,8 @@ public final class ToolServer {
     this.port = server.getAddress().getPort();
     this.allowedHosts = new HashSet<>(Arrays.asList("127.0.0.1:" + this.port, "localhost:" + this.port));
     this.allowedOrigins = new HashSet<>(Arrays.asList("http://127.0.0.1:" + this.port, "http://localhost:" + this.port));
-    this.executor = Executors.newFixedThreadPool(4, r -> {
+    // /api/changes が応答を保留する間もスレッドを占有するため、必要に応じて増やせるプールにする
+    this.executor = Executors.newCachedThreadPool(r -> {
       Thread t = new Thread(r, "tool-server");
       t.setDaemon(true);
       return t;
@@ -157,6 +160,11 @@ public final class ToolServer {
           render(ex);
         }
         break;
+      case "/api/changes":
+        if (requireMethod(ex, method, "GET")) {
+          changes(ex);
+        }
+        break;
       default:
         sendJson(ex, 404, error("API がありません: " + path));
         break;
@@ -174,10 +182,36 @@ public final class ToolServer {
 
   /** statement の一覧と、読み込みエラーの一覧 */
   private void statements(HttpExchange ex) throws IOException {
+    long generation = workspace.generation();
     SqlRenderer renderer = workspace.renderer();
     Map<String, Object> body = new LinkedHashMap<>();
+    body.put("generation", generation);
     body.put("statements", renderer.statementIds());
     body.put("loadErrors", renderer.getLoadErrors());
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * mapper の読み込み直しを待つ（ロングポーリング）。
+   * 世代番号が since より進んでいればすぐ、そうでなければ変わるかタイムアウトするまで待って、現在の世代番号を返す。
+   */
+  private void changes(HttpExchange ex) throws IOException {
+    long since;
+    try {
+      since = Long.parseLong(query(ex).getOrDefault("since", "-1"));
+    } catch (NumberFormatException e) {
+      sendJson(ex, 400, error("since は整数で指定してください"));
+      return;
+    }
+    long generation;
+    try {
+      generation = workspace.awaitChange(since, CHANGES_TIMEOUT_MILLIS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      generation = workspace.generation();
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("generation", generation);
     sendJson(ex, 200, body);
   }
 

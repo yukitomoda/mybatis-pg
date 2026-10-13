@@ -46,7 +46,13 @@ public class SqlRenderer {
    * mapper XML を読み込む。読み込めないファイルや statement はエラーとして記録し、残りは使えるようにする。
    */
   public static SqlRenderer load(List<Path> mapperFiles) {
+    return load(mapperFiles, Collections.<LoadError>emptyList());
+  }
+
+  /** @param initialErrors 読み込み前に起きたエラー（設定ファイルの読み込み失敗など） */
+  public static SqlRenderer load(List<Path> mapperFiles, List<LoadError> initialErrors) {
     SqlRenderer renderer = new SqlRenderer();
+    renderer.loadErrors.addAll(initialErrors);
     for (Path file : mapperFiles) {
       renderer.loadFile(file);
     }
