@@ -32,7 +32,8 @@ class MapperPreprocessorTest {
 
   @Test
   void 前処理するとクラスなしで読み込んで展開できる() throws Exception {
-    SqlRenderer renderer = new SqlRenderer(Arrays.asList(DIR.resolve("OrderMapper.xml"), DIR.resolve("ResultMapOnly.xml")));
+    SqlRenderer renderer = SqlRenderer.load(Arrays.asList(DIR.resolve("OrderMapper.xml"), DIR.resolve("ResultMapOnly.xml")));
+    assertEquals(java.util.Collections.emptyList(), renderer.getLoadErrors());
 
     assertEquals(Arrays.asList("sample.OrderMapper.findById", "sample.OrderMapper.insert",
         "sample.OrderMapper.insert!selectKey", "sample.OrderMapper.search"), renderer.statementIds());

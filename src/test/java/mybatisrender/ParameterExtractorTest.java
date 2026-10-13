@@ -18,8 +18,9 @@ class ParameterExtractorTest {
   @BeforeAll
   static void setUp() throws Exception {
     Path res = Paths.get("src/test/resources");
-    renderer = new SqlRenderer(Arrays.asList(res.resolve("mappers/UserMapper.xml"), res.resolve("mappers/Common.xml"),
+    renderer = SqlRenderer.load(Arrays.asList(res.resolve("mappers/UserMapper.xml"), res.resolve("mappers/Common.xml"),
         res.resolve("params/ParamMapper.xml")));
+    assertEquals(java.util.Collections.emptyList(), renderer.getLoadErrors());
   }
 
   @Test

@@ -1,8 +1,10 @@
 package mybatisrender;
 
+import java.math.BigDecimal;
+
 /**
  * 値を SQL リテラルに変換する。
- * 対象 DB が未決のため、現状は方言に依存しない最小限の変換のみ。
+ * 書式は PostgreSQL に合わせる。
  */
 public final class SqlLiteral {
 
@@ -13,11 +15,14 @@ public final class SqlLiteral {
     if (value == null) {
       return "NULL";
     }
+    if (value instanceof BigDecimal) {
+      // 1E+3 のような指数表記にしない
+      return ((BigDecimal) value).toPlainString();
+    }
     if (value instanceof Number) {
       return value.toString();
     }
     if (value instanceof Boolean) {
-      // TODO: 対象 DB に合わせる（例: Oracle は 1/0）
       return ((Boolean) value) ? "TRUE" : "FALSE";
     }
     return "'" + value.toString().replace("'", "''") + "'";

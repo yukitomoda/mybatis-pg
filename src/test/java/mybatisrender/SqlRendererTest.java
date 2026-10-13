@@ -21,7 +21,8 @@ class SqlRendererTest {
   static void setUp() throws Exception {
     Path dir = Paths.get("src/test/resources/mappers");
     // include 先（Common.xml）を後から読み込み、読み込み順に依存しないことも確かめる
-    renderer = new SqlRenderer(Arrays.asList(dir.resolve("UserMapper.xml"), dir.resolve("Common.xml")));
+    renderer = SqlRenderer.load(Arrays.asList(dir.resolve("UserMapper.xml"), dir.resolve("Common.xml")));
+    assertEquals(java.util.Collections.emptyList(), renderer.getLoadErrors());
   }
 
   @Test

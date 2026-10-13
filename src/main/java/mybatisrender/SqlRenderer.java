@@ -1,15 +1,18 @@
 package mybatisrender;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.builder.xml.XMLStatementBuilder;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
@@ -17,9 +20,10 @@ import org.apache.ibatis.mapping.ParameterMode;
 import org.apache.ibatis.mapping.SqlSource;
 import org.apache.ibatis.parsing.GenericTokenParser;
 import org.apache.ibatis.parsing.TokenHandler;
+import org.apache.ibatis.parsing.XNode;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.session.Configuration;
-import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
 
 /**
  * mapper XML を MyBatis 本体で読み込み、statement を展開して
@@ -31,18 +35,81 @@ public class SqlRenderer {
   private static final char MARKER = '\u0000';
 
   private final Configuration configuration;
+  private final List<LoadError> loadErrors = new ArrayList<>();
 
-  public SqlRenderer(List<Path> mapperFiles) throws IOException, SAXException {
+  private SqlRenderer() {
     configuration = new Configuration();
     configuration.getLanguageRegistry().setDefaultDriverClass(TracingLanguageDriver.class);
+  }
+
+  /**
+   * mapper XML を読み込む。読み込めないファイルや statement はエラーとして記録し、残りは使えるようにする。
+   */
+  public static SqlRenderer load(List<Path> mapperFiles) {
+    SqlRenderer renderer = new SqlRenderer();
     for (Path file : mapperFiles) {
+      renderer.loadFile(file);
+    }
+    renderer.resolveIncompleteStatements();
+    return renderer;
+  }
+
+  private void loadFile(Path file) {
+    try {
       byte[] xml;
       try (InputStream in = Files.newInputStream(file)) {
         xml = MapperPreprocessor.preprocess(in, file.toUri().toString());
       }
       new XMLMapperBuilder(new ByteArrayInputStream(xml), configuration, file.toString(),
           configuration.getSqlFragments()).parse();
+    } catch (SAXParseException e) {
+      loadErrors.add(new LoadError(file.toString(), e.getLineNumber(), e.getColumnNumber(), e.getMessage()));
+    } catch (Exception e) {
+      loadErrors.add(new LoadError(file.toString(), null, null, Errors.describe(e)));
     }
+  }
+
+  /**
+   * include 先が後のファイルにある statement は「未完成」として保留されている。
+   * 全ファイルを読み込んだ後に 1 つずつ組み立て、失敗したものはエラーとして外す。
+   * （MyBatis 既定の動作では、未完成の statement が 1 つでも残ると全 statement の取得が失敗する）
+   */
+  private void resolveIncompleteStatements() {
+    Collection<XMLStatementBuilder> incomplete = configuration.getIncompleteStatements();
+    synchronized (incomplete) {
+      Iterator<XMLStatementBuilder> it = incomplete.iterator();
+      while (it.hasNext()) {
+        XMLStatementBuilder builder = it.next();
+        try {
+          builder.parseStatementNode();
+        } catch (Exception e) {
+          loadErrors.add(new LoadError(statementLabel(builder), null, null, Errors.describe(e)));
+        }
+        it.remove();
+      }
+    }
+  }
+
+  /** エラー表示用に、未完成の statement の id を取り出す */
+  private static String statementLabel(XMLStatementBuilder builder) {
+    try {
+      Field f = XMLStatementBuilder.class.getDeclaredField("context");
+      f.setAccessible(true);
+      XNode context = (XNode) f.get(builder);
+      XNode mapper = context.getParent();
+      String namespace = mapper == null ? null : mapper.getStringAttribute("namespace");
+      return "statement " + (namespace == null ? "" : namespace + ".") + context.getStringAttribute("id");
+    } catch (ReflectiveOperationException | RuntimeException e) {
+      return "statement（id 不明）";
+    }
+  }
+
+  public List<LoadError> getLoadErrors() {
+    return Collections.unmodifiableList(loadErrors);
+  }
+
+  public boolean hasStatement(String statementId) {
+    return configuration.hasStatement(statementId, false);
   }
 
   public List<String> statementIds() {
