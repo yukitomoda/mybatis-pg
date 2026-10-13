@@ -23,7 +23,7 @@ public class TracingLanguageDriver extends XMLLanguageDriver {
     SqlSource original = super.createSqlSource(configuration, script, parameterType);
     // RawSqlSource は元の SqlNode を保持しないため、同じ XNode をもう一度解析して取っておく
     SqlNode rootSqlNode = parseRootSqlNode(configuration, script, parameterType);
-    return new TracingSqlSource(configuration, original, rootSqlNode);
+    return new TracingSqlSource(configuration, original, rootSqlNode, script.getNode());
   }
 
   /**

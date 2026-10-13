@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="sample.ParamMapper">
+  <sql id="paging">LIMIT #{limit,jdbcType=INTEGER}</sql>
+
+  <!-- 定数との比較からの型推測、_parameter と _databaseId、Java の static メソッド呼び出し -->
+  <select id="hints" resultType="map">
+    SELECT * FROM t
+    <where>
+      <if test="status == 1">AND status = #{status}</if>
+      <if test="type == 'A'">AND type = #{type}</if>
+      <if test="label == 'abc'">AND label = #{label}</if>
+      <if test="flag == true">AND flag</if>
+      <if test="_parameter.code != null and _databaseId == null">AND code = #{_parameter.code}</if>
+      <if test="@com.example.Util@isEmpty(memo)">AND memo IS NULL</if>
+      <if test="opts['mode'] != null">AND mode = #{opts.mode}</if>
+    </where>
+    <include refid="paging"/>
+  </select>
+
+  <!-- 入れ子の foreach、index、添字付きのプロパティ -->
+  <select id="nested" resultType="map">
+    SELECT * FROM t WHERE first_id = #{rows[0].id}
+    <foreach collection="groups" item="g" index="i" separator=" OR ">
+      (group_no = #{i} AND member IN
+      <foreach collection="g.members" item="m" open="(" separator="," close=")">#{m.name}</foreach>)
+    </foreach>
+  </select>
+
+  <!-- 解析できない式があっても他の項目は抽出する -->
+  <select id="broken" resultType="map">
+    SELECT * FROM t
+    <if test="a ==">AND a</if>
+    WHERE b = #{b}
+  </select>
+</mapper>

@@ -60,19 +60,29 @@ public class SqlRenderer {
     return ids;
   }
 
-  public Result render(String statementId, Object parameterObject) {
-    MappedStatement ms = configuration.getMappedStatement(statementId);
-    SqlSource sqlSource = ms.getSqlSource();
+  /** statement が参照しているパラメータを抜き出す */
+  public ParameterExtractor.Result parameters(String statementId) {
+    return ParameterExtractor.extract(tracingSqlSource(statementId).getScript());
+  }
+
+  private TracingSqlSource tracingSqlSource(String statementId) {
+    SqlSource sqlSource = configuration.getMappedStatement(statementId).getSqlSource();
     if (!(sqlSource instanceof TracingSqlSource)) {
       throw new IllegalStateException("lang 属性などで別の LanguageDriver が使われています: " + statementId);
     }
+    return (TracingSqlSource) sqlSource;
+  }
+
+  public Result render(String statementId, Object parameterObject) {
+    MappedStatement ms = configuration.getMappedStatement(statementId);
+    TracingSqlSource sqlSource = tracingSqlSource(statementId);
 
     // 1. 本番と同じ経路で ? 付き SQL とパラメータ対応を得る
     BoundSql boundSql = ms.getBoundSql(parameterObject);
     List<ParameterMapping> mappings = boundSql.getParameterMappings();
 
     // 2. #{} が残った段階の SQL を取り出し、#{} を ? ではなく目印に置き換える
-    String beforeMapping = ((TracingSqlSource) sqlSource).getSqlBeforeParameterMapping(parameterObject);
+    String beforeMapping = sqlSource.getSqlBeforeParameterMapping(parameterObject);
     if (beforeMapping.indexOf(MARKER) >= 0) {
       throw new IllegalStateException("SQL に NUL 文字が含まれています");
     }
