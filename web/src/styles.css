@@ -1,0 +1,399 @@
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --text: #1f2328;
+  --muted: #6b717a;
+  --border: #d9dbdf;
+  --accent: #1f6feb;
+  --accent-bg: #e7f0fd;
+  --error: #c62828;
+  --error-bg: #fdecea;
+  --warn-bg: #fff6e0;
+  --info-bg: #eef3f8;
+  --code-bg: #f3f4f6;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, 'BIZ UDGothic', monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --panel: #1c1f23;
+    --text: #e3e5e8;
+    --muted: #9198a1;
+    --border: #353a40;
+    --accent: #5b9cf5;
+    --accent-bg: #1d2a3d;
+    --error: #f07171;
+    --error-bg: #3a1f1f;
+    --warn-bg: #3a3220;
+    --info-bg: #1f2833;
+    --code-bg: #24282d;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+}
+
+code,
+pre,
+textarea {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input[type='text'],
+input[type='search'],
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+}
+
+input.invalid {
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+h2,
+h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.hint,
+.placeholder {
+  color: var(--muted);
+}
+
+.error-text {
+  color: var(--error);
+}
+
+/* ---- レイアウト ---- */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) minmax(340px, 1fr) minmax(360px, 1.2fr);
+  height: 100%;
+}
+
+.sidebar,
+.params,
+.result {
+  overflow: auto;
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+}
+
+.params {
+  border-right: 1px solid var(--border);
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .sidebar,
+  .params {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar {
+    max-height: 40vh;
+  }
+}
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.statement-id {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.fatal {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+/* ---- statement 一覧 ---- */
+
+.statements input {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.statements ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.statements li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.2rem 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statements li button.selected {
+  background: var(--accent-bg);
+  border-radius: 4px;
+}
+
+.statements .ns {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.load-errors {
+  margin-top: 1rem;
+  background: var(--error-bg);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+}
+
+.load-errors summary {
+  color: var(--error);
+  cursor: pointer;
+}
+
+.load-errors ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+}
+
+.load-errors .source {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.load-errors pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0.2rem 0 0.6rem;
+}
+
+/* ---- パラメータのツリー ---- */
+
+.tree {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.row {
+  display: grid;
+  /* 行ごとに列幅が変わらないよう固定し、字下げは項目名の列の中で行う */
+  grid-template-columns: minmax(5rem, 1fr) 5.5rem 6.5rem minmax(7rem, 1.6fr) 1.8rem;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row.add {
+  display: block;
+}
+
+.row.add form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.row .name {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
+.row.unreferenced .name {
+  color: var(--muted);
+}
+
+.row .editor input[type='text'] {
+  width: 100%;
+}
+
+.row .check {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.badge {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  margin-right: 0.2rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge.muted {
+  border-style: dashed;
+}
+
+button.icon {
+  padding: 0 0.45rem;
+}
+
+.json-panel {
+  margin-top: 0.75rem;
+}
+
+.json-panel summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.json-panel textarea {
+  width: 100%;
+  min-height: 10rem;
+  margin-top: 0.4rem;
+}
+
+.json-panel .actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.3rem;
+}
+
+/* ---- 結果 ---- */
+
+.notes {
+  margin: 0 0 0.75rem;
+  padding: 0.4rem 0.6rem 0.4rem 1.6rem;
+  border-radius: 4px;
+}
+
+.notes.info {
+  padding-left: 0.6rem;
+  background: var(--info-bg);
+}
+
+.notes.info code {
+  margin-left: 0.4rem;
+}
+
+.notes.warn {
+  background: var(--warn-bg);
+  margin-top: 0.75rem;
+}
+
+.notes.error {
+  background: var(--error-bg);
+}
+
+.render-error {
+  background: var(--error-bg);
+  color: var(--error);
+  padding: 0.6rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sql-block {
+  margin-bottom: 1rem;
+}
+
+.sql-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+}
+
+.sql-block > h3 {
+  margin-bottom: 0.3rem;
+}
+
+pre.sql {
+  margin: 0;
+  padding: 0.6rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.bindings {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.bindings th,
+.bindings td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 0.2rem 0.4rem;
+  vertical-align: top;
+}
+
+.bindings td code {
+  word-break: break-all;
+}

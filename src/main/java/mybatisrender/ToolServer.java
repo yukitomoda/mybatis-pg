@@ -326,6 +326,11 @@ public final class ToolServer {
     }
     String ext = path.substring(path.lastIndexOf('.') + 1);
     String type = CONTENT_TYPES.get(ext);
+    if ("html".equals(ext)) {
+      // 画面が読み込めるのは自サーバの資源だけにする
+      ex.getResponseHeaders().set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+          + "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    }
     send(ex, 200, type == null ? "application/octet-stream" : type, bytes);
   }
 

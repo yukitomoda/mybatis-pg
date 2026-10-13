@@ -15,6 +15,8 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- 対象環境に合わせて固定。ビルド時に -Dmybatis.version=... で差し替え可能 -->
     <mybatis.version>3.4.5</mybatis.version>
+    <!-- -Dskip.web=true でフロントのビルドを省く -->
+    <skip.web>false</skip.web>
   </properties>
 
   <dependencies>
@@ -48,6 +50,46 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
+      </plugin>
+      <!-- フロント（web/）をビルドし、target/classes/web に出力する。npm は mise で入れたものを使う -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <executable>npm</executable>
+          <workingDirectory>${project.basedir}/web</workingDirectory>
+          <skip>${skip.web}</skip>
+        </configuration>
+        <executions>
+          <execution>
+            <id>web-install</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <arguments>
+                <argument>ci</argument>
+                <argument>--no-audit</argument>
+                <argument>--no-fund</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>web-build</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <arguments>
+                <argument>run</argument>
+                <argument>build</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <!-- 依存を含めた実行可能 jar を作る -->
       <plugin>
