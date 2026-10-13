@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="sample.UserMapper">
+
+  <!-- 静的 SQL（RawSqlSource）。文字列・コメント・演算子に ? を含む -->
+  <select id="findStatic" resultType="map">
+    SELECT id, '?' AS q /* ? */
+    FROM users
+    WHERE id = #{id}
+      AND tags ?| array['a', 'b'] -- ?
+      AND name = #{name,jdbcType=VARCHAR}
+  </select>
+
+  <!-- 動的 SQL（DynamicSqlSource）。別ファイルの sql 断片を include する -->
+  <select id="search" resultType="map">
+    <bind name="namePattern" value="'%' + cond.name + '%'"/>
+    SELECT <include refid="sample.Common.userColumns"/>
+    FROM users
+    <where>
+      <if test="cond.name != null">
+        AND name LIKE #{namePattern}
+      </if>
+      <if test="cond.status != null">
+        AND status = #{cond.status}
+      </if>
+      <if test="ids != null and ids.size() > 0">
+        AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      AND note = '#?' AND deleted = #{deleted}
+    </where>
+    ORDER BY ${orderBy}
+  </select>
+
+  <!-- foreach の要素が Map の場合 -->
+  <insert id="bulkInsert">
+    INSERT INTO users (id, name) VALUES
+    <foreach collection="users" item="u" separator=",">(#{u.id}, #{u.name})</foreach>
+  </insert>
+</mapper>
