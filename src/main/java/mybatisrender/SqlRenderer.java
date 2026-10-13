@@ -1,5 +1,6 @@
 package mybatisrender;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -18,6 +19,7 @@ import org.apache.ibatis.parsing.GenericTokenParser;
 import org.apache.ibatis.parsing.TokenHandler;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.session.Configuration;
+import org.xml.sax.SAXException;
 
 /**
  * mapper XML を MyBatis 本体で読み込み、statement を展開して
@@ -30,13 +32,16 @@ public class SqlRenderer {
 
   private final Configuration configuration;
 
-  public SqlRenderer(List<Path> mapperFiles) throws IOException {
+  public SqlRenderer(List<Path> mapperFiles) throws IOException, SAXException {
     configuration = new Configuration();
     configuration.getLanguageRegistry().setDefaultDriverClass(TracingLanguageDriver.class);
     for (Path file : mapperFiles) {
+      byte[] xml;
       try (InputStream in = Files.newInputStream(file)) {
-        new XMLMapperBuilder(in, configuration, file.toString(), configuration.getSqlFragments()).parse();
+        xml = MapperPreprocessor.preprocess(in, file.toUri().toString());
       }
+      new XMLMapperBuilder(new ByteArrayInputStream(xml), configuration, file.toString(),
+          configuration.getSqlFragments()).parse();
     }
   }
 

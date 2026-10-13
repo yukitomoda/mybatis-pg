@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 存在しないクラスを参照する mapper。前処理なしでは読み込めない -->
+<mapper namespace="sample.OrderMapper">
+  <cache-ref namespace="sample.NotLoaded"/>
+  <cache type="com.example.MyCache" eviction="LRU"/>
+
+  <resultMap id="orderMap" type="com.example.Order">
+    <id property="id" column="id" javaType="com.example.OrderId" typeHandler="com.example.OrderIdHandler"/>
+    <result property="status" column="status" typeHandler="com.example.StatusHandler"/>
+    <association property="customer" javaType="com.example.Customer" resultMap="sample.Common.missing"/>
+    <collection property="lines" ofType="com.example.Line">
+      <id property="no" column="line_no"/>
+    </collection>
+    <discriminator javaType="com.example.Kind" column="kind">
+      <case value="1" resultType="com.example.SpecialOrder"/>
+    </discriminator>
+  </resultMap>
+
+  <parameterMap id="legacyParams" type="com.example.LegacyParam">
+    <parameter property="id" javaType="com.example.OrderId" typeHandler="com.example.OrderIdHandler"/>
+  </parameterMap>
+
+  <!-- 静的 SQL は読み込み時に #{} が解析されるため、オプションのクラス参照もここで失敗する -->
+  <select id="findById" parameterType="com.example.OrderId" resultMap="orderMap">
+    <![CDATA[
+    SELECT * FROM orders
+    WHERE id = #{id, javaType=com.example.OrderId, typeHandler=com.example.OrderIdHandler, jdbcType=INTEGER}
+      AND amount < 1000
+      AND memo = '\#{not a param}'
+    ]]>
+  </select>
+
+  <select id="search" parameterType="com.example.OrderCond" resultType="com.example.Order">
+    SELECT * FROM orders
+    <where>
+      <if test="status != null">
+        AND status = #{status,typeHandler=com.example.StatusHandler}
+      </if>
+      <if test="from != null">
+        AND ordered_at &gt;= #{from,jdbcType=DATE,javaType=java.util.Date}
+      </if>
+    </where>
+  </select>
+
+  <insert id="insert" parameterType="com.example.Order">
+    <selectKey keyProperty="id" resultType="com.example.OrderId" order="BEFORE">
+      SELECT nextval('order_seq')
+    </selectKey>
+    INSERT INTO orders (id, status) VALUES (#{id}, #{status,typeHandler=com.example.StatusHandler})
+  </insert>
+</mapper>
