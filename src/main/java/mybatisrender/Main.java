@@ -1,5 +1,6 @@
 package mybatisrender;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -10,16 +11,19 @@ import java.util.List;
 /**
  * 使い方:
  * <pre>
- * java -jar mybatis-xml-editor.jar [--port 番号] --project プロジェクトのディレクトリ
- * java -jar mybatis-xml-editor.jar [--port 番号] mapperのファイルまたはディレクトリ...
+ * java -jar mybatis-xml-editor.jar [--port 番号] [--public-url URL] --project プロジェクトのディレクトリ
+ * java -jar mybatis-xml-editor.jar [--port 番号] [--public-url URL] mapperのファイルまたはディレクトリ...
  * </pre>
  */
 public final class Main {
 
   private static final int DEFAULT_PORT = 7171;
   private static final String USAGE = "使い方:\n"
-      + "  java -jar mybatis-xml-editor.jar [--port 番号] --project プロジェクトのディレクトリ\n"
-      + "  java -jar mybatis-xml-editor.jar [--port 番号] mapperのファイルまたはディレクトリ...";
+      + "  java -jar mybatis-xml-editor.jar [オプション] --project プロジェクトのディレクトリ\n"
+      + "  java -jar mybatis-xml-editor.jar [オプション] mapperのファイルまたはディレクトリ...\n"
+      + "オプション:\n"
+      + "  --port 番号          待ち受けるポート（既定: 7171）\n"
+      + "  --public-url URL     リバースプロキシ経由で公開する URL（例: https://example.com/proxy/7171/）。複数指定可";
 
   private Main() {
   }
@@ -28,9 +32,12 @@ public final class Main {
     int port = DEFAULT_PORT;
     Path project = null;
     List<Path> sources = new ArrayList<>();
+    List<URI> publicUrls = new ArrayList<>();
     for (int i = 0; i < args.length; i++) {
       if ("--port".equals(args[i]) && i + 1 < args.length) {
         port = Integer.parseInt(args[++i]);
+      } else if ("--public-url".equals(args[i]) && i + 1 < args.length) {
+        publicUrls.add(publicUrl(args[++i]));
       } else if ("--project".equals(args[i]) && i + 1 < args.length) {
         project = absolute(args[++i]);
       } else if (args[i].startsWith("-")) {
@@ -69,8 +76,11 @@ public final class Main {
     System.out.println("監視中: " + workspace.watchRoots());
 
     String token = newToken();
-    ToolServer server = ToolServer.start(workspace, port, token);
+    ToolServer server = ToolServer.start(workspace, port, token, publicUrls);
     System.out.println("ブラウザで開いてください: http://127.0.0.1:" + server.getPort() + "/?token=" + token);
+    for (URI url : publicUrls) {
+      System.out.println("公開 URL: " + url + "?token=" + token);
+    }
   }
 
   private static void printSummary(MapperWorkspace workspace, String label) {
@@ -80,6 +90,16 @@ public final class Main {
     for (LoadError e : renderer.getLoadErrors()) {
       System.out.println("  " + e);
     }
+  }
+
+  /** 末尾を / にそろえる（画面は相対パスで API を呼ぶため、ディレクトリとして開く必要がある） */
+  private static URI publicUrl(String s) {
+    URI url = URI.create(s.endsWith("/") ? s : s + "/");
+    if (url.getScheme() == null || url.getHost() == null) {
+      System.err.println("--public-url は https://ホスト名/パス/ の形で指定してください: " + s);
+      System.exit(2);
+    }
+    return url;
   }
 
   private static Path absolute(String path) {

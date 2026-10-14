@@ -71,6 +71,33 @@ class ToolServerTest {
     assertFalse(ok.headers.toLowerCase().contains("access-control-"), ok.headers);
   }
 
+  @Test
+  void 公開URLを指定するとリバースプロキシ経由のHostとOriginも許可する() throws Exception {
+    ToolServer proxied = ToolServer.start(workspace, 0, TOKEN,
+        Arrays.asList(java.net.URI.create("https://ide.example.com/proxy/7171/"), java.net.URI.create("http://10.0.0.1:8080/proxy/7171/")));
+    try {
+      ToolServer original = server;
+      server = proxied;
+      try {
+        assertEquals(200, request("GET", "/api/statements",
+            headers("Host", "ide.example.com", "X-Auth-Token", TOKEN, "Origin", "https://ide.example.com"), null).status);
+        assertEquals(200, request("GET", "/api/statements",
+            headers("Host", "10.0.0.1:8080", "X-Auth-Token", TOKEN, "Origin", "http://10.0.0.1:8080"), null).status);
+        // 別のホストや、スキームの違う Origin は拒否する
+        assertEquals(403, request("GET", "/api/statements",
+            headers("Host", "other.example.com", "X-Auth-Token", TOKEN), null).status);
+        assertEquals(403, request("GET", "/api/statements",
+            headers("Host", "ide.example.com", "X-Auth-Token", TOKEN, "Origin", "http://ide.example.com"), null).status);
+        // トークンは引き続き必須
+        assertEquals(401, request("GET", "/api/statements", headers("Host", "ide.example.com"), null).status);
+      } finally {
+        server = original;
+      }
+    } finally {
+      proxied.stop();
+    }
+  }
+
   // ---- API ----
 
   @Test

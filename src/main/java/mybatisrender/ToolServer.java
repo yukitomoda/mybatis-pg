@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -65,13 +66,19 @@ public final class ToolServer {
   private final Set<String> allowedHosts;
   private final Set<String> allowedOrigins;
 
-  private ToolServer(MapperWorkspace workspace, int port, String token) throws IOException {
+  private ToolServer(MapperWorkspace workspace, int port, String token, List<URI> publicUrls) throws IOException {
     this.workspace = workspace;
     this.token = token.getBytes(StandardCharsets.UTF_8);
     this.server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
     this.port = server.getAddress().getPort();
     this.allowedHosts = new HashSet<>(Arrays.asList("127.0.0.1:" + this.port, "localhost:" + this.port));
     this.allowedOrigins = new HashSet<>(Arrays.asList("http://127.0.0.1:" + this.port, "http://localhost:" + this.port));
+    // リバースプロキシ（code-server の /proxy/{port}/ など）経由では、外部のホスト名と Origin のまま届く
+    for (URI url : publicUrls) {
+      String hostPort = url.getHost().toLowerCase() + (url.getPort() < 0 ? "" : ":" + url.getPort());
+      allowedHosts.add(hostPort);
+      allowedOrigins.add(url.getScheme().toLowerCase() + "://" + hostPort);
+    }
     // /api/changes が応答を保留する間もスレッドを占有するため、必要に応じて増やせるプールにする
     this.executor = Executors.newCachedThreadPool(r -> {
       Thread t = new Thread(r, "tool-server");
@@ -84,7 +91,12 @@ public final class ToolServer {
 
   /** @param port 0 なら空いているポートを使う */
   public static ToolServer start(MapperWorkspace workspace, int port, String token) throws IOException {
-    ToolServer s = new ToolServer(workspace, port, token);
+    return start(workspace, port, token, java.util.Collections.<URI>emptyList());
+  }
+
+  /** @param publicUrls リバースプロキシ経由で公開する URL。そのホストと Origin からのアクセスも許可する */
+  public static ToolServer start(MapperWorkspace workspace, int port, String token, List<URI> publicUrls) throws IOException {
+    ToolServer s = new ToolServer(workspace, port, token, publicUrls);
     s.server.start();
     return s;
   }

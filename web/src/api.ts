@@ -1,4 +1,5 @@
 // Java サーバの API クライアント
+// リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { toJson } from './params';
 
@@ -90,10 +91,10 @@ export function createApi(token: string) {
   }
 
   return {
-    statements: () => call<StatementsResponse>('/api/statements'),
-    parameters: (id: string) => call<ParametersResponse>(`/api/parameters?id=${encodeURIComponent(id)}`),
+    statements: () => call<StatementsResponse>('api/statements'),
+    parameters: (id: string) => call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
     render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal) =>
-      call<RenderResponse>('/api/render', {
+      call<RenderResponse>('api/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 数値の精度を保つため、JSON は自前で組み立てる
@@ -102,7 +103,7 @@ export function createApi(token: string) {
       }),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
     changes: (since: number, signal?: AbortSignal) =>
-      call<{ generation: number }>(`/api/changes?since=${since}`, { signal }),
+      call<{ generation: number }>(`api/changes?since=${since}`, { signal }),
   };
 }
 
