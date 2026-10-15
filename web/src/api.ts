@@ -1,7 +1,7 @@
 // Java サーバの API クライアント
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
-import { toJson } from './params';
+import { fromJson, getAt, toJson } from './params';
 import type { StatementEntry } from './tree';
 
 export interface LoadError {
@@ -95,6 +95,46 @@ export class ApiError extends Error {
   }
 }
 
+export interface GlobalSet {
+  id: string;
+  name: string;
+  values: PValue;
+}
+
+export interface GlobalsResponse {
+  /** 選んでいる共通パラメータ。null は「なし」 */
+  active: string | null;
+  sets: GlobalSet[];
+}
+
+/** 共通パラメータの候補（全 statement で使われている項目） */
+export interface ParameterName {
+  path: string;
+  count: number;
+  usages: string[];
+  typeHints: string[];
+  object: boolean;
+  list: boolean;
+}
+
+/** 数値の精度を保つため、共通パラメータの応答は自前の JSON 解析で読む */
+function parseGlobals(text: string): GlobalsResponse {
+  const root = fromJson(text);
+  const str = (v: PValue | undefined) => (v && v.t === 'string' ? v.v : null);
+  const sets = getAt(root, ['sets']);
+  return {
+    active: str(getAt(root, ['active'])),
+    sets:
+      sets && sets.t === 'list'
+        ? sets.items.map((s) => ({
+            id: str(getAt(s, ['id'])) ?? '',
+            name: str(getAt(s, ['name'])) ?? '',
+            values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
+          }))
+        : [],
+  };
+}
+
 const TOKEN_KEY = 'mybatis-xml-editor.token';
 
 /**
@@ -123,27 +163,43 @@ export function takeToken(): string | null {
 
 export function createApi(token: string) {
   async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    return JSON.parse(await callText(path, init)) as T;
+  }
+
+  /** 応答の本文をそのまま返す。エラーなら ApiError */
+  async function callText(path: string, init?: RequestInit): Promise<string> {
     const res = await fetch(path, {
       ...init,
       headers: { ...(init?.headers ?? {}), 'X-Auth-Token': token },
     });
     const text = await res.text();
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      throw new ApiError(res.status, text || res.statusText);
-    }
     if (!res.ok) {
-      const message = (body as { error?: string }).error ?? res.statusText;
+      let message = text || res.statusText;
+      try {
+        message = (JSON.parse(text) as { error?: string }).error ?? res.statusText;
+      } catch {
+        // JSON でなければ本文をそのまま使う
+      }
       throw new ApiError(res.status, message);
     }
-    return body as T;
+    return text;
   }
+
+  const post = (body: string): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  const globalsCall = async (action: string, body: string) => parseGlobals(await callText(`api/globals/${action}`, post(body)));
 
   return {
     statements: () => call<StatementsResponse>('api/statements'),
     parameters: (id: string) => call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
+    globals: async () => parseGlobals(await callText('api/globals')),
+    createGlobal: (name: string, copyFrom: string | null) =>
+      globalsCall('create', JSON.stringify({ name, copyFrom })),
+    renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
+    deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
+    selectGlobal: (id: string | null) => globalsCall('select', JSON.stringify({ id })),
+    saveGlobalValues: (id: string, values: PValue) =>
+      globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
+    parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),
     template: (id: string) => call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
     render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal) =>
       call<RenderResponse>('api/render', {

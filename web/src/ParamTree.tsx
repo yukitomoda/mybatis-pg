@@ -1,12 +1,20 @@
 // パラメータのツリー入力。XML から抜き出した項目を並べ、値の入力・型の選択・手での追加ができる
 import { useState } from 'react';
 import type { ParamSchema, Path, PType, PValue } from './params';
-import { TYPE_LABELS, convertType, defaultType, emptyValue, getAt, isValidNumber, setAt } from './params';
+import { TYPE_LABELS, convertType, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt } from './params';
 
 interface Props {
   schema: ParamSchema;
+  /** 編集する値（個別の値、または共通パラメータの値） */
   value: PValue | undefined;
   onChange: (value: PValue | undefined) => void;
+  /**
+   * 個別の値を編集するときの共通パラメータ。指定すると、共通や既定（foreach の空リスト）から来る値を薄く表示し、
+   * 編集するとその位置だけ個別の値として上書きする。
+   */
+  global?: PValue;
+  /** 共通パラメータの編集。XML の項目と関係なく並べ、「未参照」の印を出さない */
+  free?: boolean;
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -16,60 +24,78 @@ const USAGE_LABELS: Record<string, string> = {
   ITERATE: 'foreach',
 };
 
-export function ParamTree({ schema, value, onChange }: Props) {
+/** 木の全体で共有する情報 */
+interface Context {
+  local: PValue | undefined;
+  /** 実際に渡す値（共通 + 個別 + 既定）。共通を使わない編集では local と同じ */
+  effective: PValue | undefined;
+  /** 個別の値がないときに来る値。共通を使わない編集では undefined */
+  inherited: PValue | undefined;
+  global: PValue | undefined;
+  layered: boolean;
+  free: boolean;
+  update: (path: Path, v: PValue | undefined) => void;
+}
+
+export function ParamTree({ schema, value, onChange, global, free = false }: Props) {
+  const layered = !free;
+  const effective = layered ? effectiveValue(schema, global, value) : value;
+  const inherited = layered ? effectiveValue(schema, global, undefined) : undefined;
   const update = (path: Path, v: PValue | undefined) => {
-    const next = setAt(value, path, v);
+    const next = layered ? overrideAt(value, effective, path, v) : overrideAt(value, value, path, v);
     onChange(next && next.t === 'object' && next.fields.length === 0 ? undefined : next);
   };
+  const ctx: Context = { local: value, effective, inherited, global, layered, free, update };
   return (
     <div className="tree" role="tree">
-      <Children schema={schema} value={value} path={[]} depth={0} update={update} />
-      <AddField depth={0} existing={fieldNames(schema, value)} onAdd={(name) => update([name], { t: 'string', v: '' })} />
+      <Children ctx={ctx} schema={free ? null : schema} path={[]} depth={0} />
+      <AddField depth={0} existing={fieldNames(schema, getAt(effective, []))} onAdd={(name) => update([name], { t: 'string', v: '' })} />
     </div>
   );
 }
 
 interface NodeProps {
+  ctx: Context;
   schema: ParamSchema | null;
-  value: PValue | undefined;
   path: Path;
   depth: number;
-  update: (path: Path, v: PValue | undefined) => void;
 }
 
 /** オブジェクトの子項目。XML で参照されている項目を先に、値だけにある項目を後に並べる */
-function Children({ schema, value, path, depth, update }: NodeProps) {
+function Children({ ctx, schema, path, depth }: NodeProps) {
   const known = schema?.properties ?? [];
   const knownNames = new Set(known.map((p) => p.name as string));
-  const extra = value && value.t === 'object' ? value.fields.filter(([k]) => !knownNames.has(k)) : [];
+  const shown = path.length === 0 ? ctx.effective : getAt(ctx.effective, path);
+  // XML で参照されていない共通の値は、個別の表示では出さない（他の statement 用の値のため）
+  const extra =
+    shown && shown.t === 'object'
+      ? shown.fields.filter(([k]) => !knownNames.has(k) && (ctx.free || getAt(ctx.local, [...path, k]) !== undefined))
+      : [];
   return (
     <>
       {known.map((child) => (
-        <Row
-          key={child.name}
-          name={child.name as string}
-          schema={child}
-          value={getAt(value, [child.name as string])}
-          path={[...path, child.name as string]}
-          depth={depth}
-          update={update}
-        />
+        <Row key={child.name} ctx={ctx} name={child.name as string} schema={child} path={[...path, child.name as string]} depth={depth} />
       ))}
-      {extra.map(([k, v]) => (
-        <Row key={`extra:${k}`} name={k} schema={null} value={v} path={[...path, k]} depth={depth} update={update} />
+      {extra.map(([k]) => (
+        <Row key={`extra:${k}`} ctx={ctx} name={k} schema={null} path={[...path, k]} depth={depth} />
       ))}
     </>
   );
 }
 
-function Row({ name, schema, value, path, depth, update, removable }: NodeProps & { name: string; removable?: boolean }) {
-  const unreferenced = schema === null;
-  const type = value?.t;
-  const set = (v: PValue | undefined) => update(path, v);
+function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: string; removable?: boolean }) {
+  const unreferenced = schema === null && !ctx.free;
+  const local = getAt(ctx.local, path);
+  const shown = local ?? getAt(ctx.effective, path);
+  const inherited = ctx.layered ? inheritedAt(ctx.local, ctx.inherited, path) : undefined;
+  // 個別の値がなく、共通または既定から来ている
+  const origin = local === undefined && shown !== undefined ? (getAt(ctx.global, path) !== undefined ? '共通' : '既定') : null;
+  const type = shown?.t;
+  const set = (v: PValue | undefined) => ctx.update(path, v);
 
   return (
     <>
-      <div className={`row${unreferenced ? ' unreferenced' : ''}`}>
+      <div className={`row${unreferenced ? ' unreferenced' : ''}${origin ? ' inherited' : ''}`}>
         <span
           className="name"
           style={{ paddingLeft: `${depth * 1.25}rem` }}
@@ -78,14 +104,20 @@ function Row({ name, schema, value, path, depth, update, removable }: NodeProps 
           {name}
         </span>
         <span className="usages">
-          {unreferenced ? <span className="badge muted">未参照</span> : schema!.usages.map((u) => <span key={u} className="badge">{USAGE_LABELS[u]}</span>)}
+          {origin && (
+            <span className={origin === '共通' ? 'badge global' : 'badge muted'} title={origin === '共通' ? '共通パラメータの値' : '既定の値'}>
+              {origin}
+            </span>
+          )}
+          {unreferenced ? <span className="badge muted">未参照</span> : schema?.usages.map((u) => <span key={u} className="badge">{USAGE_LABELS[u]}</span>)}
         </span>
         <select
           aria-label={`${name} の型`}
           value={type ?? ''}
-          onChange={(e) => set(e.target.value === '' ? undefined : convertType(value, e.target.value as PType))}
+          onChange={(e) => set(e.target.value === '' ? undefined : convertType(shown, e.target.value as PType))}
         >
-          <option value="">未設定</option>
+          {/* 共通や既定の値がある項目は、「共通に戻す」で個別の値を消す */}
+          {inherited === undefined && <option value="">未設定</option>}
           {(Object.keys(TYPE_LABELS) as PType[]).map((t) => (
             <option key={t} value={t}>
               {TYPE_LABELS[t]}
@@ -93,37 +125,49 @@ function Row({ name, schema, value, path, depth, update, removable }: NodeProps 
           ))}
         </select>
         <span className="editor">
-          <Editor schema={schema} value={value} set={set} name={name} />
+          <Editor schema={schema} value={shown} set={set} name={name} />
         </span>
-        {(unreferenced || removable) && (
-          <button type="button" className="icon" aria-label={`${name} を削除`} onClick={() => set(undefined)}>
-            ×
+        {local !== undefined && inherited !== undefined ? (
+          <button
+            type="button"
+            className="icon"
+            aria-label={`${name} を${getAt(ctx.global, path) !== undefined ? '共通' : '既定'}の値に戻す`}
+            title={getAt(ctx.global, path) !== undefined ? '共通の値に戻す' : '既定の値に戻す'}
+            onClick={() => set(undefined)}
+          >
+            ↺
           </button>
+        ) : (
+          (unreferenced || removable || (ctx.free && local !== undefined)) && (
+            <button type="button" className="icon" aria-label={`${name} を削除`} onClick={() => set(undefined)}>
+              ×
+            </button>
+          )
         )}
       </div>
       {(type === 'object' || (type === undefined && schema && schema.properties.length > 0)) && (
         <>
-          <Children schema={schema} value={value} path={path} depth={depth + 1} update={update} />
+          <Children ctx={ctx} schema={schema} path={path} depth={depth + 1} />
           {type === 'object' && (
             <AddField
               depth={depth + 1}
-              existing={fieldNames(schema, value)}
-              onAdd={(n) => update([...path, n], { t: 'string', v: '' })}
+              existing={fieldNames(schema, shown)}
+              onAdd={(n) => ctx.update([...path, n], { t: 'string', v: '' })}
             />
           )}
         </>
       )}
       {type === 'list' &&
-        value!.t === 'list' &&
-        value!.items.map((item, i) => (
-          <ListItem
+        shown!.t === 'list' &&
+        shown!.items.map((_, i) => (
+          <Row
             key={i}
-            index={i}
-            schema={schema?.element ?? null}
-            value={item}
+            ctx={ctx}
+            name={`[${i}]`}
+            schema={schema?.element ?? emptyElementSchema}
             path={[...path, i]}
             depth={depth + 1}
-            update={update}
+            removable
           />
         ))}
       {(type === 'list' || (type === undefined && schema?.element)) && (
@@ -131,8 +175,8 @@ function Row({ name, schema, value, path, depth, update, removable }: NodeProps 
           <button
             type="button"
             onClick={() => {
-              const items = value && value.t === 'list' ? value.items : [];
-              update([...path, items.length], emptyValue(defaultType(schema?.element)));
+              const items = shown && shown.t === 'list' ? shown.items : [];
+              ctx.update([...path, items.length], emptyValue(defaultType(schema?.element)));
             }}
           >
             ＋要素
@@ -140,20 +184,6 @@ function Row({ name, schema, value, path, depth, update, removable }: NodeProps 
         </div>
       )}
     </>
-  );
-}
-
-function ListItem({ index, schema, value, path, depth, update }: NodeProps & { index: number }) {
-  return (
-    <Row
-      name={`[${index}]`}
-      schema={schema ?? emptyElementSchema}
-      value={value}
-      path={path}
-      depth={depth}
-      update={update}
-      removable
-    />
   );
 }
 

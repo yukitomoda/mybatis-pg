@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema, PValue } from './params';
-import { defaultType, fromJson, getAt, invalidNumbers, missingParams, mergeValues, setAt, toJson, withListDefaults } from './params';
+import { defaultType, fromJson, getAt, invalidNumbers, missingParams, inheritedAt, mergeValues, overrideAt, setAt, toJson, withListDefaults } from './params';
 import { tidySql } from './sql';
 
 const node = (name: string, extra: Partial<ParamSchema> = {}): ParamSchema => ({
@@ -128,5 +128,28 @@ describe('mergeValues', () => {
     expect(merge(null, '{"a":1}')).toBe('{"a":1}');
     expect(merge('{"a":1}', null)).toBe('{"a":1}');
     expect(merge(null, null)).toBe('null');
+  });
+});
+
+describe('overrideAt と inheritedAt', () => {
+  const effective = fromJson('{"tenantId":1,"ids":[1,2],"cond":{"status":1}}');
+
+  it('共通のオブジェクトの中は、その項目だけを個別の値にする', () => {
+    expect(toJson(overrideAt(undefined, effective, ['cond', 'name'], { t: 'string', v: 'a' }), '')).toBe('{"cond":{"name":"a"}}');
+  });
+
+  it('共通のリストの中を変えるときは、リストを写してから変える', () => {
+    expect(toJson(overrideAt(undefined, effective, ['ids', 1], { t: 'number', v: '5' }), '')).toBe('{"ids":[1,5]}');
+    expect(toJson(overrideAt(undefined, effective, ['ids', 2], { t: 'number', v: '3' }), '')).toBe('{"ids":[1,2,3]}');
+    expect(toJson(overrideAt(undefined, effective, ['ids', 0], undefined), '')).toBe('{"ids":[2]}');
+    // 個別のリストがあれば、それを変える
+    expect(toJson(overrideAt(fromJson('{"ids":[9]}'), effective, ['ids', 0], undefined), '')).toBe('{"ids":[]}');
+  });
+
+  it('個別の値を消したときに来る値', () => {
+    expect(inheritedAt(undefined, effective, ['cond', 'status'])).toEqual({ t: 'number', v: '1' });
+    // 個別で cond を NULL にしていれば、その下は重ならない
+    expect(inheritedAt(fromJson('{"cond":null}'), effective, ['cond', 'status'])).toBeUndefined();
+    expect(inheritedAt(fromJson('{"cond":{}}'), effective, ['cond', 'status'])).toEqual({ t: 'number', v: '1' });
   });
 });

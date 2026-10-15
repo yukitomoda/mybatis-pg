@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
+import { GlobalBar, GlobalEditor, useGlobals } from './Globals';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
-import { fromJson, invalidNumbers, missingParams, toJson, withListDefaults } from './params';
+import { effectiveValue, fromJson, invalidNumbers, missingParams, toJson } from './params';
 import { tidySql } from './sql';
 import { tokenize } from './template';
 import type { StatementEntry, TreeNode } from './tree';
@@ -85,6 +86,8 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
+  /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
+  const [editing, setEditing] = useState<'local' | 'global'>('local');
 
   const handleError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
@@ -154,8 +157,12 @@ function Workspace({ api }: { api: Api }) {
     };
   }, [api, selected, generation]);
 
-  const numberIssues = useMemo(() => invalidNumbers(value), [value]);
-  const missing = useMemo(() => (schema ? missingParams(schema, value) : []), [schema, value]);
+  const globals = useGlobals(api, handleError);
+  const editingGlobal = editing === 'global';
+  // レンダリングと実行に使う値（共通パラメータ + 個別の値 + foreach の空リスト）
+  const effective = useMemo(() => effectiveValue(schema, globals.values, value), [schema, globals.values, value]);
+  const numberIssues = useMemo(() => invalidNumbers(effective), [effective]);
+  const missing = useMemo(() => (schema ? missingParams(schema, effective) : []), [schema, effective]);
 
   // 入力や XML が変わるたびにレンダリングする
   useEffect(() => {
@@ -163,7 +170,7 @@ function Workspace({ api }: { api: Api }) {
     const abort = new AbortController();
     const timer = setTimeout(() => {
       api
-        .render(selected, value, abort.signal)
+        .render(selected, effective, abort.signal)
         .then((r) => {
           setResult(r);
           setRenderError(null);
@@ -179,7 +186,7 @@ function Workspace({ api }: { api: Api }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [api, selected, schema, value, numberIssues.length, generation]);
+  }, [api, selected, schema, effective, numberIssues.length, generation]);
 
   const select = (id: string) => {
     setSelected(id);
@@ -190,21 +197,9 @@ function Workspace({ api }: { api: Api }) {
   };
 
   const changeValue = (v: PValue | undefined) => {
-    // foreach で回す項目は、未設定にしても空のリストに戻す（NULL にしたいときは型で NULL を選ぶ）
-    const next = schema ? withListDefaults(schema, v) : v;
-    setValue(next);
-    if (selected) saveParams(selected, next);
+    setValue(v);
+    if (selected) saveParams(selected, v);
   };
-
-  // パラメータの木が届いたら、foreach で回す項目を最初からリストにしておく
-  useEffect(() => {
-    if (!schema || !selected) return;
-    const next = withListDefaults(schema, value);
-    if (next !== value) {
-      setValue(next);
-      saveParams(selected, next);
-    }
-  }, [schema]);
 
   if (fatal) {
     return (
@@ -227,19 +222,54 @@ function Workspace({ api }: { api: Api }) {
           <h2>パラメータ</h2>
           {selected && <code className="statement-id">{selected}</code>}
         </header>
-        {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
-        {schemaError && <p className="error-text">{schemaError}</p>}
-        {selected && schema && (
+        <div className="tabs mode" role="tablist">
+          <button type="button" role="tab" aria-selected={!editingGlobal} className={!editingGlobal ? 'tab selected' : 'tab'} onClick={() => setEditing('local')}>
+            個別{selected && <span className="hint">（{selected.slice(selected.lastIndexOf('.') + 1)}）</span>}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editingGlobal}
+            className={editingGlobal ? 'tab selected' : 'tab'}
+            onClick={() => setEditing('global')}
+          >
+            共通<span className="hint">（{globals.active ? globals.active.name : 'なし'}）</span>
+          </button>
+        </div>
+
+        {editingGlobal ? (
           <>
-            <ParamTree schema={schema} value={value} onChange={changeValue} />
-            {warnings.length > 0 && (
-              <ul className="notes warn">
-                {warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
+            <GlobalBar globals={globals} />
+            {globals.active ? (
+              <>
+                <GlobalEditor api={api} globals={globals} generation={generation} />
+                <JsonPanel value={globals.values} onApply={globals.setValues} />
+              </>
+            ) : (
+              <p className="hint">使う共通パラメータを選ぶか、「新規」で作ってください。選んだ共通パラメータの値は、すべての statement に重ねて使われます。</p>
             )}
-            <JsonPanel value={value} onApply={changeValue} />
+          </>
+        ) : (
+          <>
+            {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+            {schemaError && <p className="error-text">{schemaError}</p>}
+            {selected && schema && (
+              <>
+                <ParamTree schema={schema} value={value} onChange={changeValue} global={globals.values} />
+                {warnings.length > 0 && (
+                  <ul className="notes warn">
+                    {warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+                <JsonPanel value={value} onApply={changeValue} />
+                <details className="json-panel">
+                  <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
+                  <pre className="sql">{toJson(effective ?? { t: 'object', fields: [] })}</pre>
+                </details>
+              </>
+            )}
           </>
         )}
       </main>
@@ -296,7 +326,7 @@ function Workspace({ api }: { api: Api }) {
                 key={selected}
                 api={api}
                 statementId={selected}
-                value={value}
+                value={effective}
                 ready={numberIssues.length === 0 && !renderError}
                 onApiError={handleError}
               />

@@ -189,6 +189,44 @@ export function setAt(root: PValue | undefined, path: Path, value: PValue | unde
   return { t: 'object', fields };
 }
 
+/**
+ * 共通の値の上に、個別の値を path の位置で設定する（value が undefined なら個別の値を消す）。
+ * 共通から来ているリストの中を変えるときは、リストは丸ごと置き換わるため、先にリストを個別の値に写す。
+ */
+export function overrideAt(
+  local: PValue | undefined,
+  effective: PValue | undefined,
+  path: Path,
+  value: PValue | undefined,
+): PValue | undefined {
+  let next = local;
+  for (let i = 1; i < path.length; i++) {
+    const prefix = path.slice(0, i);
+    const own = getAt(next, prefix);
+    if (own !== undefined && own.t !== 'object') break;
+    if (own === undefined) {
+      const shown = getAt(effective, prefix);
+      if (shown && shown.t === 'list') {
+        next = setAt(next, prefix, shown);
+        break;
+      }
+    }
+  }
+  return setAt(next, path, value);
+}
+
+/**
+ * 個別の値を消したときに path の位置に来る値（共通の値や foreach の空リスト）。
+ * 途中に個別のリストや NULL などがあると、その下は共通の値と重ならないので undefined。
+ */
+export function inheritedAt(local: PValue | undefined, inherited: PValue | undefined, path: Path): PValue | undefined {
+  for (let i = 1; i < path.length; i++) {
+    const own = getAt(local, path.slice(0, i));
+    if (own !== undefined && own.t !== 'object') return undefined;
+  }
+  return getAt(inherited, path);
+}
+
 export function pathLabel(path: Path): string {
   let s = '';
   for (const seg of path) {

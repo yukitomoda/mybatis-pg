@@ -757,3 +757,67 @@ button.link {
 .t-punct {
   color: var(--muted);
 }
+
+/* ---- 共通パラメータ ---- */
+
+.global-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.global-bar label {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.global-bar select {
+  min-width: 9rem;
+}
+
+.global-bar .actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.global-bar .error-text {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.tabs.mode .tab .hint {
+  font-weight: normal;
+}
+
+.row.inherited .editor input,
+.row.inherited .editor .check,
+.row.inherited select {
+  color: var(--muted);
+}
+
+.badge.global {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.candidates {
+  margin-top: 0.75rem;
+}
+
+.candidates .hint {
+  margin: 0 0 0.3rem;
+}
+
+.candidate {
+  margin: 0 0.3rem 0.3rem 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.candidate .count {
+  margin-left: 0.4rem;
+  color: var(--muted);
+}
