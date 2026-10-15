@@ -80,8 +80,14 @@ public final class Main {
     ConnectionStore connections = ConnectionStore.load(connectionsFile);
     System.out.println("接続先の設定: " + connectionsFile);
 
+    // 共通パラメータ（プロジェクトごと）
+    Path globalsFile = Paths.get(System.getProperty("user.home"), ".mybatis-xml-editor", "globals.json");
+    Path base = workspace.baseDir();
+    GlobalStore globals = GlobalStore.load(globalsFile, base == null ? "" : base.toString());
+    System.out.println("共通パラメータ: " + globalsFile);
+
     String token = newToken();
-    ToolServer server = ToolServer.start(workspace, connections, port, token, publicUrls);
+    ToolServer server = ToolServer.start(workspace, connections, globals, port, token, publicUrls);
     System.out.println("ブラウザで開いてください: http://127.0.0.1:" + server.getPort() + "/?token=" + token);
     for (URI url : publicUrls) {
       System.out.println("公開 URL: " + url + "?token=" + token);

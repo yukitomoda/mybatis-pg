@@ -66,6 +66,7 @@ public final class ToolServer {
 
   private final MapperWorkspace workspace;
   private final ConnectionStore connections;
+  private final GlobalStore globals;
   private final byte[] token;
   private final HttpServer server;
   private final ExecutorService executor;
@@ -73,10 +74,11 @@ public final class ToolServer {
   private final Set<String> allowedHosts;
   private final Set<String> allowedOrigins;
 
-  private ToolServer(MapperWorkspace workspace, ConnectionStore connections, int port, String token,
-      List<URI> publicUrls) throws IOException {
+  private ToolServer(MapperWorkspace workspace, ConnectionStore connections, GlobalStore globals, int port,
+      String token, List<URI> publicUrls) throws IOException {
     this.workspace = workspace;
     this.connections = connections;
+    this.globals = globals;
     this.token = token.getBytes(StandardCharsets.UTF_8);
     this.server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
     this.port = server.getAddress().getPort();
@@ -99,15 +101,15 @@ public final class ToolServer {
   }
 
   /** @param port 0 なら空いているポートを使う */
-  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, int port, String token)
-      throws IOException {
-    return start(workspace, connections, port, token, java.util.Collections.<URI>emptyList());
+  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, GlobalStore globals,
+      int port, String token) throws IOException {
+    return start(workspace, connections, globals, port, token, java.util.Collections.<URI>emptyList());
   }
 
   /** @param publicUrls リバースプロキシ経由で公開する URL。そのホストと Origin からのアクセスも許可する */
-  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, int port, String token,
-      List<URI> publicUrls) throws IOException {
-    ToolServer s = new ToolServer(workspace, connections, port, token, publicUrls);
+  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, GlobalStore globals,
+      int port, String token, List<URI> publicUrls) throws IOException {
+    ToolServer s = new ToolServer(workspace, connections, globals, port, token, publicUrls);
     s.server.start();
     return s;
   }
@@ -211,6 +213,25 @@ public final class ToolServer {
       case "/api/connections/test":
         if (requireMethod(ex, method, "POST")) {
           testConnection(ex);
+        }
+        break;
+      case "/api/parameter-names":
+        if (requireMethod(ex, method, "GET")) {
+          parameterNames(ex);
+        }
+        break;
+      case "/api/globals":
+        if (requireMethod(ex, method, "GET")) {
+          sendJson(ex, 200, globals.snapshot());
+        }
+        break;
+      case "/api/globals/create":
+      case "/api/globals/rename":
+      case "/api/globals/delete":
+      case "/api/globals/select":
+      case "/api/globals/values":
+        if (requireMethod(ex, method, "POST")) {
+          updateGlobals(ex, path.substring("/api/globals/".length()));
         }
         break;
       case "/api/execute":
@@ -445,6 +466,72 @@ public final class ToolServer {
     m.put("params", p.params);
     m.put("hasPassword", connections.hasPassword(p.id));
     return m;
+  }
+
+  // ---- 共通パラメータ ----
+
+  /** 全 statement で使われている項目（共通パラメータの候補） */
+  private void parameterNames(HttpExchange ex) throws IOException {
+    List<Map<String, Object>> names = new ArrayList<>();
+    for (ParameterNames.Entry e : ParameterNames.collect(workspace.renderer())) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("path", e.path);
+      m.put("count", e.count);
+      m.put("usages", e.usages);
+      m.put("typeHints", e.typeHints);
+      m.put("object", e.object);
+      m.put("list", e.list);
+      names.add(m);
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("names", names);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * 共通パラメータを変える。応答は変えた後の全体（GET /api/globals と同じ形）。
+   * <ul>
+   * <li>create: {"name", "copyFrom"?}</li>
+   * <li>rename: {"id", "name"}</li>
+   * <li>delete: {"id"}</li>
+   * <li>select: {"id"}（null で「なし」）</li>
+   * <li>values: {"id", "values": オブジェクト}</li>
+   * </ul>
+   */
+  private void updateGlobals(HttpExchange ex, String action) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String id = string(req, "id");
+    try {
+      switch (action) {
+        case "create":
+          globals.create(string(req, "name"), string(req, "copyFrom"));
+          break;
+        case "rename":
+          globals.rename(id, string(req, "name"));
+          break;
+        case "delete":
+          globals.delete(id);
+          break;
+        case "select":
+          globals.select(id);
+          break;
+        default:
+          JsonElement values = req.get("values");
+          if (values == null || !values.isJsonObject()) {
+            sendJson(ex, 400, error("values はオブジェクトで指定してください"));
+            return;
+          }
+          globals.saveValues(id, values.getAsJsonObject());
+          break;
+      }
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    sendJson(ex, 200, globals.snapshot());
   }
 
   // ---- 実行 ----

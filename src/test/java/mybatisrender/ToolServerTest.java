@@ -34,7 +34,7 @@ class ToolServerTest {
   static void start() throws Exception {
     Path res = Paths.get("src/test/resources");
     workspace = MapperWorkspace.ofPaths(Arrays.asList(res.resolve("mappers"), res.resolve("params")));
-    server = ToolServer.start(workspace, ConnectionStore.inMemory(), 0, TOKEN);
+    server = ToolServer.start(workspace, ConnectionStore.inMemory(), GlobalStore.inMemory(), 0, TOKEN);
     host = "127.0.0.1:" + server.getPort();
   }
 
@@ -73,7 +73,7 @@ class ToolServerTest {
 
   @Test
   void 公開URLを指定するとリバースプロキシ経由のHostとOriginも許可する() throws Exception {
-    ToolServer proxied = ToolServer.start(workspace, ConnectionStore.inMemory(), 0, TOKEN,
+    ToolServer proxied = ToolServer.start(workspace, ConnectionStore.inMemory(), GlobalStore.inMemory(), 0, TOKEN,
         Arrays.asList(java.net.URI.create("https://ide.example.com/proxy/7171/"), java.net.URI.create("http://10.0.0.1:8080/proxy/7171/")));
     try {
       ToolServer original = server;
@@ -182,6 +182,29 @@ class ToolServerTest {
 
     api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 200);
     api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 404);
+  }
+
+  @Test
+  void 共通パラメータ() throws Exception {
+    JsonObject created = api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 200);
+    String id = created.getAsJsonArray("sets").get(0).getAsJsonObject().get("id").getAsString();
+    api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":{\"tenantId\":1.0}}", 200);
+    JsonObject selected = api("POST", "/api/globals/select", "{\"id\":\"" + id + "\"}", 200);
+    assertEquals(id, selected.get("active").getAsString());
+    assertEquals("{\"tenantId\":1.0}", api("GET", "/api/globals", null, 200)
+        .getAsJsonArray("sets").get(0).getAsJsonObject().get("values").toString());
+
+    api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":[1]}", 400);
+    api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 400);
+    api("POST", "/api/globals/select", "{\"id\":null}", 200);
+    api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 200);
+    api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 400);
+  }
+
+  @Test
+  void 項目名の集計() throws Exception {
+    String names = api("GET", "/api/parameter-names", null, 200).toString();
+    assertTrue(names.contains("{\"path\":\"cond.status\",\"count\":1,\"usages\":[\"BIND\",\"CONDITION\"]"), names);
   }
 
   @Test

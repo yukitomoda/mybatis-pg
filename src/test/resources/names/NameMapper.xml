@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="names">
+  <select id="a">
+    SELECT * FROM t WHERE tenant_id = #{tenantId} AND status = #{cond.status}
+  </select>
+  <select id="b">
+    SELECT * FROM t WHERE tenant_id = #{tenantId}
+    <if test="cond != null and cond.flag">AND flag</if>
+  </select>
+  <select id="c">
+    SELECT * FROM t WHERE tenant_id = #{tenantId} AND id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+</mapper>
