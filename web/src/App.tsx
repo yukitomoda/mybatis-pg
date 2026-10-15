@@ -47,12 +47,13 @@ function saveParams(id: string, value: PValue | undefined) {
   }
 }
 
-type Tab = 'sql' | 'template';
+type Tab = 'sql' | 'execute' | 'template';
 const TAB_KEY = 'mybatis-xml-editor.tab';
 
 function loadTab(): Tab {
   try {
-    return localStorage.getItem(TAB_KEY) === 'template' ? 'template' : 'sql';
+    const saved = localStorage.getItem(TAB_KEY);
+    return saved === 'execute' || saved === 'template' ? saved : 'sql';
   } catch {
     return 'sql';
   }
@@ -278,8 +279,9 @@ function Workspace({ api }: { api: Api }) {
         <div className="tabs" role="tablist">
           {(
             [
-              ['sql', 'SQL'],
               ['template', 'テンプレート'],
+              ['sql', 'SQL'],
+              ['execute', '実行'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -298,39 +300,41 @@ function Workspace({ api }: { api: Api }) {
           ))}
         </div>
 
-        {/* 実行結果が消えないよう、切り替えても SQL のタブは残しておく */}
-        <div hidden={tab !== 'sql'}>
-          {numberIssues.length > 0 && (
-            <ul className="notes error">
-              {numberIssues.map((i) => (
-                <li key={i.path}>
-                  <code>{i.path}</code>: {i.message}
-                </li>
-              ))}
-            </ul>
-          )}
-          {missing.length > 0 && (
-            <div className="notes info">
-              未設定の項目（NULL として扱われます）: {missing.map((m) => <code key={m}>{m}</code>)}
-            </div>
-          )}
-          {renderError && <pre className="render-error">{renderError}</pre>}
-          {result && !renderError && <RenderResult result={result} />}
-  
-          {selected && schema && (
-            <>
-              <header className="panel-header execute-header">
-                <h2>実行</h2>
-              </header>
-              <ExecutePanel
-                key={selected}
-                api={api}
-                statementId={selected}
-                value={effective}
-                ready={numberIssues.length === 0 && !renderError}
-                onApiError={handleError}
-              />
-            </>
+        {tab === 'sql' && (
+          <>
+            {numberIssues.length > 0 && (
+              <ul className="notes error">
+                {numberIssues.map((i) => (
+                  <li key={i.path}>
+                    <code>{i.path}</code>: {i.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {missing.length > 0 && (
+              <div className="notes info">
+                未設定の項目（NULL として扱われます）: {missing.map((m) => <code key={m}>{m}</code>)}
+              </div>
+            )}
+            {renderError && <pre className="render-error">{renderError}</pre>}
+            {result && !renderError && <RenderResult result={result} />}
+            {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+          </>
+        )}
+
+        {/* 実行結果が消えないよう、切り替えても実行のタブは残しておく */}
+        <div hidden={tab !== 'execute'}>
+          {selected && schema ? (
+            <ExecutePanel
+              key={selected}
+              api={api}
+              statementId={selected}
+              value={effective}
+              ready={numberIssues.length === 0 && !renderError}
+              onApiError={handleError}
+            />
+          ) : (
+            <p className="hint">左の一覧から statement を選んでください。</p>
           )}
         </div>
 

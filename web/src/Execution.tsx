@@ -111,7 +111,7 @@ export function ExecutePanel({
           {running ? '実行中…' : commit ? '実行してコミット' : '実行（ロールバック）'}
         </button>
       </div>
-      {!ready && current && <p className="hint">入力の誤りを直すと実行できます。</p>}
+      {!ready && current && <p className="hint">SQL を組み立てられないため実行できません。SQL タブに出ているエラーを直してください。</p>}
 
       {error && <pre className="render-error">{error}</pre>}
       {result && !error && <ExecuteResult result={result} />}

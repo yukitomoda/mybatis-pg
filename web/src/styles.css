@@ -445,12 +445,6 @@ pre.sql {
 
 /* ---- 実行 ---- */
 
-.execute-header {
-  margin-top: 1.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-}
-
 .execute-bar {
   display: flex;
   flex-wrap: wrap;
