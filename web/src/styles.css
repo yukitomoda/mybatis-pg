@@ -126,8 +126,32 @@ h3 {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(200px, 280px) minmax(340px, 1fr) minmax(360px, 1.2fr);
+  /* 仕切りで幅を変えると --sidebar-width と --params-width が入る */
+  grid-template-columns:
+    var(--sidebar-width, minmax(200px, 280px)) 6px var(--params-width, minmax(340px, 1fr))
+    6px minmax(320px, 1.2fr);
   height: 100%;
+}
+
+.splitter {
+  cursor: col-resize;
+  background: var(--border);
+  background-clip: content-box;
+  padding: 0 2.5px;
+  touch-action: none;
+}
+
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--accent);
+  padding: 0 1.5px;
+  outline: none;
+}
+
+/* ドラッグ中は文字の選択やカーソルの切り替わりを止める */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sidebar,
@@ -138,18 +162,14 @@ h3 {
   min-width: 0;
 }
 
-.sidebar {
-  border-right: 1px solid var(--border);
-}
-
-.params {
-  border-right: 1px solid var(--border);
-}
 
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
     height: auto;
+  }
+  .splitter {
+    display: none;
   }
   .sidebar,
   .params {

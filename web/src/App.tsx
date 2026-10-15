@@ -4,6 +4,7 @@ import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
 import { GlobalBar, GlobalEditor, useGlobals } from './Globals';
 import { ParamTree } from './ParamTree';
+import { Splitter, usePaneWidths } from './Splitter';
 import type { ParamSchema, PValue } from './params';
 import { effectiveValue, fromJson, invalidNumbers, missingParams, toJson } from './params';
 import { tidySql } from './sql';
@@ -87,6 +88,7 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
+  const panes = usePaneWidths();
   /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
   const [editing, setEditing] = useState<'local' | 'global'>('local');
 
@@ -212,11 +214,12 @@ function Workspace({ api }: { api: Api }) {
   }
 
   return (
-    <div className="layout">
+    <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
         <StatementTree statements={statements} selected={selected} onSelect={select} />
         <LoadErrors errors={loadErrors} />
       </aside>
+      <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
 
       <main className="params">
         <header className="panel-header">
@@ -274,6 +277,7 @@ function Workspace({ api }: { api: Api }) {
           </>
         )}
       </main>
+      <Splitter pane="params" label="パラメータ欄の幅" panes={panes} />
 
       <section className="result">
         <div className="tabs" role="tablist">
