@@ -1,7 +1,10 @@
 // パラメータのツリー入力。XML から抜き出した項目を並べ、値の入力・型の選択・手での追加ができる
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { hasTemplate } from './gen';
+import type { GenContext } from './GenInput';
+import { GenPicker, GenPreview } from './GenInput';
 import type { ParamSchema, Path, PType, PValue } from './params';
-import { TYPE_LABELS, convertType, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt } from './params';
+import { TYPE_LABELS, convertType, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
 
 interface Props {
   schema: ParamSchema;
@@ -15,6 +18,8 @@ interface Props {
   global?: PValue;
   /** 共通パラメータの編集。XML の項目と関係なく並べ、「未参照」の印を出さない */
   free?: boolean;
+  /** 生成値（式）の計算 */
+  gen: GenContext;
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -34,10 +39,11 @@ interface Context {
   global: PValue | undefined;
   layered: boolean;
   free: boolean;
+  gen: GenContext;
   update: (path: Path, v: PValue | undefined) => void;
 }
 
-export function ParamTree({ schema, value, onChange, global, free = false }: Props) {
+export function ParamTree({ schema, value, onChange, global, free = false, gen }: Props) {
   const layered = !free;
   const effective = layered ? effectiveValue(schema, global, value) : value;
   const inherited = layered ? effectiveValue(schema, global, undefined) : undefined;
@@ -45,7 +51,7 @@ export function ParamTree({ schema, value, onChange, global, free = false }: Pro
     const next = layered ? overrideAt(value, effective, path, v) : overrideAt(value, value, path, v);
     onChange(next && next.t === 'object' && next.fields.length === 0 ? undefined : next);
   };
-  const ctx: Context = { local: value, effective, inherited, global, layered, free, update };
+  const ctx: Context = { local: value, effective, inherited, global, layered, free, gen, update };
   return (
     <div className="tree" role="tree">
       <Children ctx={ctx} schema={free ? null : schema} path={[]} depth={0} />
@@ -133,7 +139,7 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
           ))}
         </select>
         <span className="editor">
-          <Editor schema={schema} value={shown} set={set} name={name} />
+          <Editor schema={schema} value={shown} set={set} name={name} genKey={pathLabel(path)} gen={ctx.gen} />
         </span>
         {local !== undefined && inherited !== undefined ? (
           <button
@@ -199,7 +205,21 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
 const emptyElementSchema: ParamSchema = { name: '[]', usages: [], typeHints: [], properties: [], element: null };
 
 /** 値の入力欄。未設定のときに入力すると、推測した型で設定する */
-function Editor({ schema, value, set, name }: { schema: ParamSchema | null; value: PValue | undefined; set: (v: PValue | undefined) => void; name: string }) {
+function Editor({
+  schema,
+  value,
+  set,
+  name,
+  genKey,
+  gen,
+}: {
+  schema: ParamSchema | null;
+  value: PValue | undefined;
+  set: (v: PValue | undefined) => void;
+  name: string;
+  genKey: string;
+  gen: GenContext;
+}) {
   const t = value?.t ?? defaultType(schema);
   if (value === undefined && (t === 'list' || t === 'object')) {
     return <span className="placeholder">未設定（NULL として扱われます）</span>;
@@ -208,16 +228,16 @@ function Editor({ schema, value, set, name }: { schema: ParamSchema | null; valu
     case 'string':
     case 'number': {
       const text = value && (value.t === 'string' || value.t === 'number') ? value.v : '';
-      const invalid = value?.t === 'number' && !isValidNumber(text);
+      const numeric = value?.t === 'number' || (value === undefined && t === 'number');
       return (
-        <input
-          type="text"
-          aria-label={`${name} の値`}
-          className={invalid ? 'invalid' : undefined}
-          inputMode={t === 'number' ? 'decimal' : undefined}
-          placeholder={value === undefined ? '未設定' : t === 'number' ? '数値' : ''}
-          value={text}
-          onChange={(e) => set({ t: value?.t === 'number' || (value === undefined && t === 'number') ? 'number' : 'string', v: e.target.value })}
+        <TextEditor
+          name={name}
+          text={text}
+          numeric={numeric}
+          unset={value === undefined}
+          onChange={(v) => set({ t: numeric ? 'number' : 'string', v })}
+          genKey={genKey}
+          gen={gen}
         />
       );
     }
@@ -240,6 +260,73 @@ function Editor({ schema, value, set, name }: { schema: ParamSchema | null; valu
     case 'object':
       return null;
   }
+}
+
+/** 文字列・数値の入力欄。式を書け、ƒ ボタンから式を挿入できる */
+function TextEditor({
+  name,
+  text,
+  numeric,
+  unset,
+  onChange,
+  genKey,
+  gen,
+}: {
+  name: string;
+  text: string;
+  numeric: boolean;
+  unset: boolean;
+  onChange: (text: string) => void;
+  genKey: string;
+  gen: GenContext;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [picking, setPicking] = useState(false);
+  // 式は結果で確かめるので、式のある数値は入力の段階では誤りにしない
+  const invalid = numeric && !unset && !hasTemplate(text) && !isValidNumber(text);
+  const insert = (expr: string) => {
+    const el = input.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    // 数値の欄で数値だけが入っているなら、式で置き換える
+    const replaceAll = numeric && !hasTemplate(text);
+    const next = replaceAll ? expr : text.slice(0, start) + expr + text.slice(end);
+    onChange(next);
+    setPicking(false);
+    const caret = replaceAll ? expr.length : start + expr.length;
+    requestAnimationFrame(() => {
+      input.current?.focus();
+      input.current?.setSelectionRange(caret, caret);
+    });
+  };
+  return (
+    <div className="text-editor">
+      <div className="text-input">
+        <input
+          ref={input}
+          type="text"
+          aria-label={`${name} の値`}
+          className={invalid ? 'invalid' : undefined}
+          inputMode={numeric ? 'decimal' : undefined}
+          placeholder={unset ? '未設定' : numeric ? '数値' : ''}
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          className="icon fn"
+          title="式を挿入（UUID、日時、UNIX 時刻など）"
+          aria-label={`${name} に式を挿入`}
+          aria-expanded={picking}
+          onClick={() => setPicking(!picking)}
+        >
+          ƒ
+        </button>
+      </div>
+      <GenPreview text={text} numeric={numeric} genKey={genKey} gen={gen} />
+      {picking && <GenPicker numeric={numeric} onInsert={insert} onClose={() => setPicking(false)} />}
+    </div>
+  );
 }
 
 function fieldNames(schema: ParamSchema | null, value: PValue | undefined): Set<string> {

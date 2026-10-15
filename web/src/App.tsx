@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
+import type { GenCache } from './gen';
+import { forget, resolveTemplates } from './gen';
+import type { GenContext } from './GenInput';
 import { GlobalBar, GlobalEditor, useGlobals } from './Globals';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
@@ -164,7 +167,27 @@ function Workspace({ api }: { api: Api }) {
   const editingGlobal = editing === 'global';
   // レンダリングと実行に使う値（共通パラメータ + 個別の値 + foreach の空リスト）
   const effective = useMemo(() => effectiveValue(schema, globals.values, value), [schema, globals.values, value]);
-  const numberIssues = useMemo(() => invalidNumbers(effective), [effective]);
+  // 生成値（式）を計算した値。一度作った値は genCache に覚え、↻ で作り直す
+  const genCache = useRef<GenCache>(new Map()).current;
+  const [genVersion, setGenVersion] = useState(0);
+  const gen: GenContext = useMemo(
+    () => ({
+      cache: genCache,
+      version: genVersion,
+      regenerate: (key: string) => {
+        forget(genCache, key);
+        setGenVersion((v) => v + 1);
+      },
+    }),
+    [genCache, genVersion],
+  );
+  const resolved = useMemo(() => resolveTemplates(effective, genCache), [effective, genCache, genVersion]);
+  const sent = resolved.value;
+  const numberIssues = useMemo(() => {
+    // 式の誤りがある項目は、数値の誤りとしては重ねて出さない
+    const genPaths = new Set(resolved.issues.map((i) => i.path));
+    return [...resolved.issues, ...invalidNumbers(sent).filter((i) => !genPaths.has(i.path))];
+  }, [resolved, sent]);
   const missing = useMemo(() => (schema ? missingParams(schema, effective) : []), [schema, effective]);
 
   // 入力や XML が変わるたびにレンダリングする
@@ -173,7 +196,7 @@ function Workspace({ api }: { api: Api }) {
     const abort = new AbortController();
     const timer = setTimeout(() => {
       api
-        .render(selected, effective, abort.signal)
+        .render(selected, sent, abort.signal)
         .then((r) => {
           setResult(r);
           setRenderError(null);
@@ -189,7 +212,7 @@ function Workspace({ api }: { api: Api }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [api, selected, schema, effective, numberIssues.length, generation]);
+  }, [api, selected, schema, sent, numberIssues.length, generation]);
 
   const select = (id: string) => {
     setSelected(id);
@@ -246,7 +269,7 @@ function Workspace({ api }: { api: Api }) {
             <GlobalBar globals={globals} />
             {globals.active ? (
               <>
-                <GlobalEditor api={api} globals={globals} generation={generation} />
+                <GlobalEditor api={api} globals={globals} generation={generation} gen={gen} />
                 <JsonPanel value={globals.values} onApply={globals.setValues} />
               </>
             ) : (
@@ -259,7 +282,7 @@ function Workspace({ api }: { api: Api }) {
             {schemaError && <p className="error-text">{schemaError}</p>}
             {selected && schema && (
               <>
-                <ParamTree schema={schema} value={value} onChange={changeValue} global={globals.values} />
+                <ParamTree schema={schema} value={value} onChange={changeValue} global={globals.values} gen={gen} />
                 {warnings.length > 0 && (
                   <ul className="notes warn">
                     {warnings.map((w) => (
@@ -270,7 +293,7 @@ function Workspace({ api }: { api: Api }) {
                 <JsonPanel value={value} onApply={changeValue} />
                 <details className="json-panel">
                   <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
-                  <pre className="sql">{toJson(effective ?? { t: 'object', fields: [] })}</pre>
+                  <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
                 </details>
               </>
             )}
@@ -321,6 +344,18 @@ function Workspace({ api }: { api: Api }) {
               </div>
             )}
             {renderError && <pre className="render-error">{renderError}</pre>}
+            {resolved.generated.length > 0 && (
+              <div className="notes info generated">
+                式で作った値:
+                <ul>
+                  {resolved.generated.map((g) => (
+                    <li key={g.path}>
+                      <code>{g.path}</code> <code className="source">{g.source}</code> → <code>{g.result}</code>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {result && !renderError && <RenderResult result={result} />}
             {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
           </>
@@ -333,7 +368,7 @@ function Workspace({ api }: { api: Api }) {
               key={selected}
               api={api}
               statementId={selected}
-              value={effective}
+              value={sent}
               ready={numberIssues.length === 0 && !renderError}
               onApiError={handleError}
             />

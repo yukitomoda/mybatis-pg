@@ -1,6 +1,7 @@
 // 共通パラメータ（複数の statement で共有する値の集まり）の選択と編集
 import { useEffect, useRef, useState } from 'react';
 import type { Api, GlobalsResponse, GlobalSet, ParameterName } from './api';
+import type { GenContext } from './GenInput';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt } from './params';
@@ -154,7 +155,7 @@ function initialValue(n: ParameterName): PValue {
 const MAX_CANDIDATES = 30;
 
 /** 共通パラメータの値の編集。全 statement で使われている項目を候補として出す */
-export function GlobalEditor({ api, globals, generation }: { api: Api; globals: Globals; generation: number }) {
+export function GlobalEditor({ api, globals, generation, gen }: { api: Api; globals: Globals; generation: number; gen: GenContext }) {
   const [names, setNames] = useState<ParameterName[]>([]);
 
   useEffect(() => {
@@ -170,7 +171,7 @@ export function GlobalEditor({ api, globals, generation }: { api: Api; globals: 
 
   return (
     <>
-      <ParamTree schema={FREE_SCHEMA} value={values} onChange={globals.setValues} free />
+      <ParamTree schema={FREE_SCHEMA} value={values} onChange={globals.setValues} free gen={gen} />
       {candidates.length > 0 && (
         <div className="candidates">
           <p className="hint">よく使われている項目（クリックで追加。数字は使っている statement の数）</p>

@@ -116,7 +116,7 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
   | --- | --- | --- |
   | `{{uuid}}` | 文字列 | UUIDv4 |
   | `{{date:基準\|書式}}` | 文字列 | `{{date:now-7d\|yyyy-MM-dd}}` → `'2026-10-08'`。書式の既定は `yyyy-MM-dd HH:mm:ss` |
-  | `{{unixtime:基準\|単位}}` | 数値 | `{{unixtime:2026-01-03 23:35}}` → `1767451500`。単位は `s`（既定）か `ms` |
+  | `{{unixtime:基準\|単位}}` | 数値 | `{{unixtime:2026-01-03 23:35}}` → `1767450900`。単位は `s`（既定）か `ms` |
   | `{{random:最小..最大}}` | 数値 | 範囲内の整数 |
   | `{{randstr:長さ}}` | 文字列 | 英数字。長さの既定は16 |
 

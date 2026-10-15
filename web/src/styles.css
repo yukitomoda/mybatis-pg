@@ -859,3 +859,97 @@ button.link {
   color: var(--warn);
   margin-right: 0.3rem;
 }
+
+/* ---- 生成値（式） ---- */
+
+.text-editor {
+  position: relative;
+  min-width: 0;
+}
+
+.text-input {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.text-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.fn {
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+  padding: 0 0.4rem;
+}
+
+.gen-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.gen-preview .arrow {
+  color: var(--muted);
+}
+
+button.regen {
+  padding: 0 0.3rem;
+  font-size: 12px;
+}
+
+.gen-picker {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  right: 0;
+  width: min(24rem, 80vw);
+  margin-top: 0.2rem;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.gen-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.gen-picker .hint {
+  font-size: 12px;
+}
+
+.gen-picker-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.3rem 0.4rem;
+  background: var(--code-bg);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.gen-picker .actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.notes.generated ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.notes.generated .source {
+  color: var(--muted);
+}
