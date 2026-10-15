@@ -98,22 +98,23 @@ export function mergeValues(base: PValue | undefined, override: PValue | undefin
   return { t: 'object', fields };
 }
 
-/** レンダリングと実行に使う値（共通パラメータ + 個別の値 + foreach の項目の空リスト） */
+/** レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値） */
 export function effectiveValue(
   schema: ParamSchema | null,
   base: PValue | undefined,
   override: PValue | undefined,
 ): PValue | undefined {
   const merged = mergeValues(base, override);
-  return schema ? withListDefaults(schema, merged) : merged;
+  return schema ? withDefaults(schema, merged) : merged;
 }
 
 /**
- * foreach で回す項目のうち未設定のものを、空のリストにする。
- * 対象は値のあるオブジェクトの中（一番外側は常に対象）で、未設定の親を作ってまでは入れない。
+ * 未設定の項目に、XML での使われ方から決まる既定の値を入れる。
+ * - foreach で回す項目（要素を持つ項目）は空のリスト
+ * - 子の項目を持つ項目は空のオブジェクト（その中にも同じように既定の値を入れる）
  * 変える必要がなければ、受け取った値をそのまま返す。
  */
-export function withListDefaults(schema: ParamSchema, value: PValue | undefined): PValue | undefined {
+export function withDefaults(schema: ParamSchema, value: PValue | undefined): PValue | undefined {
   const filled = fill(schema, value ?? EMPTY_ROOT);
   return filled === (value ?? EMPTY_ROOT) ? value : filled;
 }
@@ -128,8 +129,10 @@ function fill(schema: ParamSchema, value: PValue): PValue {
       return [k, next];
     });
     for (const p of schema.properties) {
-      if (p.name !== null && p.usages.includes('ITERATE') && !fields.some(([k]) => k === p.name)) {
-        fields.push([p.name, { t: 'list', items: [] }]);
+      if (p.name === null || fields.some(([k]) => k === p.name)) continue;
+      const initial = defaultContainer(p);
+      if (initial) {
+        fields.push([p.name, fill(p, initial)]);
         changed = true;
       }
     }
@@ -141,6 +144,13 @@ function fill(schema: ParamSchema, value: PValue): PValue {
     return items.some((item, i) => item !== value.items[i]) ? { t: 'list', items } : value;
   }
   return value;
+}
+
+/** 既定の値を入れる項目なら、その空の値 */
+function defaultContainer(schema: ParamSchema): PValue | null {
+  if (schema.usages.includes('ITERATE') || schema.element) return { t: 'list', items: [] };
+  if (schema.properties.length > 0) return { t: 'object', fields: [] };
+  return null;
 }
 
 // ---- 木の操作 ----
