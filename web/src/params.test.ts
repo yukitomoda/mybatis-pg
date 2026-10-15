@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema, PValue } from './params';
-import { defaultType, fromJson, getAt, invalidNumbers, missingParams, setAt, toJson, withListDefaults } from './params';
+import { defaultType, fromJson, getAt, invalidNumbers, missingParams, mergeValues, setAt, toJson, withListDefaults } from './params';
 import { tidySql } from './sql';
 
 const node = (name: string, extra: Partial<ParamSchema> = {}): ParamSchema => ({
@@ -106,5 +106,27 @@ describe('withListDefaults', () => {
   it('変える必要がなければ同じ値を返す', () => {
     const v = fromJson('{"ids":[1],"users":[]}');
     expect(withListDefaults(root, v)).toBe(v);
+  });
+});
+
+describe('mergeValues', () => {
+  const merge = (base: string | null, override: string | null) =>
+    toJson(mergeValues(base === null ? undefined : fromJson(base), override === null ? undefined : fromJson(override)), '');
+
+  it('オブジェクトは項目ごとに重ね、個別の値を優先する', () => {
+    expect(merge('{"tenantId":100,"cond":{"status":1}}', '{"cond":{"name":"taro"}}')).toBe(
+      '{"tenantId":100,"cond":{"status":1,"name":"taro"}}',
+    );
+    expect(merge('{"a":1,"b":2}', '{"b":3,"c":4}')).toBe('{"a":1,"b":3,"c":4}');
+  });
+
+  it('リストや NULL は丸ごと置き換える', () => {
+    expect(merge('{"ids":[1,2],"x":{"y":1}}', '{"ids":[3],"x":null}')).toBe('{"ids":[3],"x":null}');
+  });
+
+  it('どちらかがなければ、もう一方を使う', () => {
+    expect(merge(null, '{"a":1}')).toBe('{"a":1}');
+    expect(merge('{"a":1}', null)).toBe('{"a":1}');
+    expect(merge(null, null)).toBe('null');
   });
 });

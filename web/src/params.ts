@@ -82,6 +82,33 @@ export function convertType(value: PValue | undefined, t: PType): PValue {
 }
 
 /**
+ * 共通パラメータ（base）に個別の値（override）を重ねる。個別の値が優先する。
+ * オブジェクトは項目ごとに重ね、それ以外（リストや NULL を含む）は個別の値で丸ごと置き換える。
+ */
+export function mergeValues(base: PValue | undefined, override: PValue | undefined): PValue | undefined {
+  if (override === undefined) return base;
+  if (base === undefined || base.t !== 'object' || override.t !== 'object') return override;
+  const fields: [string, PValue][] = base.fields.map(([k, v]) => {
+    const o = override.fields.find(([name]) => name === k);
+    return [k, o ? (mergeValues(v, o[1]) as PValue) : v];
+  });
+  for (const [k, v] of override.fields) {
+    if (!base.fields.some(([name]) => name === k)) fields.push([k, v]);
+  }
+  return { t: 'object', fields };
+}
+
+/** レンダリングと実行に使う値（共通パラメータ + 個別の値 + foreach の項目の空リスト） */
+export function effectiveValue(
+  schema: ParamSchema | null,
+  base: PValue | undefined,
+  override: PValue | undefined,
+): PValue | undefined {
+  const merged = mergeValues(base, override);
+  return schema ? withListDefaults(schema, merged) : merged;
+}
+
+/**
  * foreach で回す項目のうち未設定のものを、空のリストにする。
  * 対象は値のあるオブジェクトの中（一番外側は常に対象）で、未設定の親を作ってまでは入れない。
  * 変える必要がなければ、受け取った値をそのまま返す。
