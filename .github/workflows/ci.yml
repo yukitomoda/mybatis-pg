@@ -99,10 +99,10 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
       # 画面が jar に入っていることを確かめる
-      - run: jar tf target/mybatis-xml-editor.jar | grep -qx 'web/index.html'
-      - run: java -jar target/mybatis-xml-editor.jar --version
+      - run: jar tf target/mybatis-pg.jar | grep -qx 'web/index.html'
+      - run: java -jar target/mybatis-pg.jar --version
       - uses: actions/upload-artifact@v4
         with:
-          name: mybatis-xml-editor
-          path: target/mybatis-xml-editor.jar
+          name: mybatis-pg
+          path: target/mybatis-pg.jar
           retention-days: 30

@@ -1,5 +1,5 @@
 {
-  "name": "mybatis-xml-editor-web",
+  "name": "mybatis-pg-web",
   "private": true,
   "type": "module",
   "scripts": {

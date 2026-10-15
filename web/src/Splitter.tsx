@@ -2,7 +2,7 @@
 import type { CSSProperties, PointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
-const STORAGE_KEY = 'mybatis-xml-editor.panes';
+const STORAGE_KEY = 'mybatis-pg.panes';
 /** 各ペインの最小の幅 */
 export const MIN_SIDEBAR = 160;
 export const MIN_PARAMS = 280;

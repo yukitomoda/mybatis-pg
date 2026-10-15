@@ -31,7 +31,7 @@ export function App() {
 
 // ---- 保存 ----
 
-const STORAGE_PREFIX = 'mybatis-xml-editor.params:';
+const STORAGE_PREFIX = 'mybatis-pg.params:';
 
 function loadParams(id: string): PValue | undefined {
   try {
@@ -52,7 +52,7 @@ function saveParams(id: string, value: PValue | undefined) {
 }
 
 type Tab = 'sql' | 'execute' | 'template';
-const TAB_KEY = 'mybatis-xml-editor.tab';
+const TAB_KEY = 'mybatis-pg.tab';
 
 function loadTab(): Tab {
   try {
@@ -390,7 +390,7 @@ function Workspace({ api }: { api: Api }) {
 
 // ---- statement の一覧（ディレクトリ → ファイル → statement のツリー） ----
 
-const TOGGLED_KEY = 'mybatis-xml-editor.tree';
+const TOGGLED_KEY = 'mybatis-pg.tree';
 
 /** 既定（ディレクトリは開く、ファイルは閉じる）から切り替えた項目の key */
 function loadToggled(): Set<string> {

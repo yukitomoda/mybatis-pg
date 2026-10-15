@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Api, ConnectionInput, ConnectionProfile, ExecuteResponse, ResultTable } from './api';
 import type { PValue } from './params';
 
-const CONNECTION_KEY = 'mybatis-xml-editor.connection';
+const CONNECTION_KEY = 'mybatis-pg.connection';
 const MAX_ROWS = 1000;
 
 function loadSelected(): string | null {

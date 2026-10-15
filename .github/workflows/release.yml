@@ -45,15 +45,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: mybatis-xml-editor
+          name: mybatis-pg
       - name: Releases に jar を添付する
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          jar="mybatis-xml-editor-$VERSION.jar"
-          mv mybatis-xml-editor.jar "$jar"
+          jar="mybatis-pg-$VERSION.jar"
+          mv mybatis-pg.jar "$jar"
           sha256sum "$jar" > "$jar.sha256"
           gh release create "$TAG" "$jar" "$jar.sha256" \
             --repo "$GITHUB_REPOSITORY" --title "$TAG" --verify-tag --generate-notes

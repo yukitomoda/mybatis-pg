@@ -135,7 +135,7 @@ function parseGlobals(text: string): GlobalsResponse {
   };
 }
 
-const TOKEN_KEY = 'mybatis-xml-editor.token';
+const TOKEN_KEY = 'mybatis-pg.token';
 
 /**
  * 起動時に表示された URL の ?token= を取り出してタブ内に保存し、URL からは消す
