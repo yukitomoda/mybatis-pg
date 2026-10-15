@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, RenderResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
+import { ExecutePanel } from './Execution';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { fromJson, invalidNumbers, missingParams, toJson } from './params';
@@ -228,6 +229,22 @@ function Workspace({ api }: { api: Api }) {
         )}
         {renderError && <pre className="render-error">{renderError}</pre>}
         {result && !renderError && <RenderResult result={result} />}
+
+        {selected && schema && (
+          <>
+            <header className="panel-header execute-header">
+              <h2>実行</h2>
+            </header>
+            <ExecutePanel
+              key={selected}
+              api={api}
+              statementId={selected}
+              value={value}
+              ready={numberIssues.length === 0 && !renderError}
+              onApiError={handleError}
+            />
+          </>
+        )}
       </section>
     </div>
   );

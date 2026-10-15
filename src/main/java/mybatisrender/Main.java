@@ -75,8 +75,13 @@ public final class Main {
     });
     System.out.println("監視中: " + workspace.watchRoots());
 
+    // 接続先の設定（パスワードは保存しない）
+    Path connectionsFile = Paths.get(System.getProperty("user.home"), ".mybatis-xml-editor", "connections.json");
+    ConnectionStore connections = ConnectionStore.load(connectionsFile);
+    System.out.println("接続先の設定: " + connectionsFile);
+
     String token = newToken();
-    ToolServer server = ToolServer.start(workspace, port, token, publicUrls);
+    ToolServer server = ToolServer.start(workspace, connections, port, token, publicUrls);
     System.out.println("ブラウザで開いてください: http://127.0.0.1:" + server.getPort() + "/?token=" + token);
     for (URI url : publicUrls) {
       System.out.println("公開 URL: " + url + "?token=" + token);

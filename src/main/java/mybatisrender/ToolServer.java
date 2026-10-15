@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.sun.net.httpserver.Headers;
@@ -58,7 +59,11 @@ public final class ToolServer {
     CONTENT_TYPES.put("woff2", "font/woff2");
   }
 
+  /** 結果セットから読む行数の上限（画面からの指定もこれを超えられない） */
+  private static final int MAX_ROWS_LIMIT = 10_000;
+
   private final MapperWorkspace workspace;
+  private final ConnectionStore connections;
   private final byte[] token;
   private final HttpServer server;
   private final ExecutorService executor;
@@ -66,8 +71,10 @@ public final class ToolServer {
   private final Set<String> allowedHosts;
   private final Set<String> allowedOrigins;
 
-  private ToolServer(MapperWorkspace workspace, int port, String token, List<URI> publicUrls) throws IOException {
+  private ToolServer(MapperWorkspace workspace, ConnectionStore connections, int port, String token,
+      List<URI> publicUrls) throws IOException {
     this.workspace = workspace;
+    this.connections = connections;
     this.token = token.getBytes(StandardCharsets.UTF_8);
     this.server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
     this.port = server.getAddress().getPort();
@@ -90,13 +97,15 @@ public final class ToolServer {
   }
 
   /** @param port 0 なら空いているポートを使う */
-  public static ToolServer start(MapperWorkspace workspace, int port, String token) throws IOException {
-    return start(workspace, port, token, java.util.Collections.<URI>emptyList());
+  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, int port, String token)
+      throws IOException {
+    return start(workspace, connections, port, token, java.util.Collections.<URI>emptyList());
   }
 
   /** @param publicUrls リバースプロキシ経由で公開する URL。そのホストと Origin からのアクセスも許可する */
-  public static ToolServer start(MapperWorkspace workspace, int port, String token, List<URI> publicUrls) throws IOException {
-    ToolServer s = new ToolServer(workspace, port, token, publicUrls);
+  public static ToolServer start(MapperWorkspace workspace, ConnectionStore connections, int port, String token,
+      List<URI> publicUrls) throws IOException {
+    ToolServer s = new ToolServer(workspace, connections, port, token, publicUrls);
     s.server.start();
     return s;
   }
@@ -177,6 +186,31 @@ public final class ToolServer {
           changes(ex);
         }
         break;
+      case "/api/connections":
+        if (requireMethod(ex, method, "GET")) {
+          listConnections(ex);
+        }
+        break;
+      case "/api/connections/save":
+        if (requireMethod(ex, method, "POST")) {
+          saveConnection(ex);
+        }
+        break;
+      case "/api/connections/delete":
+        if (requireMethod(ex, method, "POST")) {
+          deleteConnection(ex);
+        }
+        break;
+      case "/api/connections/test":
+        if (requireMethod(ex, method, "POST")) {
+          testConnection(ex);
+        }
+        break;
+      case "/api/execute":
+        if (requireMethod(ex, method, "POST")) {
+          execute(ex);
+        }
+        break;
       default:
         sendJson(ex, 404, error("API がありません: " + path));
         break;
@@ -244,30 +278,16 @@ public final class ToolServer {
 
   /** リクエスト: {"statementId": "...", "parameters": 任意の JSON} */
   private void render(HttpExchange ex) throws IOException {
-    String contentType = ex.getRequestHeaders().getFirst("Content-Type");
-    if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
-      sendJson(ex, 415, error("Content-Type は application/json にしてください"));
+    JsonObject req = readJson(ex);
+    if (req == null) {
       return;
     }
-    byte[] raw = readBody(ex);
-    if (raw == null) {
-      sendJson(ex, 413, error("リクエストが大きすぎます"));
+    String statementId = string(req, "statementId");
+    if (statementId == null) {
+      sendJson(ex, 400, error("statementId がありません"));
       return;
     }
-    String statementId;
-    Object parameters;
-    try {
-      JsonObject req = Json.GSON.fromJson(new String(raw, StandardCharsets.UTF_8), JsonObject.class);
-      if (req == null || !req.has("statementId") || !req.get("statementId").isJsonPrimitive()) {
-        sendJson(ex, 400, error("statementId がありません"));
-        return;
-      }
-      statementId = req.get("statementId").getAsString();
-      parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
-    } catch (JsonParseException e) {
-      sendJson(ex, 400, error("JSON を解析できません: " + e.getMessage()));
-      return;
-    }
+    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
 
     SqlRenderer renderer = workspace.renderer();
     if (!renderer.hasStatement(statementId)) {
@@ -295,6 +315,149 @@ public final class ToolServer {
     body.put("placeholderSql", r.placeholderSql);
     body.put("literalSql", r.literalSql);
     body.put("bindings", bindings);
+    sendJson(ex, 200, body);
+  }
+
+  // ---- 接続先 ----
+
+  private void listConnections(HttpExchange ex) throws IOException {
+    List<Map<String, Object>> list = new ArrayList<>();
+    for (ConnectionStore.Profile p : connections.list()) {
+      list.add(toJson(p));
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("connections", list);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * リクエスト: {"id"?, "name", "host", "port", "database", "user", "params", "password"?}。
+   * id がなければ追加する。password がなければ今のパスワードのまま、空文字ならパスワードを消す。
+   */
+  private void saveConnection(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    ConnectionStore.Profile p = new ConnectionStore.Profile();
+    p.id = string(req, "id");
+    p.name = string(req, "name");
+    p.host = string(req, "host");
+    p.database = string(req, "database");
+    p.user = string(req, "user");
+    p.params = string(req, "params");
+    String password = string(req, "password");
+    try {
+      if (req.has("port")) {
+        p.port = req.get("port").getAsInt();
+      }
+      sendJson(ex, 200, toJson(connections.save(p, password)));
+    } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException e) {
+      sendJson(ex, 400, error("ポートは整数で入力してください"));
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+    }
+  }
+
+  private void deleteConnection(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    if (!connections.delete(string(req, "id"))) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
+  }
+
+  /** 接続できるかを確かめ、DB の版を返す */
+  private void testConnection(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String id = string(req, "id");
+    if (id == null || connections.get(id) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    try (java.sql.Connection c = connections.open(id)) {
+      java.sql.DatabaseMetaData meta = c.getMetaData();
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("server", meta.getDatabaseProductName() + " " + meta.getDatabaseProductVersion());
+      sendJson(ex, 200, body);
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error("接続できません\n" + Errors.describe(e)));
+    }
+  }
+
+  private Map<String, Object> toJson(ConnectionStore.Profile p) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("id", p.id);
+    m.put("name", p.name);
+    m.put("host", p.host);
+    m.put("port", p.port);
+    m.put("database", p.database);
+    m.put("user", p.user);
+    m.put("params", p.params);
+    m.put("hasPassword", connections.hasPassword(p.id));
+    return m;
+  }
+
+  // ---- 実行 ----
+
+  /**
+   * リクエスト: {"statementId", "parameters", "connectionId", "commit"?, "maxRows"?}。
+   * commit が true でなければロールバックする。
+   */
+  private void execute(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String statementId = string(req, "statementId");
+    String connectionId = string(req, "connectionId");
+    if (statementId == null || connectionId == null) {
+      sendJson(ex, 400, error("statementId と connectionId を指定してください"));
+      return;
+    }
+    QueryExecutor.Options options = new QueryExecutor.Options();
+    try {
+      options.commit = req.has("commit") && req.get("commit").getAsBoolean();
+      if (req.has("maxRows")) {
+        options.maxRows = Math.max(1, Math.min(MAX_ROWS_LIMIT, req.get("maxRows").getAsInt()));
+      }
+    } catch (RuntimeException e) {
+      sendJson(ex, 400, error("commit は真偽値、maxRows は整数で指定してください"));
+      return;
+    }
+    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
+
+    SqlRenderer renderer = workspace.renderer();
+    if (!renderer.hasStatement(statementId)) {
+      sendJson(ex, 404, error("statement がありません: " + statementId));
+      return;
+    }
+    if (connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    QueryExecutor.Result r;
+    try {
+      r = QueryExecutor.execute(renderer, statementId, parameters, () -> connections.open(connectionId), options);
+    } catch (QueryExecutor.ExecutionException | RuntimeException e) {
+      // SQL のエラー、接続できない、OGNL の評価エラーなど
+      sendJson(ex, 422, error(e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sql", r.sql);
+    body.put("resultSets", r.resultSets);
+    body.put("updateCounts", r.updateCounts);
+    body.put("warnings", r.warnings);
+    body.put("committed", r.committed);
+    body.put("elapsedMillis", r.elapsedMillis);
     sendJson(ex, 200, body);
   }
 
@@ -367,6 +530,36 @@ public final class ToolServer {
       params.put(URLDecoder.decode(key, "UTF-8"), URLDecoder.decode(value, "UTF-8"));
     }
     return params;
+  }
+
+  /** JSON のリクエストを読む。読めなければエラーを返して null */
+  private static JsonObject readJson(HttpExchange ex) throws IOException {
+    String contentType = ex.getRequestHeaders().getFirst("Content-Type");
+    if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
+      sendJson(ex, 415, error("Content-Type は application/json にしてください"));
+      return null;
+    }
+    byte[] raw = readBody(ex);
+    if (raw == null) {
+      sendJson(ex, 413, error("リクエストが大きすぎます"));
+      return null;
+    }
+    try {
+      JsonObject req = Json.GSON.fromJson(new String(raw, StandardCharsets.UTF_8), JsonObject.class);
+      if (req == null) {
+        sendJson(ex, 400, error("リクエストが空です"));
+      }
+      return req;
+    } catch (JsonParseException e) {
+      sendJson(ex, 400, error("JSON を解析できません: " + e.getMessage()));
+      return null;
+    }
+  }
+
+  /** 文字列の項目。なければ（null も含む）null */
+  private static String string(JsonObject obj, String key) {
+    JsonElement e = obj.get(key);
+    return e == null || !e.isJsonPrimitive() ? null : e.getAsString();
   }
 
   /** 上限を超えたら null */

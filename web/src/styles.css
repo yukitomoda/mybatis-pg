@@ -11,6 +11,8 @@
   --warn-bg: #fff6e0;
   --info-bg: #eef3f8;
   --code-bg: #f3f4f6;
+  --danger: #b42318;
+  --ok: #1a7f37;
   --mono: ui-monospace, 'Cascadia Mono', Consolas, 'BIZ UDGothic', monospace;
   color-scheme: light;
 }
@@ -29,6 +31,8 @@
     --warn-bg: #3a3220;
     --info-bg: #1f2833;
     --code-bg: #24282d;
+    --danger: #f07171;
+    --ok: #4ac26b;
     color-scheme: dark;
   }
 }
@@ -396,4 +400,231 @@ pre.sql {
 
 .bindings td code {
   word-break: break-all;
+}
+
+/* ---- 実行 ---- */
+
+.execute-header {
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.execute-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.execute-bar select {
+  min-width: 10rem;
+}
+
+.check {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.commit-check {
+  margin-left: auto;
+}
+
+button.run {
+  border-color: var(--accent);
+}
+
+button.run.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.outcome {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0.5rem 0;
+  font-weight: 600;
+}
+
+.outcome.committed {
+  color: var(--danger);
+}
+
+.outcome span {
+  font-weight: normal;
+}
+
+.result-grid {
+  margin-bottom: 1rem;
+}
+
+.result-grid .hint {
+  margin: 0 0 0.3rem;
+}
+
+.grid-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.grid-scroll table {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.grid-scroll th,
+.grid-scroll td {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.15rem 0.4rem;
+  text-align: left;
+  white-space: pre;
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.grid-scroll th {
+  position: sticky;
+  top: 0;
+  background: var(--code-bg);
+}
+
+.grid-scroll th .type {
+  display: block;
+  font-weight: normal;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.grid-scroll .rownum {
+  color: var(--muted);
+  text-align: right;
+}
+
+.grid-scroll td.null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ---- 接続先の設定 ---- */
+
+dialog.connections {
+  width: min(44rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+dialog.connections::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.connections-body {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 600px) {
+  .connections-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.connection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.connection-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.25rem 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-list button.selected {
+  background: var(--accent-bg);
+  border-radius: 4px;
+}
+
+.connection-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.connection-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.connection-form input {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+}
+
+.host-port {
+  display: grid;
+  grid-template-columns: 1fr 6rem;
+  gap: 0.5rem;
+}
+
+.connection-form .hint {
+  margin: 0;
+}
+
+button.link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  padding: 0 0.3rem;
+  text-decoration: underline;
+}
+
+.status {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status.ok {
+  color: var(--ok);
+  background: var(--code-bg);
+}
+
+.connection-form .actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.connection-form .spacer {
+  flex: 1;
 }

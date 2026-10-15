@@ -34,6 +34,47 @@ export interface RenderResponse {
   bindings: Binding[];
 }
 
+export interface ConnectionProfile {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  /** JDBC URL に付ける接続パラメータ */
+  params: string;
+  /** パスワードがサーバのメモリにある（ファイルには保存しない） */
+  hasPassword: boolean;
+}
+
+/** 接続先の保存。id がなければ追加。password は省略で今のまま、空文字で消す */
+export interface ConnectionInput {
+  id?: string;
+  name: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  params: string;
+  password?: string;
+}
+
+export interface ResultTable {
+  columns: string[];
+  columnTypes: string[];
+  rows: (string | null)[][];
+  truncated: boolean;
+}
+
+export interface ExecuteResponse {
+  sql: string;
+  resultSets: ResultTable[];
+  updateCounts: number[];
+  warnings: string[];
+  committed: boolean;
+  elapsedMillis: number;
+}
+
 /** API がエラーを返した。status 401 はトークンの問題 */
 export class ApiError extends Error {
   constructor(
@@ -100,6 +141,32 @@ export function createApi(token: string) {
         // 数値の精度を保つため、JSON は自前で組み立てる
         body: `{"statementId":${JSON.stringify(statementId)},"parameters":${toJson(parameters, '')}}`,
         signal,
+      }),
+    connections: () => call<{ connections: ConnectionProfile[] }>('api/connections'),
+    saveConnection: (input: ConnectionInput) =>
+      call<ConnectionProfile>('api/connections/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      }),
+    deleteConnection: (id: string) =>
+      call<object>('api/connections/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }),
+    testConnection: (id: string) =>
+      call<{ server: string }>('api/connections/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }),
+    /** 実行する。commit が true でなければロールバックする */
+    execute: (statementId: string, parameters: PValue | undefined, connectionId: string, commit: boolean, maxRows: number) =>
+      call<ExecuteResponse>('api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
       }),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
     changes: (since: number, signal?: AbortSignal) =>

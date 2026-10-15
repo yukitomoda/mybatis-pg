@@ -34,7 +34,7 @@ class ToolServerTest {
   static void start() throws Exception {
     Path res = Paths.get("src/test/resources");
     workspace = MapperWorkspace.ofPaths(Arrays.asList(res.resolve("mappers"), res.resolve("params")));
-    server = ToolServer.start(workspace, 0, TOKEN);
+    server = ToolServer.start(workspace, ConnectionStore.inMemory(), 0, TOKEN);
     host = "127.0.0.1:" + server.getPort();
   }
 
@@ -73,7 +73,7 @@ class ToolServerTest {
 
   @Test
   void 公開URLを指定するとリバースプロキシ経由のHostとOriginも許可する() throws Exception {
-    ToolServer proxied = ToolServer.start(workspace, 0, TOKEN,
+    ToolServer proxied = ToolServer.start(workspace, ConnectionStore.inMemory(), 0, TOKEN,
         Arrays.asList(java.net.URI.create("https://ide.example.com/proxy/7171/"), java.net.URI.create("http://10.0.0.1:8080/proxy/7171/")));
     try {
       ToolServer original = server;
@@ -150,6 +150,28 @@ class ToolServerTest {
         headers("Host", host, "X-Auth-Token", TOKEN, "Content-Type", "text/plain"), "{}");
     assertEquals(415, wrongType.status);
     api("GET", "/api/render", null, 405);
+  }
+
+  @Test
+  void 接続先の保存と一覧ではパスワードを返さない() throws Exception {
+    JsonObject saved = api("POST", "/api/connections/save",
+        "{\"name\":\"開発\",\"host\":\"127.0.0.1\",\"port\":1,\"database\":\"app\",\"user\":\"u\",\"password\":\"secret\"}", 200);
+    String id = saved.get("id").getAsString();
+    assertTrue(saved.get("hasPassword").getAsBoolean());
+    String list = api("GET", "/api/connections", null, 200).toString();
+    assertTrue(list.contains(id), list);
+    assertFalse(list.contains("secret"), list);
+
+    api("POST", "/api/connections/save", "{\"name\":\"x\",\"host\":\"h\",\"port\":\"abc\",\"database\":\"d\"}", 400);
+    // ポート 1 には接続できない。エラーは 422 で返す
+    JsonObject failed = api("POST", "/api/execute",
+        "{\"statementId\":\"sample.UserMapper.findStatic\",\"connectionId\":\"" + id + "\",\"parameters\":{}}", 422);
+    assertTrue(failed.get("error").getAsString().startsWith("接続できません"), failed.toString());
+    api("POST", "/api/execute", "{\"statementId\":\"no.such\",\"connectionId\":\"" + id + "\"}", 404);
+    api("POST", "/api/execute", "{\"statementId\":\"sample.UserMapper.findStatic\",\"connectionId\":\"no-such\"}", 404);
+
+    api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 200);
+    api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 404);
   }
 
   @Test

@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -13,15 +15,18 @@ import java.util.List;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.builder.xml.XMLStatementBuilder;
+import org.apache.ibatis.executor.keygen.SelectKeyGenerator;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.mapping.ParameterMapping;
 import org.apache.ibatis.mapping.ParameterMode;
 import org.apache.ibatis.mapping.SqlSource;
+import org.apache.ibatis.mapping.StatementType;
 import org.apache.ibatis.parsing.GenericTokenParser;
 import org.apache.ibatis.parsing.TokenHandler;
 import org.apache.ibatis.parsing.XNode;
 import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.scripting.defaults.DefaultParameterHandler;
 import org.apache.ibatis.session.Configuration;
 import org.xml.sax.SAXParseException;
 
@@ -192,6 +197,21 @@ public class SqlRenderer {
     return new Result(boundSql.getSql(), bindings, literal.toString());
   }
 
+  /**
+   * 実行用に、本番と同じ ? 付き SQL を作る。値は {@link Bound#setParameters} で MyBatis の TypeHandler を通して設定する。
+   */
+  public Bound bind(String statementId, Object parameterObject) {
+    MappedStatement ms = configuration.getMappedStatement(statementId);
+    if (ms.getStatementType() == StatementType.CALLABLE) {
+      throw new IllegalStateException("statementType=\"CALLABLE\" の statement は実行できません");
+    }
+    List<String> warnings = new ArrayList<>();
+    if (ms.getKeyGenerator() instanceof SelectKeyGenerator) {
+      warnings.add("<selectKey> は実行しません（statement 本体だけを実行します）");
+    }
+    return new Bound(ms, parameterObject, ms.getBoundSql(parameterObject), warnings);
+  }
+
   /** DefaultParameterHandler#setParameters と同じ手順で値を解決する */
   private Object resolveValue(ParameterMapping pm, BoundSql boundSql, Object parameterObject) {
     if (pm.getMode() == ParameterMode.OUT) {
@@ -224,6 +244,30 @@ public class SqlRenderer {
     @Override
     public String toString() {
       return index + ": " + property + " = " + value;
+    }
+  }
+
+  /** 実行用に組み立てた statement */
+  public static class Bound {
+    private final MappedStatement ms;
+    private final Object parameterObject;
+    private final BoundSql boundSql;
+    public final List<String> warnings;
+
+    Bound(MappedStatement ms, Object parameterObject, BoundSql boundSql, List<String> warnings) {
+      this.ms = ms;
+      this.parameterObject = parameterObject;
+      this.boundSql = boundSql;
+      this.warnings = Collections.unmodifiableList(warnings);
+    }
+
+    public String sql() {
+      return boundSql.getSql();
+    }
+
+    /** 本番の DefaultParameterHandler で値を設定する（null は jdbcTypeForNull の既定値 OTHER で渡る） */
+    public void setParameters(PreparedStatement ps) throws SQLException {
+      new DefaultParameterHandler(ms, parameterObject, boundSql).setParameters(ps);
     }
   }
 

@@ -57,7 +57,23 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
     - SQL本文の `#{}` から `javaType` / `typeHandler` オプションを削除
   - 将来モデルクラスを作ったら、クラスパス指定で本来の型を使えるようにする
 - **`databaseId`**: 使っていないため対応しない。`databaseId` 付きのstatementは読み込まれない
-- **SQL実行**: MVPでは対象外。レンダリングしたSQLをA5M2で実行する。実行機能で重いのは、接続情報の管理、JDBCドライバ、型ごとの表示であり、後のフェーズで検討する
+- **SQL実行**: MVPの後に追加した（次節）
+
+## SQL実行
+
+画面で接続先を選び、statementをPostgreSQLで実行する。
+
+- **実行方法**: 本番と同じく、MyBatisが作る `?` 付きSQLに、`DefaultParameterHandler`（TypeHandler）で値を設定して実行する。値を埋め込んだSQLは実行しない
+- **トランザクション**: 自動コミットを切り、常にトランザクションの中で実行する
+  - 既定ではロールバックする
+  - 「コミットする」を選んだときだけ、確認のうえコミットする。実行後は既定（ロールバック）に戻す
+  - エラーになったら必ずロールバックする
+- **接続先**: 名前を付けて複数登録し、画面で切り替える
+  - `~/.mybatis-xml-editor/connections.json` に保存する（自分だけが読める権限）
+  - パスワードはファイルに保存せず、ツールの起動中だけメモリに持つ。再起動したら画面で入力し直す
+  - JDBCドライバ（pgjdbc）はjarに同梱する
+- **結果**: 値はJDBCの `getString` の文字列で表示する（DBの表記のまま）。行数は先頭1000行まで。更新件数と実行時間も表示する
+- **実行しないもの**: `<selectKey>`（本体だけを実行し、警告を出す）。`statementType="CALLABLE"` は実行できない
 
 ## パラメータ入力UI
 
@@ -108,4 +124,5 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
 - **`lang` 属性**: 別のLanguageDriverを指定したstatementはレンダリングできない。クラスを参照している場合、そのmapperは読み込めない
 - **Javaのメソッド呼び出し**: `<if test="@com.example.Util@isEmpty(x)">` のような式は、クラスがないため評価がエラーになる
 - **アノテーション**: `@Select` などのアノテーションで書いたSQLは対象外
+- **`?` 演算子**: pgjdbcは `#{}` 以外の `?`（`?|` などのjsonb演算子）もパラメータとみなすため、実行がエラーになる（本番でも同じ）。JDBCでは `??` と書く必要があるが、その場合は値を埋め込んだSQLにも `??` が残るため、A5M2では手で直す必要がある
 - **`<selectKey>`**: statement一覧に `insert!selectKey` のような別項目として現れる。必要なら画面で隠す
