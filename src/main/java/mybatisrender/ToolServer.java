@@ -178,6 +178,11 @@ public final class ToolServer {
           parameters(ex);
         }
         break;
+      case "/api/template":
+        if (requireMethod(ex, method, "GET")) {
+          template(ex);
+        }
+        break;
       case "/api/render":
         if (requireMethod(ex, method, "POST")) {
           render(ex);
@@ -282,6 +287,34 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("tree", toJson(r.root));
     body.put("warnings", r.warnings);
+    sendJson(ex, 200, body);
+  }
+
+  /** statement の元の記述（mapper XML に書かれたままの要素） */
+  private void template(HttpExchange ex) throws IOException {
+    String id = query(ex).get("id");
+    SqlRenderer renderer = workspace.renderer();
+    if (id == null || !renderer.hasStatement(id)) {
+      sendJson(ex, 404, error("statement がありません: " + id));
+      return;
+    }
+    String resource = renderer.statementSource(id);
+    StatementSource.Snippet snippet;
+    try {
+      snippet = StatementSource.find(Paths.get(resource), id.substring(id.lastIndexOf('.') + 1));
+    } catch (IOException | RuntimeException e) {
+      sendJson(ex, 422, error("ファイルを読み込めません: " + resource + "\n" + Errors.describe(e)));
+      return;
+    }
+    if (snippet == null) {
+      // 読み込んだ後にファイルが変わった場合など
+      sendJson(ex, 404, error("ファイルに statement が見つかりません: " + resource));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("file", displayPath(resource));
+    body.put("line", snippet.line);
+    body.put("xml", snippet.xml);
     sendJson(ex, 200, body);
   }
 

@@ -22,6 +22,15 @@ export interface ParametersResponse {
   warnings: string[];
 }
 
+export interface TemplateResponse {
+  /** 定義したファイル（基準からの相対パス） */
+  file: string;
+  /** 要素が始まる行 */
+  line: number;
+  /** 書かれたままの要素（共通の字下げは除く） */
+  xml: string;
+}
+
 export interface Binding {
   index: number;
   property: string;
@@ -135,6 +144,7 @@ export function createApi(token: string) {
   return {
     statements: () => call<StatementsResponse>('api/statements'),
     parameters: (id: string) => call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
+    template: (id: string) => call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
     render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal) =>
       call<RenderResponse>('api/render', {
         method: 'POST',

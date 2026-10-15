@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Api, LoadError, RenderResponse } from './api';
+import type { Api, LoadError, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { fromJson, invalidNumbers, missingParams, toJson } from './params';
 import { tidySql } from './sql';
+import { tokenize } from './template';
 import type { StatementEntry, TreeNode } from './tree';
 import { buildTree, filterEntries, pathTo, shortId } from './tree';
 
@@ -45,6 +46,25 @@ function saveParams(id: string, value: PValue | undefined) {
   }
 }
 
+type Tab = 'sql' | 'template';
+const TAB_KEY = 'mybatis-xml-editor.tab';
+
+function loadTab(): Tab {
+  try {
+    return localStorage.getItem(TAB_KEY) === 'template' ? 'template' : 'sql';
+  } catch {
+    return 'sql';
+  }
+}
+
+function saveTab(tab: Tab) {
+  try {
+    localStorage.setItem(TAB_KEY, tab);
+  } catch {
+    // 保存できない環境では、この表示中だけ覚える
+  }
+}
+
 function initialStatement(): string | null {
   const hash = decodeURIComponent(window.location.hash.slice(1));
   return hash || null;
@@ -64,6 +84,7 @@ function Workspace({ api }: { api: Api }) {
   const [value, setValue] = useState<PValue | undefined>(() => (selected ? loadParams(selected) : undefined));
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>(loadTab);
 
   const handleError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
@@ -212,41 +233,71 @@ function Workspace({ api }: { api: Api }) {
       </main>
 
       <section className="result">
-        <header className="panel-header">
-          <h2>SQL</h2>
-        </header>
-        {numberIssues.length > 0 && (
-          <ul className="notes error">
-            {numberIssues.map((i) => (
-              <li key={i.path}>
-                <code>{i.path}</code>: {i.message}
-              </li>
-            ))}
-          </ul>
-        )}
-        {missing.length > 0 && (
-          <div className="notes info">
-            未設定の項目（NULL として扱われます）: {missing.map((m) => <code key={m}>{m}</code>)}
-          </div>
-        )}
-        {renderError && <pre className="render-error">{renderError}</pre>}
-        {result && !renderError && <RenderResult result={result} />}
+        <div className="tabs" role="tablist">
+          {(
+            [
+              ['sql', 'SQL'],
+              ['template', 'テンプレート'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              className={tab === key ? 'tab selected' : 'tab'}
+              onClick={() => {
+                setTab(key);
+                saveTab(key);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {selected && schema && (
-          <>
-            <header className="panel-header execute-header">
-              <h2>実行</h2>
-            </header>
-            <ExecutePanel
-              key={selected}
-              api={api}
-              statementId={selected}
-              value={value}
-              ready={numberIssues.length === 0 && !renderError}
-              onApiError={handleError}
-            />
-          </>
-        )}
+        {/* 実行結果が消えないよう、切り替えても SQL のタブは残しておく */}
+        <div hidden={tab !== 'sql'}>
+          {numberIssues.length > 0 && (
+            <ul className="notes error">
+              {numberIssues.map((i) => (
+                <li key={i.path}>
+                  <code>{i.path}</code>: {i.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          {missing.length > 0 && (
+            <div className="notes info">
+              未設定の項目（NULL として扱われます）: {missing.map((m) => <code key={m}>{m}</code>)}
+            </div>
+          )}
+          {renderError && <pre className="render-error">{renderError}</pre>}
+          {result && !renderError && <RenderResult result={result} />}
+  
+          {selected && schema && (
+            <>
+              <header className="panel-header execute-header">
+                <h2>実行</h2>
+              </header>
+              <ExecutePanel
+                key={selected}
+                api={api}
+                statementId={selected}
+                value={value}
+                ready={numberIssues.length === 0 && !renderError}
+                onApiError={handleError}
+              />
+            </>
+          )}
+        </div>
+
+        {tab === 'template' &&
+          (selected ? (
+            <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} />
+          ) : (
+            <p className="hint">左の一覧から statement を選んでください。</p>
+          ))}
       </section>
     </div>
   );
@@ -466,6 +517,72 @@ function RenderResult({ result }: { result: RenderResponse }) {
         <pre className="sql">{tidySql(result.placeholderSql)}</pre>
       </div>
     </>
+  );
+}
+
+/** mapper XML に書かれたままの statement */
+function TemplateView({
+  api,
+  statementId,
+  generation,
+  onApiError,
+}: {
+  api: Api;
+  statementId: string;
+  generation: number;
+  onApiError: (e: unknown) => void;
+}) {
+  const [template, setTemplate] = useState<TemplateResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // XML が変わったら取り直す
+  useEffect(() => {
+    if (generation === 0) return;
+    let active = true;
+    api
+      .template(statementId)
+      .then((t) => {
+        if (!active) return;
+        setTemplate(t);
+        setError(null);
+      })
+      .catch((e) => {
+        if (!active) return;
+        onApiError(e);
+        setTemplate(null);
+        setError(String(e.message ?? e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, statementId, generation]);
+
+  if (error) return <pre className="render-error">{error}</pre>;
+  if (!template) return null;
+  const lineCount = template.xml.split('\n').length;
+  return (
+    <div className="sql-block">
+      <div className="sql-title">
+        <code className="template-file">
+          {template.file}:{template.line}
+        </code>
+        <CopyButton text={template.xml} />
+      </div>
+      <div className="template">
+        <pre className="gutter" aria-hidden="true">
+          {Array.from({ length: lineCount }, (_, i) => template.line + i).join('\n')}
+        </pre>
+        <pre className="code">
+          {tokenize(template.xml).map((t, i) =>
+            t.kind === 'text' ? t.text : (
+              <span key={i} className={'t-' + t.kind}>
+                {t.text}
+              </span>
+            ),
+          )}
+        </pre>
+      </div>
+    </div>
   );
 }
 

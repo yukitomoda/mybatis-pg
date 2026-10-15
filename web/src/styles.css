@@ -13,6 +13,11 @@
   --code-bg: #f3f4f6;
   --danger: #b42318;
   --ok: #1a7f37;
+  --hl-tag: #116329;
+  --hl-attr: #6639ba;
+  --hl-value: #0a3069;
+  --hl-param: #953800;
+  --hl-raw: #cf222e;
   --mono: ui-monospace, 'Cascadia Mono', Consolas, 'BIZ UDGothic', monospace;
   color-scheme: light;
 }
@@ -33,6 +38,11 @@
     --code-bg: #24282d;
     --danger: #f07171;
     --ok: #4ac26b;
+    --hl-tag: #7ee787;
+    --hl-attr: #d2a8ff;
+    --hl-value: #a5d6ff;
+    --hl-param: #ffa657;
+    --hl-raw: #ff7b72;
     color-scheme: dark;
   }
 }
@@ -658,4 +668,92 @@ button.link {
 
 .connection-form .spacer {
   flex: 1;
+}
+
+/* ---- タブ ---- */
+
+.tabs {
+  display: flex;
+  gap: 0.2rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs .tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0.2rem 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tabs .tab.selected {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- テンプレート ---- */
+
+.template-file {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.template {
+  display: flex;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.template pre {
+  margin: 0;
+  padding: 0.6rem;
+  line-height: 1.5;
+}
+
+.template .gutter {
+  flex: none;
+  text-align: right;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  user-select: none;
+  position: sticky;
+  left: 0;
+  background: var(--code-bg);
+}
+
+.template .code {
+  flex: 1;
+}
+
+.t-tag {
+  color: var(--hl-tag);
+}
+
+.t-attr {
+  color: var(--hl-attr);
+}
+
+.t-value {
+  color: var(--hl-value);
+}
+
+.t-param {
+  color: var(--hl-param);
+  font-weight: 600;
+}
+
+.t-raw {
+  color: var(--hl-raw);
+  font-weight: 600;
+}
+
+.t-comment,
+.t-cdata,
+.t-punct {
+  color: var(--muted);
 }

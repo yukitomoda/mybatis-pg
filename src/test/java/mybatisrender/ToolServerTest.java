@@ -123,6 +123,15 @@ class ToolServerTest {
   }
 
   @Test
+  void テンプレート() throws Exception {
+    JsonObject body = api("GET", "/api/template?id=sample.UserMapper.bulkInsert", null, 200);
+    assertEquals("mappers/UserMapper.xml", body.get("file").getAsString());
+    assertTrue(body.get("xml").getAsString().startsWith("<insert id=\"bulkInsert\">\n  INSERT INTO users"), body.toString());
+    assertTrue(body.get("line").getAsInt() > 1, body.toString());
+    api("GET", "/api/template?id=no.such", null, 404);
+  }
+
+  @Test
   void レンダリング() throws Exception {
     // 数値は 10 が 10.0 にならず、小数は指数表記にならないこと
     JsonObject body = api("POST", "/api/render",
