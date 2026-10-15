@@ -1,0 +1,59 @@
+# リリース: vX.Y.Z のタグを push すると、テストとビルドを行い、GitHub の Releases に jar を添付する。
+#
+#   git tag -a v0.0.1 -m "v0.0.1"
+#   git push origin v0.0.1
+#
+# バージョンの付け方は docs/release.md を参照。
+
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - id: parse
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # タグの形を厳密に確かめる（v01.2.3 や v1.2.3-rc などは受け付けない）
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::タグは vX.Y.Z の形にしてください: $TAG"
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mybatis-xml-editor
+      - name: Releases に jar を添付する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          jar="mybatis-xml-editor-$VERSION.jar"
+          mv mybatis-xml-editor.jar "$jar"
+          sha256sum "$jar" > "$jar.sha256"
+          gh release create "$TAG" "$jar" "$jar.sha256" \
+            --repo "$GITHUB_REPOSITORY" --title "$TAG" --verify-tag --generate-notes

@@ -6,10 +6,12 @@
 
   <groupId>mybatisrender</groupId>
   <artifactId>mybatis-xml-editor</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <!-- リリース時は CI がタグ（vX.Y.Z）から -Drevision=X.Y.Z を渡す。手元のビルドは SNAPSHOT になる -->
+  <version>${revision}</version>
   <packaging>jar</packaging>
 
   <properties>
+    <revision>0.0.1-SNAPSHOT</revision>
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -120,6 +122,10 @@
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>mybatisrender.Main</mainClass>
+                  <manifestEntries>
+                    <Implementation-Title>mybatis-xml-editor</Implementation-Title>
+                    <Implementation-Version>${project.version}</Implementation-Version>
+                  </manifestEntries>
                 </transformer>
               </transformers>
             </configuration>

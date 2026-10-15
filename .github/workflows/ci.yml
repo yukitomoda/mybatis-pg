@@ -10,12 +10,19 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['*']
   pull_request:
+  # リリース（release.yml）から呼ばれる。タグの push ではこのワークフローは直接動かない
+  workflow_call:
+    inputs:
+      version:
+        description: 'jar に付けるバージョン（例 0.0.1）。空なら pom.xml の SNAPSHOT のまま'
+        type: string
+        default: ''
 
 # 同じブランチ・PR で新しい push があれば、古い実行を止める
+# （呼び出し元と同じグループ名にならないよう、ワークフロー名ではなく固定の接頭辞を使う）
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -88,9 +95,12 @@ jobs:
           name: web
           path: target/classes/web
       # 画面は web ジョブの成果物を使うため、ここではビルドしない
-      - run: mvn $MAVEN_CLI_OPTS package -DskipTests -Dskip.web=true
+      - run: mvn $MAVEN_CLI_OPTS package -DskipTests -Dskip.web=true ${VERSION:+-Drevision=$VERSION}
+        env:
+          VERSION: ${{ inputs.version }}
       # 画面が jar に入っていることを確かめる
       - run: jar tf target/mybatis-xml-editor.jar | grep -qx 'web/index.html'
+      - run: java -jar target/mybatis-xml-editor.jar --version
       - uses: actions/upload-artifact@v4
         with:
           name: mybatis-xml-editor

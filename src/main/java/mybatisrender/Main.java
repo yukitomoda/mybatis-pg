@@ -23,7 +23,8 @@ public final class Main {
       + "  java -jar mybatis-xml-editor.jar [オプション] mapperのファイルまたはディレクトリ...\n"
       + "オプション:\n"
       + "  --port 番号          待ち受けるポート（既定: 7171）\n"
-      + "  --public-url URL     リバースプロキシ経由で公開する URL（例: https://example.com/proxy/7171/）。複数指定可";
+      + "  --public-url URL     リバースプロキシ経由で公開する URL（例: https://example.com/proxy/7171/）。複数指定可\n"
+      + "  --version            バージョンを表示して終了する";
 
   private Main() {
   }
@@ -34,7 +35,10 @@ public final class Main {
     List<Path> sources = new ArrayList<>();
     List<URI> publicUrls = new ArrayList<>();
     for (int i = 0; i < args.length; i++) {
-      if ("--port".equals(args[i]) && i + 1 < args.length) {
+      if ("--version".equals(args[i])) {
+        System.out.println("mybatis-xml-editor " + version());
+        return;
+      } else if ("--port".equals(args[i]) && i + 1 < args.length) {
         port = Integer.parseInt(args[++i]);
       } else if ("--public-url".equals(args[i]) && i + 1 < args.length) {
         publicUrls.add(publicUrl(args[++i]));
@@ -49,6 +53,7 @@ public final class Main {
     if ((project == null) == sources.isEmpty()) {
       usage();
     }
+    System.out.println("mybatis-xml-editor " + version());
 
     MapperWorkspace workspace;
     if (project != null) {
@@ -92,6 +97,12 @@ public final class Main {
     for (URI url : publicUrls) {
       System.out.println("公開 URL: " + url + "?token=" + token);
     }
+  }
+
+  /** jar のマニフェストにあるバージョン。jar から起動していなければ「開発版」 */
+  private static String version() {
+    String v = Main.class.getPackage().getImplementationVersion();
+    return v == null ? "（開発版）" : v;
   }
 
   private static void printSummary(MapperWorkspace workspace, String label) {
