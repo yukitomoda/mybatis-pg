@@ -1,2 +1,5 @@
 target/
 web/node_modules/
+# CI でのみ作られるもの
+.m2/
+web/.npm/

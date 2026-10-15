@@ -1,0 +1,98 @@
+# MyBatis SQL レンダリングツールのビルド
+#
+# ツールの版は mise.toml と合わせること（Java 8 / Maven 3.9.16 / Node 24.20.0）。
+# ビルドは公式の Docker イメージをコンテナとして使い、その中で行う（runs-on はコンテナを動かす土台のマシン）。
+# Maven のイメージには Node がないため、画面は Node のジョブでビルドし、
+# 成果物（target/classes/web）を jar 作成のジョブに渡す。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  pull_request:
+
+# 同じブランチ・PR で新しい push があれば、古い実行を止める
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 依存をキャッシュできるよう、ローカルリポジトリをプロジェクト内に置く
+  MAVEN_OPTS: -Dmaven.repo.local=.m2/repository
+  MAVEN_CLI_OPTS: --batch-mode --errors --no-transfer-progress
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    container: node:24.20.0-bookworm-slim
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: web/.npm
+          key: npm-${{ hashFiles('web/package-lock.json') }}
+      - run: npm ci --cache .npm --prefer-offline --no-audit --no-fund
+      - run: npx vitest run
+      # 型チェックと本番ビルド。出力先は ../target/classes/web
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: target/classes/web
+          retention-days: 1
+
+  java-test:
+    runs-on: ubuntu-latest
+    container: maven:3.9.16-eclipse-temurin-8
+    strategy:
+      fail-fast: false
+      matrix:
+        # 本番相当の 3.4.5 に加え、差し替え先の候補として 3.5 系でも動くことを確かめる
+        mybatis: ['3.4.5', '3.5.19']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .m2/repository
+          key: maven-${{ hashFiles('pom.xml') }}
+          restore-keys: maven-
+      - run: mvn $MAVEN_CLI_OPTS test -Dmybatis.version=${{ matrix.mybatis }}
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ matrix.mybatis }}
+          path: target/surefire-reports
+          retention-days: 7
+
+  package:
+    needs: [web, java-test]
+    runs-on: ubuntu-latest
+    container: maven:3.9.16-eclipse-temurin-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .m2/repository
+          key: maven-${{ hashFiles('pom.xml') }}
+          restore-keys: maven-
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: target/classes/web
+      # 画面は web ジョブの成果物を使うため、ここではビルドしない
+      - run: mvn $MAVEN_CLI_OPTS package -DskipTests -Dskip.web=true
+      # 画面が jar に入っていることを確かめる
+      - run: jar tf target/mybatis-xml-editor.jar | grep -qx 'web/index.html'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mybatis-xml-editor
+          path: target/mybatis-xml-editor.jar
+          retention-days: 30
