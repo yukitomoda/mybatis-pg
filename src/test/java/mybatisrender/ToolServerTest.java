@@ -103,9 +103,10 @@ class ToolServerTest {
   @Test
   void statement一覧() throws Exception {
     JsonObject body = api("GET", "/api/statements", null, 200);
-    JsonArray ids = body.getAsJsonArray("statements");
-    assertTrue(ids.toString().contains("\"sample.UserMapper.search\""), ids.toString());
-    assertTrue(ids.toString().contains("\"sample.ParamMapper.hints\""), ids.toString());
+    String statements = body.getAsJsonArray("statements").toString();
+    // ファイルは mapper の共通の親（src/test/resources）からの相対パス
+    assertTrue(statements.contains("{\"id\":\"sample.UserMapper.search\",\"file\":\"mappers/UserMapper.xml\"}"), statements);
+    assertTrue(statements.contains("{\"id\":\"sample.ParamMapper.hints\",\"file\":\"params/ParamMapper.xml\"}"), statements);
     assertEquals(0, body.getAsJsonArray("loadErrors").size());
   }
 

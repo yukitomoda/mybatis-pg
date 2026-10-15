@@ -6,6 +6,8 @@ import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { fromJson, invalidNumbers, missingParams, toJson } from './params';
 import { tidySql } from './sql';
+import type { StatementEntry, TreeNode } from './tree';
+import { buildTree, filterEntries, pathTo, shortId } from './tree';
 
 export function App() {
   const [token] = useState(() => takeToken());
@@ -53,7 +55,7 @@ function initialStatement(): string | null {
 function Workspace({ api }: { api: Api }) {
   const [fatal, setFatal] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
-  const [statements, setStatements] = useState<string[]>([]);
+  const [statements, setStatements] = useState<StatementEntry[]>([]);
   const [loadErrors, setLoadErrors] = useState<LoadError[]>([]);
   const [selected, setSelected] = useState<string | null>(initialStatement);
   const [schema, setSchema] = useState<ParamSchema | null>(null);
@@ -183,7 +185,7 @@ function Workspace({ api }: { api: Api }) {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <StatementList statements={statements} selected={selected} onSelect={select} />
+        <StatementTree statements={statements} selected={selected} onSelect={select} />
         <LoadErrors errors={loadErrors} />
       </aside>
 
@@ -250,26 +252,97 @@ function Workspace({ api }: { api: Api }) {
   );
 }
 
-function StatementList({ statements, selected, onSelect }: { statements: string[]; selected: string | null; onSelect: (id: string) => void }) {
+// ---- statement の一覧（ディレクトリ → ファイル → statement のツリー） ----
+
+const TOGGLED_KEY = 'mybatis-xml-editor.tree';
+
+/** 既定（ディレクトリは開く、ファイルは閉じる）から切り替えた項目の key */
+function loadToggled(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(TOGGLED_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveToggled(keys: Set<string>) {
+  try {
+    localStorage.setItem(TOGGLED_KEY, JSON.stringify([...keys]));
+  } catch {
+    // 保存できない環境では、この表示中だけ覚える
+  }
+}
+
+function StatementTree({
+  statements,
+  selected,
+  onSelect,
+}: {
+  statements: StatementEntry[];
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
   const [filter, setFilter] = useState('');
-  const shown = statements.filter((s) => s.toLowerCase().includes(filter.trim().toLowerCase()));
+  const [toggled, setToggled] = useState(loadToggled);
+  const filtering = filter.trim() !== '';
+  const tree = useMemo(() => buildTree(filterEntries(statements, filter)), [statements, filter]);
+
+  const isOpen = (n: TreeNode) => filtering || (n.kind === 'dir' ? !toggled.has(n.key) : toggled.has(n.key));
+  const update = (f: (next: Set<string>) => void) =>
+    setToggled((prev) => {
+      const next = new Set(prev);
+      f(next);
+      saveToggled(next);
+      return next;
+    });
+  const toggle = (n: TreeNode) => update((next) => (next.has(n.key) ? next.delete(n.key) : next.add(n.key)));
+
+  // 選ばれている statement が見えるよう、そこまでの項目を開く（URL から開いたときなど）
+  const loaded = statements.length > 0;
+  useEffect(() => {
+    if (!selected || !loaded) return;
+    const keys = pathTo(buildTree(statements), selected);
+    update((next) => {
+      for (const k of keys) {
+        if (k.endsWith('/')) next.delete(k);
+        else next.add(k);
+      }
+    });
+  }, [selected, loaded]);
+
+  const render = (nodes: TreeNode[]) => (
+    <ul>
+      {nodes.map((n) => {
+        const open = isOpen(n);
+        return (
+          <li key={n.key}>
+            <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
+              <span className="twisty">{open ? '▾' : '▸'}</span>
+              {n.kind === 'dir' ? n.label + '/' : n.label}
+              {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
+            </button>
+            {open && n.kind === 'dir' && render(n.children)}
+            {open && n.kind === 'file' && (
+              <ul>
+                {n.statements.map((s) => (
+                  <li key={s.id}>
+                    <button type="button" className={s.id === selected ? 'node stmt selected' : 'node stmt'} onClick={() => onSelect(s.id)} title={s.id}>
+                      {shortId(s.id)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
   return (
     <div className="statements">
-      <input type="search" placeholder="statement を絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <ul>
-        {shown.map((id) => {
-          const dot = id.lastIndexOf('.');
-          return (
-            <li key={id}>
-              <button type="button" className={id === selected ? 'selected' : undefined} onClick={() => onSelect(id)} title={id}>
-                <span className="ns">{id.slice(0, dot + 1)}</span>
-                <span className="sid">{id.slice(dot + 1)}</span>
-              </button>
-            </li>
-          );
-        })}
-        {shown.length === 0 && <li className="hint">該当する statement がありません</li>}
-      </ul>
+      <input type="search" placeholder="statement・ファイルを絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : <nav className="tree-list">{render(tree)}</nav>}
     </div>
   );
 }

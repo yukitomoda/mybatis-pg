@@ -138,6 +138,11 @@ public class SqlRenderer {
     return ids;
   }
 
+  /** statement を定義したファイルのパス（読み込み時に resource として渡したもの） */
+  public String statementSource(String statementId) {
+    return configuration.getMappedStatement(statementId, false).getResource();
+  }
+
   /** statement が参照しているパラメータを抜き出す */
   public ParameterExtractor.Result parameters(String statementId) {
     return ParameterExtractor.extract(tracingSqlSource(statementId).getScript());

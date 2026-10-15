@@ -17,13 +17,16 @@ public final class MapperWorkspace {
 
   private final Supplier<List<Path>> files;
   private final List<Path> watchRoots;
+  /** 画面でファイルを相対パスで見せるときの基準 */
+  private final Path baseDir;
   private volatile SqlRenderer renderer;
   /** reload() のたびに増える。画面はこれを見て再取得する */
   private long generation;
 
-  private MapperWorkspace(Supplier<List<Path>> files, List<Path> watchRoots) {
+  private MapperWorkspace(Supplier<List<Path>> files, List<Path> watchRoots, Path baseDir) {
     this.files = files;
     this.watchRoots = Collections.unmodifiableList(new ArrayList<>(watchRoots));
+    this.baseDir = baseDir;
     reload();
   }
 
@@ -45,13 +48,29 @@ public final class MapperWorkspace {
         }
       }
       return result;
-    }, new ArrayList<>(roots));
+    }, new ArrayList<>(roots), commonAncestor(roots));
   }
 
   /** Spring Boot プロジェクトの設定（mybatis.mapper-locations）から探す。設定は読み込み直すたびに読む */
   public static MapperWorkspace ofProject(Path projectDir) {
     return new MapperWorkspace(() -> MapperLocations.of(projectDir).resolve(),
-        MapperLocations.of(projectDir).watchRoots());
+        MapperLocations.of(projectDir).watchRoots(), projectDir.toAbsolutePath().normalize());
+  }
+
+  /** すべてのパスを含む最も深いディレクトリ。共通部分がなければ null */
+  private static Path commonAncestor(Iterable<Path> paths) {
+    Path common = null;
+    for (Path p : paths) {
+      Path abs = p.toAbsolutePath().normalize();
+      if (common == null) {
+        common = abs;
+      } else {
+        while (common != null && !abs.startsWith(common)) {
+          common = common.getParent();
+        }
+      }
+    }
+    return common;
   }
 
   public void reload() {
@@ -73,6 +92,11 @@ public final class MapperWorkspace {
 
   public SqlRenderer renderer() {
     return renderer;
+  }
+
+  /** 画面でファイルを相対パスで見せるときの基準。null なら絶対パスで見せる */
+  public Path baseDir() {
+    return baseDir;
   }
 
   /** 変更を監視するディレクトリ */

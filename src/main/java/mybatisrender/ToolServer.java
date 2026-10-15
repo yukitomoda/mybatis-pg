@@ -10,6 +10,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -226,13 +228,20 @@ public final class ToolServer {
     return false;
   }
 
-  /** statement の一覧と、読み込みエラーの一覧 */
+  /** statement の一覧（定義したファイル付き）と、読み込みエラーの一覧 */
   private void statements(HttpExchange ex) throws IOException {
     long generation = workspace.generation();
     SqlRenderer renderer = workspace.renderer();
+    List<Map<String, Object>> statements = new ArrayList<>();
+    for (String id : renderer.statementIds()) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("id", id);
+      m.put("file", displayPath(renderer.statementSource(id)));
+      statements.add(m);
+    }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("generation", generation);
-    body.put("statements", renderer.statementIds());
+    body.put("statements", statements);
     body.put("loadErrors", renderer.getLoadErrors());
     sendJson(ex, 200, body);
   }
@@ -459,6 +468,19 @@ public final class ToolServer {
     body.put("committed", r.committed);
     body.put("elapsedMillis", r.elapsedMillis);
     sendJson(ex, 200, body);
+  }
+
+  /** 基準ディレクトリからの相対パスを / 区切りで返す。基準の外なら絶対パスのまま */
+  private String displayPath(String resource) {
+    Path base = workspace.baseDir();
+    Path file;
+    try {
+      file = Paths.get(resource).toAbsolutePath().normalize();
+    } catch (RuntimeException e) {
+      return resource;
+    }
+    Path shown = base != null && file.startsWith(base) && !file.equals(base) ? base.relativize(file) : file;
+    return shown.toString().replace('\\', '/');
   }
 
   private static Map<String, Object> toJson(ParamNode node) {

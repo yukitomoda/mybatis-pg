@@ -2,6 +2,7 @@
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { toJson } from './params';
+import type { StatementEntry } from './tree';
 
 export interface LoadError {
   source: string;
@@ -12,7 +13,7 @@ export interface LoadError {
 
 export interface StatementsResponse {
   generation: number;
-  statements: string[];
+  statements: StatementEntry[];
   loadErrors: LoadError[];
 }
 
