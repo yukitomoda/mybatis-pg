@@ -22,6 +22,8 @@ export interface ParametersResponse {
   warnings: string[];
 }
 
+export type OpenTarget = { statementId: string } | { file: string; line?: number | null };
+
 export interface TemplateResponse {
   /** 定義したファイル（基準からの相対パス） */
   file: string;
@@ -200,6 +202,9 @@ export function createApi(token: string) {
     saveGlobalValues: (id: string, values: PValue) =>
       globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
     parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),
+    editor: () => call<{ available: boolean; command: string | null }>('api/editor'),
+    /** mapper XML をエディタで開く（statement の開始行、またはファイルと行） */
+    open: (target: OpenTarget) => call<object>('api/open', post(JSON.stringify(target))),
     template: (id: string) => call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
     render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal) =>
       call<RenderResponse>('api/render', {

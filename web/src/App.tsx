@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Api, LoadError, RenderResponse, TemplateResponse } from './api';
+import type { Api, LoadError, OpenTarget, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
 import type { GenCache } from './gen';
@@ -78,6 +78,25 @@ function initialStatement(): string | null {
 
 // ---- 画面 ----
 
+/** ファイルをエディタで開く。エディタのコマンドがなければ null */
+type Opener = { label: string; open: (target: OpenTarget) => void } | null;
+
+function useOpener(api: Api, onApiError: (e: unknown) => void): Opener {
+  const [command, setCommand] = useState<string | null>(null);
+  useEffect(() => {
+    api.editor().then((r) => setCommand(r.available ? r.command : null), onApiError);
+  }, [api]);
+  if (!command) return null;
+  return {
+    label: /(^|\/)code(-server)?(\s|$)/.test(command) ? 'VS Code で開く' : 'エディタで開く',
+    open: (target) =>
+      api.open(target).catch((e) => {
+        onApiError(e);
+        window.alert('ファイルを開けません\n' + (e instanceof Error ? e.message : String(e)));
+      }),
+  };
+}
+
 function Workspace({ api }: { api: Api }) {
   const [fatal, setFatal] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
@@ -100,6 +119,8 @@ function Workspace({ api }: { api: Api }) {
       setFatal('トークンが一致しません。サーバを起動し直した場合は、新しく表示された URL から開き直してください。');
     }
   };
+
+  const opener = useOpener(api, handleError);
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -239,8 +260,8 @@ function Workspace({ api }: { api: Api }) {
   return (
     <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
-        <StatementTree statements={statements} selected={selected} onSelect={select} />
-        <LoadErrors errors={loadErrors} />
+        <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} />
+        <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
 
@@ -379,7 +400,7 @@ function Workspace({ api }: { api: Api }) {
 
         {tab === 'template' &&
           (selected ? (
-            <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} />
+            <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
           ) : (
             <p className="hint">左の一覧から statement を選んでください。</p>
           ))}
@@ -413,10 +434,12 @@ function StatementTree({
   statements,
   selected,
   onSelect,
+  opener,
 }: {
   statements: StatementEntry[];
   selected: string | null;
   onSelect: (id: string) => void;
+  opener: Opener;
 }) {
   const [filter, setFilter] = useState('');
   const [toggled, setToggled] = useState(loadToggled);
@@ -452,11 +475,18 @@ function StatementTree({
         const open = isOpen(n);
         return (
           <li key={n.key}>
-            <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
-              <span className="twisty">{open ? '▾' : '▸'}</span>
-              {n.kind === 'dir' ? n.label + '/' : n.label}
-              {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
-            </button>
+            <div className="node-line">
+              <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
+                <span className="twisty">{open ? '▾' : '▸'}</span>
+                {n.kind === 'dir' ? n.label + '/' : n.label}
+                {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
+              </button>
+              {n.kind === 'file' && opener && (
+                <button type="button" className="icon open-file" title={opener.label} aria-label={`${n.label} を${opener.label}`} onClick={() => opener.open({ file: n.key })}>
+                  ↗
+                </button>
+              )}
+            </div>
             {open && n.kind === 'dir' && render(n.children)}
             {open && n.kind === 'file' && (
               <ul>
@@ -483,7 +513,7 @@ function StatementTree({
   );
 }
 
-function LoadErrors({ errors }: { errors: LoadError[] }) {
+function LoadErrors({ errors, opener }: { errors: LoadError[]; opener: Opener }) {
   if (errors.length === 0) return null;
   return (
     <details className="load-errors" open>
@@ -494,6 +524,11 @@ function LoadErrors({ errors }: { errors: LoadError[] }) {
             <div className="source">
               {e.source}
               {e.line !== null && `:${e.line}`}
+              {opener && e.source.endsWith('.xml') && (
+                <button type="button" className="link" onClick={() => opener.open({ file: e.source, line: e.line })}>
+                  {opener.label}
+                </button>
+              )}
             </div>
             <pre>{e.message}</pre>
           </li>
@@ -611,11 +646,13 @@ function TemplateView({
   statementId,
   generation,
   onApiError,
+  opener,
 }: {
   api: Api;
   statementId: string;
   generation: number;
   onApiError: (e: unknown) => void;
+  opener: Opener;
 }) {
   const [template, setTemplate] = useState<TemplateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -651,7 +688,14 @@ function TemplateView({
         <code className="template-file">
           {template.file}:{template.line}
         </code>
-        <CopyButton text={template.xml} />
+        <span className="actions">
+          {opener && (
+            <button type="button" onClick={() => opener.open({ statementId })}>
+              {opener.label}
+            </button>
+          )}
+          <CopyButton text={template.xml} />
+        </span>
       </div>
       <div className="template">
         <pre className="gutter" aria-hidden="true">

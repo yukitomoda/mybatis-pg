@@ -30,6 +30,8 @@ public final class Main {
       + "オプション:\n"
       + "  --port 番号          待ち受けるポート（既定: 7171）\n"
       + "  --public-url URL     リバースプロキシ経由で公開する URL（例: https://example.com/proxy/7171/）。複数指定可\n"
+      + "  --editor コマンド    ファイルを開くコマンド。{file} と {line} を置き換える（既定: VS Code の code コマンドを探して使う）\n"
+      + "                       例: --editor \"code --goto {file}:{line}\"\n"
       + "  --version            バージョンを表示して終了する";
 
   private Main() {
@@ -40,12 +42,15 @@ public final class Main {
     Path project = null;
     List<Path> sources = new ArrayList<>();
     List<URI> publicUrls = new ArrayList<>();
+    String editorCommand = null;
     for (int i = 0; i < args.length; i++) {
       if ("--version".equals(args[i])) {
         System.out.println("mybatis-pg " + version());
         return;
       } else if ("--port".equals(args[i]) && i + 1 < args.length) {
         port = Integer.parseInt(args[++i]);
+      } else if ("--editor".equals(args[i]) && i + 1 < args.length) {
+        editorCommand = args[++i];
       } else if ("--public-url".equals(args[i]) && i + 1 < args.length) {
         publicUrls.add(publicUrl(args[++i]));
       } else if ("--project".equals(args[i]) && i + 1 < args.length) {
@@ -102,6 +107,10 @@ public final class Main {
 
     String token = newToken();
     ToolServer server = ToolServer.start(workspace, connections, globals, port, token, publicUrls);
+    EditorLauncher editor = editorCommand != null ? EditorLauncher.of(editorCommand) : EditorLauncher.detect(System.getenv());
+    server.setEditor(editor);
+    System.out.println(editor.isAvailable() ? "エディタ: " + editor.describe()
+        : "エディタ: コマンドが見つからないため、画面からファイルを開けません（--editor で指定できます）");
     System.out.println("ブラウザで開いてください: http://127.0.0.1:" + server.getPort() + "/?token=" + token);
     for (URI url : publicUrls) {
       System.out.println("公開 URL: " + url + "?token=" + token);

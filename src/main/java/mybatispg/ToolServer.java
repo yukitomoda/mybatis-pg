@@ -67,6 +67,7 @@ public final class ToolServer {
   private final MapperWorkspace workspace;
   private final ConnectionStore connections;
   private final GlobalStore globals;
+  private volatile EditorLauncher editor = EditorLauncher.disabled();
   private final byte[] token;
   private final HttpServer server;
   private final ExecutorService executor;
@@ -112,6 +113,11 @@ public final class ToolServer {
     ToolServer s = new ToolServer(workspace, connections, globals, port, token, publicUrls);
     s.server.start();
     return s;
+  }
+
+  /** ファイルを開くエディタ。設定しなければ開けない */
+  public void setEditor(EditorLauncher editor) {
+    this.editor = editor;
   }
 
   public int getPort() {
@@ -232,6 +238,19 @@ public final class ToolServer {
       case "/api/globals/values":
         if (requireMethod(ex, method, "POST")) {
           updateGlobals(ex, path.substring("/api/globals/".length()));
+        }
+        break;
+      case "/api/editor":
+        if (requireMethod(ex, method, "GET")) {
+          Map<String, Object> body = new LinkedHashMap<>();
+          body.put("available", editor.isAvailable());
+          body.put("command", editor.describe());
+          sendJson(ex, 200, body);
+        }
+        break;
+      case "/api/open":
+        if (requireMethod(ex, method, "POST")) {
+          openInEditor(ex);
         }
         break;
       case "/api/execute":
@@ -466,6 +485,68 @@ public final class ToolServer {
     m.put("params", p.params);
     m.put("hasPassword", connections.hasPassword(p.id));
     return m;
+  }
+
+  // ---- エディタ ----
+
+  /**
+   * mapper XML をエディタで開く。開けるのは読み込んでいる mapper XML だけ。
+   * リクエスト: {"statementId"} なら statement の開始行、{"file", "line"?} ならそのファイル
+   * （file は statement 一覧のパスか、読み込みエラーの source）。
+   */
+  private void openInEditor(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    SqlRenderer renderer = workspace.renderer();
+    Path file;
+    int line = 1;
+    String statementId = string(req, "statementId");
+    if (statementId != null) {
+      if (!renderer.hasStatement(statementId)) {
+        sendJson(ex, 404, error("statement がありません: " + statementId));
+        return;
+      }
+      file = Paths.get(renderer.statementSource(statementId));
+      StatementSource.Snippet s = StatementSource.find(file, statementId.substring(statementId.lastIndexOf('.') + 1));
+      if (s != null) {
+        line = s.line;
+      }
+    } else {
+      file = mapperFile(string(req, "file"));
+      if (file == null) {
+        sendJson(ex, 404, error("読み込んでいる mapper XML ではありません: " + string(req, "file")));
+        return;
+      }
+      try {
+        line = req.has("line") && !req.get("line").isJsonNull() ? req.get("line").getAsInt() : 1;
+      } catch (RuntimeException e) {
+        sendJson(ex, 400, error("line は整数で指定してください"));
+        return;
+      }
+    }
+    try {
+      editor.open(file.toAbsolutePath().normalize(), line);
+    } catch (IOException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+      return;
+    }
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
+  }
+
+  /** 画面のパス（相対パスか絶対パス）から、読み込んでいる mapper XML を探す */
+  private Path mapperFile(String shown) {
+    if (shown == null) {
+      return null;
+    }
+    for (Path p : workspace.mapperFiles()) {
+      if (displayPath(p.toString()).equals(shown) || p.toString().equals(shown)
+          || p.toAbsolutePath().normalize().toString().equals(shown)) {
+        return p;
+      }
+    }
+    return null;
   }
 
   // ---- 共通パラメータ ----

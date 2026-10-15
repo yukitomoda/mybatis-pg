@@ -953,3 +953,33 @@ button.regen {
 .notes.generated .source {
   color: var(--muted);
 }
+
+/* ---- エディタで開く ---- */
+
+.node-line {
+  display: flex;
+  align-items: center;
+}
+
+.node-line .node {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ファイルの行にマウスを乗せたとき（またはキーで選んだとき）だけ出す */
+button.open-file {
+  flex: none;
+  padding: 0 0.35rem;
+  font-size: 12px;
+  visibility: hidden;
+}
+
+.node-line:hover button.open-file,
+button.open-file:focus-visible {
+  visibility: visible;
+}
+
+.sql-title .actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}

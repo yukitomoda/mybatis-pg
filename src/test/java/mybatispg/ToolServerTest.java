@@ -208,6 +208,32 @@ class ToolServerTest {
   }
 
   @Test
+  void エディタで開く() throws Exception {
+    java.nio.file.Path out = java.nio.file.Files.createTempFile("open", ".txt");
+    try {
+      assertEquals("{\"available\":false,\"command\":null}", api("GET", "/api/editor", null, 200).toString());
+      api("POST", "/api/open", "{\"statementId\":\"sample.UserMapper.bulkInsert\"}", 422);
+
+      server.setEditor(EditorLauncher.of("sh -c 'printf \"%s\\n\" \"$0\" >> " + out + "' {file}:{line}"));
+      assertTrue(api("GET", "/api/editor", null, 200).get("available").getAsBoolean());
+      api("POST", "/api/open", "{\"statementId\":\"sample.UserMapper.bulkInsert\"}", 200);
+      api("POST", "/api/open", "{\"file\":\"mappers/Common.xml\",\"line\":3}", 200);
+      String opened = new String(java.nio.file.Files.readAllBytes(out), StandardCharsets.UTF_8);
+      String base = Paths.get("src/test/resources").toAbsolutePath().normalize().toString();
+      String[] lines = opened.split("\n");
+      assertTrue(lines[0].startsWith(base + "/mappers/UserMapper.xml:") && !lines[0].endsWith(":1"), opened);
+      assertEquals(base + "/mappers/Common.xml:3", lines[1]);
+
+      // 読み込んでいない mapper XML 以外のファイルは開かない
+      api("POST", "/api/open", "{\"file\":\"/etc/passwd\"}", 404);
+      api("POST", "/api/open", "{\"file\":\"../pom.xml\"}", 404);
+    } finally {
+      server.setEditor(EditorLauncher.disabled());
+      java.nio.file.Files.deleteIfExists(out);
+    }
+  }
+
+  @Test
   void 変更待ちは世代番号が進むまで応答を保留する() throws Exception {
     long current = api("GET", "/api/statements", null, 200).get("generation").getAsLong();
 
