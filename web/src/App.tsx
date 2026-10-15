@@ -4,7 +4,7 @@ import { ApiError, createApi, takeToken } from './api';
 import { ExecutePanel } from './Execution';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
-import { fromJson, invalidNumbers, missingParams, toJson } from './params';
+import { fromJson, invalidNumbers, missingParams, toJson, withListDefaults } from './params';
 import { tidySql } from './sql';
 import { tokenize } from './template';
 import type { StatementEntry, TreeNode } from './tree';
@@ -190,9 +190,21 @@ function Workspace({ api }: { api: Api }) {
   };
 
   const changeValue = (v: PValue | undefined) => {
-    setValue(v);
-    if (selected) saveParams(selected, v);
+    // foreach で回す項目は、未設定にしても空のリストに戻す（NULL にしたいときは型で NULL を選ぶ）
+    const next = schema ? withListDefaults(schema, v) : v;
+    setValue(next);
+    if (selected) saveParams(selected, next);
   };
+
+  // パラメータの木が届いたら、foreach で回す項目を最初からリストにしておく
+  useEffect(() => {
+    if (!schema || !selected) return;
+    const next = withListDefaults(schema, value);
+    if (next !== value) {
+      setValue(next);
+      saveParams(selected, next);
+    }
+  }, [schema]);
 
   if (fatal) {
     return (

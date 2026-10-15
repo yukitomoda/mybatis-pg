@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema, PValue } from './params';
-import { defaultType, fromJson, getAt, invalidNumbers, missingParams, setAt, toJson } from './params';
+import { defaultType, fromJson, getAt, invalidNumbers, missingParams, setAt, toJson, withListDefaults } from './params';
 import { tidySql } from './sql';
 
 const node = (name: string, extra: Partial<ParamSchema> = {}): ParamSchema => ({
@@ -84,5 +84,27 @@ describe('SQL の整形', () => {
   it('空白だけの行を除き、共通の字下げを外す', () => {
     const sql = 'SELECT  id \n    FROM users\n     WHERE  a = 1\n      \n      \n    ORDER BY id';
     expect(tidySql(sql)).toBe('SELECT  id\nFROM users\n WHERE  a = 1\nORDER BY id');
+  });
+});
+
+describe('withListDefaults', () => {
+  const ids = node('ids', { usages: ['ITERATE'], element: node(null as unknown as string) });
+  const tags = node('tags', { usages: ['ITERATE'], element: node(null as unknown as string) });
+  const users = node('users', { usages: ['ITERATE'], element: node(null as unknown as string, { properties: [tags] }) });
+  const cond = node('cond', { properties: [node('ids2', { usages: ['ITERATE'] })] });
+  const root = node(null as unknown as string, { properties: [ids, cond, users] });
+
+  it('一番外側の foreach の項目を空のリストにする。未設定のオブジェクトの中には作らない', () => {
+    expect(toJson(withListDefaults(root, undefined), '')).toBe('{"ids":[],"users":[]}');
+  });
+
+  it('値のあるオブジェクトやリストの要素の中にも入れ、設定済みの値は変えない', () => {
+    const v = fromJson('{"ids":null,"cond":{},"users":[{},{"tags":[1]}]}');
+    expect(toJson(withListDefaults(root, v), '')).toBe('{"ids":null,"cond":{"ids2":[]},"users":[{"tags":[]},{"tags":[1]}]}');
+  });
+
+  it('変える必要がなければ同じ値を返す', () => {
+    const v = fromJson('{"ids":[1],"users":[]}');
+    expect(withListDefaults(root, v)).toBe(v);
   });
 });

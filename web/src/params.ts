@@ -81,6 +81,41 @@ export function convertType(value: PValue | undefined, t: PType): PValue {
   return emptyValue(t);
 }
 
+/**
+ * foreach で回す項目のうち未設定のものを、空のリストにする。
+ * 対象は値のあるオブジェクトの中（一番外側は常に対象）で、未設定の親を作ってまでは入れない。
+ * 変える必要がなければ、受け取った値をそのまま返す。
+ */
+export function withListDefaults(schema: ParamSchema, value: PValue | undefined): PValue | undefined {
+  const filled = fill(schema, value ?? EMPTY_ROOT);
+  return filled === (value ?? EMPTY_ROOT) ? value : filled;
+}
+
+function fill(schema: ParamSchema, value: PValue): PValue {
+  if (value.t === 'object') {
+    let changed = false;
+    const fields = value.fields.map(([k, v]): [string, PValue] => {
+      const child = schema.properties.find((p) => p.name === k);
+      const next = child ? fill(child, v) : v;
+      if (next !== v) changed = true;
+      return [k, next];
+    });
+    for (const p of schema.properties) {
+      if (p.name !== null && p.usages.includes('ITERATE') && !fields.some(([k]) => k === p.name)) {
+        fields.push([p.name, { t: 'list', items: [] }]);
+        changed = true;
+      }
+    }
+    return changed ? { t: 'object', fields } : value;
+  }
+  if (value.t === 'list' && schema.element) {
+    const element = schema.element;
+    const items = value.items.map((item) => fill(element, item));
+    return items.some((item, i) => item !== value.items[i]) ? { t: 'list', items } : value;
+  }
+  return value;
+}
+
 // ---- 木の操作 ----
 
 export function getAt(root: PValue | undefined, path: Path): PValue | undefined {
