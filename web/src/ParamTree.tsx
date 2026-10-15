@@ -92,15 +92,23 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const origin = local === undefined && shown !== undefined ? (getAt(ctx.global, path) !== undefined ? '共通' : '既定') : null;
   const type = shown?.t;
   const set = (v: PValue | undefined) => ctx.update(path, v);
+  // XML で参照されているのに値がない（多くは入力のし忘れ）
+  const missing =
+    !ctx.free && shown === undefined && schema !== null && (schema.usages.length > 0 || schema.properties.length > 0 || schema.element !== null);
 
   return (
     <>
-      <div className={`row${unreferenced ? ' unreferenced' : ''}${origin ? ' inherited' : ''}`}>
+      <div className={`row${unreferenced ? ' unreferenced' : ''}${origin ? ' inherited' : ''}${missing ? ' missing' : ''}`}>
         <span
           className="name"
           style={{ paddingLeft: `${depth * 1.25}rem` }}
           title={unreferenced ? 'XML では参照されていない項目' : undefined}
         >
+          {missing && (
+            <span className="warn-mark" title="値が未設定です（NULL として扱われます）" aria-label="未設定">
+              ⚠
+            </span>
+          )}
           {name}
         </span>
         <span className="usages">
