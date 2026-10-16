@@ -1,5 +1,5 @@
 // EXPLAIN タブ: 計画を取得（または貼り付け）して、ツリーで表示する
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { Snapshot } from './compare';
 import { loadSnapshots, ratioTo, saveSnapshots, summarize } from './compare';
 import type { Finding } from './diagnose';
@@ -10,7 +10,8 @@ import type { PValue } from './params';
 import { toJson } from './params';
 import type { Plan, PlanNode } from './plan';
 import type { Timing } from './plan';
-import { estimateRatio, flatten, parsePlan, timings } from './plan';
+import { estimateRatio, flatten, parsePlan, relations, timings } from './plan';
+import type { TableInfo } from './api';
 
 /** 見積もりと実績の行数がこの倍率以上ずれていたら印を付ける */
 const MISESTIMATE = 10;
@@ -289,7 +290,12 @@ export function ExplainPanel({
       ) : (
         <>
           {error && <pre className="render-error">{error}</pre>}
-          {shown && !error && <PlanView shown={shown} onKeep={() => keep(shown)} />}
+          {shown && !error && (
+            <>
+              <PlanView shown={shown} onKeep={() => keep(shown)} />
+              <Tables conn={conn} plan={shown.plan} auto={shown.source !== '貼り付けた結果'} />
+            </>
+          )}
         </>
       )}
     </div>
@@ -583,6 +589,148 @@ function PlanRow({
         </>
       )}
     </tr>
+  );
+}
+
+function fmtBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} kB`;
+  return `${n} B`;
+}
+
+/** 日時を「2026-10-16 09:30（3 日前）」の形にする */
+function fmtWhen(iso: string | null): string {
+  if (!iso) return 'なし';
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const text = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${text}（${days <= 0 ? '今日' : `${days} 日前`}）`;
+}
+
+/** 統計が古いとみなす日数 */
+const STALE_DAYS = 30;
+/** 不要な行がこの割合を超えたら知らせる */
+const DEAD_RATIO = 0.2;
+
+/** 計画に出てくる表の情報（行数、サイズ、統計の更新日時、インデックス） */
+function Tables({ conn, plan, auto }: { conn: Connections; plan: Plan; auto: boolean }) {
+  const names = useMemo(() => relations(plan.root), [plan]);
+  const [info, setInfo] = useState<{ tables: TableInfo[]; notFound: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const current = conn.current;
+
+  const load = () => {
+    if (!current || names.length === 0) return;
+    setLoading(true);
+    setError(null);
+    conn.api
+      .tables(current.id, names)
+      .then(setInfo, (e) => {
+        setInfo(null);
+        setError(message(e));
+      })
+      .finally(() => setLoading(false));
+  };
+
+  // DB から取った計画なら、表の情報もすぐに読む（貼り付けた計画は、どの DB のものか分からないので押したときだけ）
+  const key = names.join(',');
+  useEffect(() => {
+    setInfo(null);
+    if (auto) load();
+  }, [key, plan]);
+
+  if (names.length === 0) return null;
+  return (
+    <details className="tables" open>
+      <summary>
+        表の情報
+        {current && (
+          <button type="button" className="link" disabled={loading} onClick={load}>
+            {loading ? '読み込み中…' : `${current.name} から読む`}
+          </button>
+        )}
+      </summary>
+      {!auto && !info && <p className="hint">貼り付けた計画の表の情報を、選んでいる接続先から読みます（本番とはデータ量が違うことに注意）。</p>}
+      {error && <pre className="render-error">{error}</pre>}
+      {info?.notFound.length ? <p className="hint">見つからない表: {info.notFound.join(', ')}</p> : null}
+      {info?.tables.map((t) => (
+        <TableCard key={`${t.schema}.${t.name}`} t={t} />
+      ))}
+    </details>
+  );
+}
+
+function TableCard({ t }: { t: TableInfo }) {
+  const analyzedDaysAgo = t.lastAnalyze ? (Date.now() - new Date(t.lastAnalyze).getTime()) / 86_400_000 : null;
+  const stale = analyzedDaysAgo === null || analyzedDaysAgo > STALE_DAYS;
+  const deadRatio = t.liveRows && t.deadRows !== null ? t.deadRows / Math.max(1, t.liveRows) : 0;
+  return (
+    <div className="table-card">
+      <h4>
+        {t.schema}.{t.name}
+      </h4>
+      <dl className="table-facts">
+        <dt>行数（統計）</dt>
+        <dd>{fmtInt(t.estimatedRows)}</dd>
+        <dt>サイズ</dt>
+        <dd>
+          {fmtBytes(t.totalBytes)}（表 {fmtBytes(t.tableBytes)}、インデックスなど {fmtBytes(t.totalBytes - t.tableBytes)}）
+        </dd>
+        <dt>不要な行</dt>
+        <dd className={deadRatio > DEAD_RATIO ? 'warn-text' : undefined}>
+          {t.deadRows === null ? '-' : `${fmtInt(t.deadRows)} 行（生きている行の ${Math.round(deadRatio * 100)}%）`}
+          {deadRatio > DEAD_RATIO && ' ⚠ VACUUM が追いついていない可能性があります'}
+        </dd>
+        <dt>統計の更新</dt>
+        <dd className={stale ? 'warn-text' : undefined}>
+          {fmtWhen(t.lastAnalyze)}
+          {stale && ` ⚠ ${t.lastAnalyze ? `${STALE_DAYS} 日以上前です` : '一度も更新されていません'}。見積もりがずれる原因になります（ANALYZE ${t.name}）`}
+        </dd>
+        <dt>読まれた回数</dt>
+        <dd>
+          全件読み込み {t.seqScans === null ? '-' : fmtInt(t.seqScans)} 回 / インデックス {t.indexScans === null ? '-' : fmtInt(t.indexScans)} 回
+        </dd>
+      </dl>
+      <table className="index-table">
+        <thead>
+          <tr>
+            <th>インデックス</th>
+            <th>定義</th>
+            <th>サイズ</th>
+            <th title="統計を取り始めてから、このインデックスを使って読んだ回数">使用回数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {t.indexes.length === 0 && (
+            <tr>
+              <td colSpan={4} className="hint">
+                インデックスはありません
+              </td>
+            </tr>
+          )}
+          {t.indexes.map((i) => (
+            <tr key={i.name}>
+              <td>
+                {i.name}
+                {i.primary && <span className="badge">主キー</span>}
+                {!i.primary && i.unique && <span className="badge">一意</span>}
+                {!i.valid && <span className="badge temp">無効</span>}
+              </td>
+              <td>
+                <code>{i.definition.replace(/^CREATE (UNIQUE )?INDEX \S+ ON \S+ (USING btree )?/, '')}</code>
+              </td>
+              <td className="num">{fmtBytes(i.bytes)}</td>
+              <td className={i.scans === 0 ? 'num warn-text' : 'num'} title={i.scans === 0 ? '使われていません（統計を取り始めてから一度も）' : undefined}>
+                {i.scans === null ? '-' : fmtInt(i.scans)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

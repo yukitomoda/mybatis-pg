@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 // PostgreSQL 11.5 で同じクエリを JSON 形式とテキスト形式で EXPLAIN (ANALYZE, BUFFERS) したもの
 import json from './fixtures/plan11.json?raw';
 import text from './fixtures/plan11.txt?raw';
-import { estimateRatio, flatten, parsePlan, timings } from './plan';
+import { estimateRatio, flatten, parsePlan, relations, timings } from './plan';
 
 describe('parsePlan', () => {
   it('JSON 形式とテキスト形式で、同じ木と名前になる', () => {
@@ -103,5 +103,15 @@ describe('JSON 形式の名前', () => {
       ]),
     );
     expect(flatten(p.root).map((r) => r.node.title)).toEqual(['Bitmap Heap Scan on users', 'Bitmap Index Scan on users_status']);
+  });
+});
+
+describe('relations', () => {
+  it('計画に出てくる表を取り出す（インデックスの名前は含めない）', () => {
+    expect(relations(parsePlan(text).root)).toEqual(['orders', 'users']);
+    expect(relations(parsePlan(json).root)).toEqual(['orders', 'users']);
+    const bitmap = parsePlan(`Bitmap Heap Scan on users  (cost=1.00..2.00 rows=1 width=4)
+  ->  Bitmap Index Scan on users_status  (cost=0.00..1.00 rows=1 width=0)`);
+    expect(relations(bitmap.root)).toEqual(['users']);
   });
 });

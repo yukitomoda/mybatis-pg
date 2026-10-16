@@ -22,6 +22,34 @@ export interface ParametersResponse {
   warnings: string[];
 }
 
+export interface IndexInfo {
+  name: string;
+  definition: string;
+  bytes: number;
+  /** インデックスを使って読んだ回数（統計を取り始めてから） */
+  scans: number | null;
+  unique: boolean;
+  primary: boolean;
+  valid: boolean;
+}
+
+export interface TableInfo {
+  schema: string;
+  name: string;
+  /** 統計情報上の行数（ANALYZE や VACUUM で更新される） */
+  estimatedRows: number;
+  totalBytes: number;
+  tableBytes: number;
+  liveRows: number | null;
+  deadRows: number | null;
+  /** 統計情報を最後に更新した日時（手動・自動の新しいほう） */
+  lastAnalyze: string | null;
+  lastVacuum: string | null;
+  seqScans: number | null;
+  indexScans: number | null;
+  indexes: IndexInfo[];
+}
+
 export type OpenTarget = { statementId: string } | { file: string; line?: number | null };
 
 export interface TemplateResponse {
@@ -264,6 +292,8 @@ export function createApi(token: string) {
             `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
+    tables: (connectionId: string, tables: string[]) =>
+      call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
     changes: (since: number, signal?: AbortSignal) =>
       call<{ generation: number }>(`api/changes?since=${since}`, { signal }),

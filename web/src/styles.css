@@ -1350,3 +1350,76 @@ button.open-file:focus-visible {
 .compare-plan h3 {
   margin: 0 0 0.3rem;
 }
+
+/* ---- 表の情報 ---- */
+
+.tables {
+  margin-top: 0.8rem;
+}
+
+.tables summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tables summary .link {
+  font-weight: normal;
+  margin-left: 0.6rem;
+}
+
+.table-card {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.table-card h4 {
+  margin: 0 0 0.3rem;
+  font-family: var(--mono);
+}
+
+.table-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15rem 0.8rem;
+  margin: 0 0 0.4rem;
+  font-size: 13px;
+}
+
+.table-facts dt {
+  color: var(--muted);
+}
+
+.table-facts dd {
+  margin: 0;
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.index-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.index-table th,
+.index-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 0.15rem 0.4rem;
+  vertical-align: top;
+}
+
+.index-table td.num,
+.index-table th:nth-child(n + 3) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.index-table code {
+  word-break: break-all;
+}

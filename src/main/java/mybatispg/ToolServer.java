@@ -260,6 +260,11 @@ public final class ToolServer {
           explain(ex);
         }
         break;
+      case "/api/tables":
+        if (requireMethod(ex, method, "POST")) {
+          tables(ex);
+        }
+        break;
       case "/api/execute":
         if (requireMethod(ex, method, "POST")) {
           execute(ex);
@@ -777,6 +782,35 @@ public final class ToolServer {
     body.put("analyze", options.analyze);
     body.put("generic", r.generic);
     sendJson(ex, 200, body);
+  }
+
+  /** 表の情報。リクエスト: {"connectionId", "tables": ["users", "public.orders", ...]} */
+  private void tables(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    List<String> names = new ArrayList<>();
+    JsonElement list = req.get("tables");
+    if (list == null || !list.isJsonArray()) {
+      sendJson(ex, 400, error("tables は表の名前の配列で指定してください"));
+      return;
+    }
+    for (JsonElement e : list.getAsJsonArray()) {
+      if (e.isJsonPrimitive() && !e.getAsString().trim().isEmpty() && names.size() < 50) {
+        names.add(e.getAsString().trim());
+      }
+    }
+    try {
+      sendJson(ex, 200, TableInfo.read(() -> connections.open(connectionId), names));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+    }
   }
 
   /** EXPLAIN (FORMAT JSON) の結果の Execution Time。なければ 0 */

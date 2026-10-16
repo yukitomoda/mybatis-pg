@@ -12,6 +12,8 @@ export interface Buffers {
 export interface PlanNode {
   /** 表示用の名前（例: Parallel Seq Scan on users u） */
   title: string;
+  /** 読み書きする表（Seq Scan や Insert などの対象）。なければ null */
+  relation: string | null;
   startupCost: number | null;
   totalCost: number | null;
   /** 見積もりの行数（1 回あたり） */
@@ -144,6 +146,7 @@ function jsonNode(n: Json): PlanNode {
   }
   return {
     title: jsonTitle(n),
+    relation: typeof n['Relation Name'] === 'string' ? (n['Schema'] ? `${n['Schema']}.${n['Relation Name']}` : (n['Relation Name'] as string)) : null,
     startupCost: num(n['Startup Cost']),
     totalCost: num(n['Total Cost']),
     planRows: num(n['Plan Rows']),
@@ -191,6 +194,7 @@ function parseTextPlan(text: string): Plan {
     if (m && (isNode || root === null)) {
       const node: PlanNode = {
         title: m[1].trim(),
+        relation: textRelation(m[1].trim()),
         startupCost: Number(m[2]),
         totalCost: Number(m[3]),
         planRows: Number(m[4]),
@@ -234,6 +238,22 @@ function parseTextPlan(text: string): Plan {
   }
   if (!root) throw new Error('EXPLAIN の結果として解釈できません（「(cost=... rows=... width=...)」のある行がありません）');
   return { root, planningMs, executionMs, analyzed: root.actual !== null || root.neverExecuted };
+}
+
+/** テキスト形式の名前から表を取り出す（「Index Scan using idx on users u」なら users）。Bitmap Index Scan の on はインデックス */
+function textRelation(title: string): string | null {
+  if (/^Bitmap Index Scan/.test(title)) return null;
+  const m = / on (\S+)/.exec(title);
+  return m ? m[1] : null;
+}
+
+/** 計画に出てくる表（重なりなし、出てきた順） */
+export function relations(root: PlanNode): string[] {
+  const out: string[] = [];
+  for (const { node } of flatten(root)) {
+    if (node.relation && !out.includes(node.relation)) out.push(node.relation);
+  }
+  return out;
 }
 
 /** 例: shared hit=4222 read=1, temp read=1636 written=2001 */
