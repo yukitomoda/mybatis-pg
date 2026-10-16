@@ -22,9 +22,21 @@ public final class SqlLiteral {
     if (value instanceof Number) {
       return value.toString();
     }
+    if (value instanceof java.sql.Timestamp) {
+      return "TIMESTAMP '" + timestamp((java.sql.Timestamp) value) + "'";
+    }
+    if (value instanceof java.sql.Date) {
+      return "DATE '" + value + "'";
+    }
     if (value instanceof Boolean) {
       return ((Boolean) value) ? "TRUE" : "FALSE";
     }
     return "'" + value.toString().replace("'", "''") + "'";
+  }
+
+  /** 秒の端数がなければ「.0」を付けない */
+  static String timestamp(java.sql.Timestamp t) {
+    String s = t.toString();
+    return s.endsWith(".0") ? s.substring(0, s.length() - 2) : s;
   }
 }

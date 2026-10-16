@@ -4,7 +4,8 @@ import { hasTemplate } from './gen';
 import type { GenContext } from './GenInput';
 import { GenPicker, GenPreview } from './GenInput';
 import type { ParamSchema, Path, PType, PValue } from './params';
-import { TYPE_LABELS, convertType, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
+import type { TextType } from './params';
+import { TYPE_LABELS, convertType, isValidDate, isValidTimestamp, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
 
 interface Props {
   schema: ParamSchema;
@@ -226,16 +227,18 @@ function Editor({
   }
   switch (t) {
     case 'string':
-    case 'number': {
-      const text = value && (value.t === 'string' || value.t === 'number') ? value.v : '';
-      const numeric = value?.t === 'number' || (value === undefined && t === 'number');
+    case 'number':
+    case 'timestamp':
+    case 'date': {
+      const kind = value?.t ?? t;
+      const text = value && 'v' in value && typeof value.v === 'string' ? value.v : '';
       return (
         <TextEditor
           name={name}
           text={text}
-          numeric={numeric}
+          kind={kind as TextType}
           unset={value === undefined}
-          onChange={(v) => set({ t: numeric ? 'number' : 'string', v })}
+          onChange={(v) => set({ t: kind as TextType, v })}
           genKey={genKey}
           gen={gen}
         />
@@ -263,10 +266,17 @@ function Editor({
 }
 
 /** 文字列・数値の入力欄。式を書け、ƒ ボタンから式を挿入できる */
+const PLACEHOLDERS: Record<TextType, string> = {
+  string: '',
+  number: '数値',
+  timestamp: '2026-01-03 23:35:00',
+  date: '2026-01-03',
+};
+
 function TextEditor({
   name,
   text,
-  numeric,
+  kind,
   unset,
   onChange,
   genKey,
@@ -274,7 +284,7 @@ function TextEditor({
 }: {
   name: string;
   text: string;
-  numeric: boolean;
+  kind: TextType;
   unset: boolean;
   onChange: (text: string) => void;
   genKey: string;
@@ -282,8 +292,10 @@ function TextEditor({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
-  // 式は結果で確かめるので、式のある数値は入力の段階では誤りにしない
-  const invalid = numeric && !unset && !hasTemplate(text) && !isValidNumber(text);
+  const numeric = kind === 'number';
+  // 式は結果で確かめるので、式のある値は入力の段階では誤りにしない
+  const valid = kind === 'number' ? isValidNumber : kind === 'timestamp' ? isValidTimestamp : kind === 'date' ? isValidDate : () => true;
+  const invalid = !unset && !hasTemplate(text) && !valid(text);
   const insert = (expr: string) => {
     const el = input.current;
     const start = el?.selectionStart ?? text.length;
@@ -308,7 +320,7 @@ function TextEditor({
           aria-label={`${name} の値`}
           className={invalid ? 'invalid' : undefined}
           inputMode={numeric ? 'decimal' : undefined}
-          placeholder={unset ? '未設定' : numeric ? '数値' : ''}
+          placeholder={unset ? '未設定' : PLACEHOLDERS[kind]}
           value={text}
           onChange={(e) => onChange(e.target.value)}
         />

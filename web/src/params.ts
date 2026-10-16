@@ -2,7 +2,7 @@
 
 /** サーバが返すパラメータの木（ParamNode） */
 export type Usage = 'BIND' | 'RAW' | 'CONDITION' | 'ITERATE';
-export type TypeHint = 'STRING' | 'NUMBER' | 'BOOLEAN';
+export type TypeHint = 'STRING' | 'NUMBER' | 'BOOLEAN' | 'TIMESTAMP' | 'DATE';
 export interface ParamSchema {
   name: string | null;
   usages: Usage[];
@@ -18,6 +18,10 @@ export interface ParamSchema {
 export type PValue =
   | { t: 'string'; v: string }
   | { t: 'number'; v: string }
+  /** 日時（timestamp としてバインドする）。yyyy-MM-dd HH:mm:ss の形の文字列で持つ */
+  | { t: 'timestamp'; v: string }
+  /** 日付（date としてバインドする）。yyyy-MM-dd の形の文字列で持つ */
+  | { t: 'date'; v: string }
   | { t: 'boolean'; v: boolean }
   | { t: 'null' }
   | { t: 'list'; items: PValue[] }
@@ -32,6 +36,8 @@ export type Path = PathSegment[];
 export const TYPE_LABELS: Record<PType, string> = {
   string: '文字列',
   number: '数値',
+  timestamp: '日時',
+  date: '日付',
   boolean: '真偽値',
   null: 'NULL',
   list: 'リスト',
@@ -53,6 +59,8 @@ export function defaultType(schema: ParamSchema | null | undefined): PType {
   if (schema.properties.length > 0) return 'object';
   if (schema.typeHints.includes('NUMBER')) return 'number';
   if (schema.typeHints.includes('BOOLEAN')) return 'boolean';
+  if (schema.typeHints.includes('TIMESTAMP')) return 'timestamp';
+  if (schema.typeHints.includes('DATE')) return 'date';
   return 'string';
 }
 
@@ -61,6 +69,8 @@ export function emptyValue(t: PType): PValue {
     case 'string':
       return { t, v: '' };
     case 'number':
+    case 'timestamp':
+    case 'date':
       return { t, v: '' };
     case 'boolean':
       return { t, v: false };
@@ -73,12 +83,30 @@ export function emptyValue(t: PType): PValue {
   }
 }
 
-/** 型を変える。文字列と数値の間では入力済みの文字を引き継ぐ */
+/** 文字で入力する型（文字列・数値・日時・日付） */
+export type TextType = 'string' | 'number' | 'timestamp' | 'date';
+
+export function isTextType(t: PType): t is TextType {
+  return t === 'string' || t === 'number' || t === 'timestamp' || t === 'date';
+}
+
+/** 型を変える。文字で入力する型どうしでは、入力済みの文字を引き継ぐ */
 export function convertType(value: PValue | undefined, t: PType): PValue {
-  if (value && (value.t === 'string' || value.t === 'number') && (t === 'string' || t === 'number')) {
+  if (value && isTextType(value.t) && isTextType(t) && 'v' in value && typeof value.v === 'string') {
     return { t, v: value.v };
   }
   return emptyValue(t);
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?)?$/;
+
+export function isValidDate(text: string): boolean {
+  return DATE_PATTERN.test(text.trim());
+}
+
+export function isValidTimestamp(text: string): boolean {
+  return TIMESTAMP_PATTERN.test(text.trim());
 }
 
 /**
@@ -252,12 +280,16 @@ export interface Issue {
   message: string;
 }
 
-/** 数値として不正な入力 */
+/** 数値・日時・日付として不正な入力 */
 export function invalidNumbers(value: PValue | undefined, path: Path = []): Issue[] {
   if (!value) return [];
   switch (value.t) {
     case 'number':
       return isValidNumber(value.v) ? [] : [{ path: pathLabel(path), message: `数値として解釈できません: "${value.v}"` }];
+    case 'timestamp':
+      return isValidTimestamp(value.v) ? [] : [{ path: pathLabel(path), message: `日時として解釈できません: "${value.v}"（例: 2026-01-03 23:35:00）` }];
+    case 'date':
+      return isValidDate(value.v) ? [] : [{ path: pathLabel(path), message: `日付として解釈できません: "${value.v}"（例: 2026-01-03）` }];
     case 'list':
       return value.items.flatMap((item, i) => invalidNumbers(item, [...path, i]));
     case 'object':
@@ -291,6 +323,21 @@ export function missingParams(schema: ParamSchema, value: PValue | undefined, pa
 
 // ---- JSON ----
 
+/** 型付きの値（サーバの TypedValues と同じ形） */
+function typed(type: string, text: string): string {
+  return `{"$type":${JSON.stringify(type)},"value":${JSON.stringify(text)}}`;
+}
+
+/** 型付きの値なら、その値にする */
+function fromTyped(fields: [string, PValue][]): PValue | null {
+  if (fields.length !== 2) return null;
+  const type = fields.find(([k]) => k === '$type')?.[1];
+  const value = fields.find(([k]) => k === 'value')?.[1];
+  if (!type || type.t !== 'string' || !value || value.t !== 'string') return null;
+  if (type.v === 'timestamp' || type.v === 'date' || type.v === 'number') return { t: type.v, v: value.v };
+  return null;
+}
+
 /** 数値の文字列をそのまま書き出す JSON 変換 */
 export function toJson(value: PValue | undefined, indent = '  ', depth = 0): string {
   if (value === undefined) return 'null';
@@ -301,7 +348,12 @@ export function toJson(value: PValue | undefined, indent = '  ', depth = 0): str
     case 'string':
       return JSON.stringify(value.v);
     case 'number':
-      return isValidNumber(value.v) ? value.v.trim() : 'null';
+      // 数値として書けない値（計算前の式など）は、型付きの値として文字のまま残す
+      return isValidNumber(value.v) ? value.v.trim() : typed('number', value.v);
+    case 'timestamp':
+    case 'date':
+      // JSON には日時の型がないので、型付きの値として送る（サーバで timestamp・date に直す）
+      return typed(value.t, value.v);
     case 'boolean':
       return value.v ? 'true' : 'false';
     case 'null':
@@ -363,7 +415,7 @@ export function fromJson(text: string): PValue {
         if (text[pos] === ',') pos++;
         else if (text[pos] === '}') {
           pos++;
-          return { t: 'object', fields };
+          return fromTyped(fields) ?? { t: 'object', fields };
         } else fail('"," か "}" が必要です');
       }
     }

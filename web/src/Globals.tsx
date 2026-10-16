@@ -149,6 +149,8 @@ function initialValue(n: ParameterName): PValue {
   if (n.object) return { t: 'object', fields: [] };
   if (n.typeHints.includes('NUMBER')) return { t: 'number', v: '' };
   if (n.typeHints.includes('BOOLEAN')) return { t: 'boolean', v: false };
+  if (n.typeHints.includes('TIMESTAMP')) return { t: 'timestamp', v: '' };
+  if (n.typeHints.includes('DATE')) return { t: 'date', v: '' };
   return { t: 'string', v: '' };
 }
 

@@ -382,7 +382,13 @@ public final class ToolServer {
       sendJson(ex, 400, error("statementId がありません"));
       return;
     }
-    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
 
     SqlRenderer renderer = workspace.renderer();
     if (!renderer.hasStatement(statementId)) {
@@ -402,7 +408,9 @@ public final class ToolServer {
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("index", b.index);
       m.put("property", b.property);
-      m.put("value", b.value);
+      // 日時は画面で読める形にする（Gson の既定の形は読みにくい）
+      m.put("value", b.value instanceof java.sql.Timestamp ? SqlLiteral.timestamp((java.sql.Timestamp) b.value)
+          : b.value instanceof java.util.Date ? b.value.toString() : b.value);
       m.put("literal", SqlLiteral.of(b.value));
       bindings.add(m);
     }
@@ -655,7 +663,13 @@ public final class ToolServer {
       sendJson(ex, 400, error("commit は真偽値、maxRows は整数で指定してください"));
       return;
     }
-    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
 
     SqlRenderer renderer = workspace.renderer();
     if (!renderer.hasStatement(statementId)) {
@@ -737,7 +751,13 @@ public final class ToolServer {
       sendJson(ex, 400, error("analyze・buffers・readOnly は真偽値、timeoutSeconds は整数で指定してください"));
       return;
     }
-    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
     SqlRenderer renderer = workspace.renderer();
     if (!renderer.hasStatement(statementId)) {
       sendJson(ex, 404, error("statement がありません: " + statementId));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema, PValue } from './params';
-import { defaultType, fromJson, getAt, invalidNumbers, missingParams, inheritedAt, mergeValues, overrideAt, setAt, toJson, withDefaults } from './params';
+import { convertType, defaultType, fromJson, getAt, invalidNumbers, missingParams, inheritedAt, mergeValues, overrideAt, setAt, toJson, withDefaults } from './params';
 import { tidySql } from './sql';
 
 const node = (name: string, extra: Partial<ParamSchema> = {}): ParamSchema => ({
@@ -151,5 +151,32 @@ describe('overrideAt と inheritedAt', () => {
     // 個別で cond を NULL にしていれば、その下は重ならない
     expect(inheritedAt(fromJson('{"cond":null}'), effective, ['cond', 'status'])).toBeUndefined();
     expect(inheritedAt(fromJson('{"cond":{}}'), effective, ['cond', 'status'])).toEqual({ t: 'number', v: '1' });
+  });
+});
+
+describe('日時・日付', () => {
+  it('型付きの値として JSON に書き、読み戻せる', () => {
+    const v: PValue = {
+      t: 'object',
+      fields: [
+        ['from', { t: 'timestamp', v: '2026-01-03 23:35' }],
+        ['day', { t: 'date', v: '2026-01-03' }],
+        ['n', { t: 'number', v: '{{unixtime}}' }],
+      ],
+    };
+    const json = toJson(v, '');
+    expect(json).toBe(
+      '{"from":{"$type":"timestamp","value":"2026-01-03 23:35"},"day":{"$type":"date","value":"2026-01-03"},"n":{"$type":"number","value":"{{unixtime}}"}}',
+    );
+    expect(fromJson(json)).toEqual(v);
+    // キーが他にもあれば、普通のオブジェクト
+    expect(fromJson('{"$type":"date","value":"x","y":1}').t).toBe('object');
+  });
+
+  it('形の誤りを知らせ、文字の型どうしでは入力を引き継ぐ', () => {
+    const v = fromJson('{"a":{"$type":"timestamp","value":"2026/01/03"},"b":{"$type":"date","value":"2026-01-03 10:00"},"c":{"$type":"timestamp","value":"2026-01-03T10:00:00.123"}}');
+    expect(invalidNumbers(v).map((i) => i.path)).toEqual(['a', 'b']);
+    expect(convertType({ t: 'string', v: '2026-01-03' }, 'date')).toEqual({ t: 'date', v: '2026-01-03' });
+    expect(defaultType(node('x', { typeHints: ['TIMESTAMP'] }))).toBe('timestamp');
   });
 });

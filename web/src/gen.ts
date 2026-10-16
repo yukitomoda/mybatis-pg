@@ -365,7 +365,9 @@ export function resolveTemplates(value: PValue | undefined, cache: GenCache, now
   const walk = (v: PValue, path: Path): PValue => {
     switch (v.t) {
       case 'string':
-      case 'number': {
+      case 'number':
+      case 'timestamp':
+      case 'date': {
         if (!hasTemplate(v.v)) return v.v.includes('\\{{') ? { t: v.t, v: unescape(v.v) } : v;
         const label = pathLabel(path);
         try {

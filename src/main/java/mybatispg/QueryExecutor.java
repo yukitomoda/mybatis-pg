@@ -320,6 +320,12 @@ public final class QueryExecutor {
     if (value instanceof Boolean) {
       return "bool";
     }
+    if (value instanceof java.sql.Timestamp) {
+      return "timestamp";
+    }
+    if (value instanceof java.sql.Date) {
+      return "date";
+    }
     return "unknown";
   }
 

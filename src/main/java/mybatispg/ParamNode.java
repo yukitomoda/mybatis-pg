@@ -28,7 +28,11 @@ public final class ParamNode {
 
   /** 式から推測した値の型 */
   public enum TypeHint {
-    STRING, NUMBER, BOOLEAN
+    STRING, NUMBER, BOOLEAN,
+    /** jdbcType=TIMESTAMP（画面では日時の型にする） */
+    TIMESTAMP,
+    /** jdbcType=DATE（画面では日付の型にする） */
+    DATE
   }
 
   private final String name;

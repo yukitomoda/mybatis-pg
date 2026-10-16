@@ -327,11 +327,13 @@ public final class ParameterExtractor {
       case "LONGNVARCHAR":
       case "CLOB":
       case "NCLOB":
-      // 日付はパラメータでは文字列で渡す
-      case "DATE":
+      // 時刻だけの値は文字列で渡す
       case "TIME":
-      case "TIMESTAMP":
         return ParamNode.TypeHint.STRING;
+      case "DATE":
+        return ParamNode.TypeHint.DATE;
+      case "TIMESTAMP":
+        return ParamNode.TypeHint.TIMESTAMP;
       default:
         return null;
     }
