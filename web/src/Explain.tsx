@@ -1,10 +1,13 @@
 // EXPLAIN タブ: 計画を取得（または貼り付け）して、ツリーで表示する
 import { Fragment, useMemo, useState } from 'react';
+import type { Snapshot } from './compare';
+import { loadSnapshots, ratioTo, saveSnapshots, summarize } from './compare';
 import type { Finding } from './diagnose';
 import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import type { PValue } from './params';
+import { toJson } from './params';
 import type { Plan, PlanNode } from './plan';
 import type { Timing } from './plan';
 import { estimateRatio, flatten, parsePlan, timings } from './plan';
@@ -69,7 +72,44 @@ export function ExplainPanel({
   const [error, setError] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
   const [pasted, setPasted] = useState('');
+  const [snapshots, setSnapshots] = useState<Snapshot[]>(() => loadSnapshots(statementId));
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [comparing, setComparing] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const current = conn.current;
+
+  const updateSnapshots = (next: Snapshot[]) => {
+    setSnapshots(next);
+    setStorageError(saveSnapshots(statementId, next));
+  };
+
+  /** 表示している結果を、比較用に残す */
+  const keep = (s: Shown) => {
+    const now = new Date();
+    const time = now.toTimeString().slice(0, 8);
+    const name = window.prompt('比較用に残す名前（パラメータや変更の内容など）:', `${time} ${s.source.replace(/（.*$/, '')}`);
+    if (name === null) return;
+    const snapshot: Snapshot = {
+      id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: name.trim() || time,
+      createdAt: now.toISOString(),
+      source: s.source,
+      raw: s.raw,
+      parameters: toJson(value ?? { t: 'object', fields: [] }, ''),
+      generic: s.generic,
+    };
+    updateSnapshots([...snapshots, snapshot]);
+    setChecked((prev) => new Set(prev).add(snapshot.id));
+  };
+
+  const toggleChecked = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const compared = snapshots.filter((s) => checked.has(s.id));
 
   const set = (o: Partial<Options>) => {
     const next = { ...options, ...o };
@@ -171,8 +211,171 @@ export function ExplainPanel({
         </div>
       )}
 
-      {error && <pre className="render-error">{error}</pre>}
-      {shown && !error && <PlanView shown={shown} />}
+      {snapshots.length > 0 && (
+        <details className="snapshots" open>
+          <summary>比較用に残した結果 {snapshots.length} 件</summary>
+          <ul>
+            {snapshots.map((s) => (
+              <li key={s.id}>
+                <label className="check">
+                  <input type="checkbox" checked={checked.has(s.id)} onChange={() => toggleChecked(s.id)} />
+                  <span className="snapshot-name">{s.name}</span>
+                </label>
+                <span className="hint snapshot-params" title={s.parameters}>
+                  {s.parameters}
+                </span>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    const name = window.prompt('名前:', s.name);
+                    if (name) updateSnapshots(snapshots.map((x) => (x.id === s.id ? { ...x, name } : x)));
+                  }}
+                >
+                  名前変更
+                </button>
+                <button
+                  type="button"
+                  className="icon"
+                  aria-label={`${s.name} を削除`}
+                  onClick={() => {
+                    updateSnapshots(snapshots.filter((x) => x.id !== s.id));
+                    setChecked((prev) => {
+                      const next = new Set(prev);
+                      next.delete(s.id);
+                      return next;
+                    });
+                  }}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="actions">
+            <button type="button" disabled={compared.length < 2} onClick={() => setComparing(true)}>
+              選んだ {compared.length} 件を比べる
+            </button>
+            {comparing && (
+              <button type="button" onClick={() => setComparing(false)}>
+                比較を閉じる
+              </button>
+            )}
+            {compared.length < 2 && <span className="hint">2 件以上選ぶと比べられます。</span>}
+          </div>
+          {storageError && <p className="error-text">{storageError}</p>}
+        </details>
+      )}
+
+      {comparing && compared.length >= 2 ? (
+        <Comparison snapshots={compared} />
+      ) : (
+        <>
+          {error && <pre className="render-error">{error}</pre>}
+          {shown && !error && <PlanView shown={shown} onKeep={() => keep(shown)} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 残した結果を並べて比べる */
+function Comparison({ snapshots }: { snapshots: Snapshot[] }) {
+  const plans = useMemo(() => snapshots.map((s) => parsePlan(s.raw)), [snapshots]);
+  const sums = useMemo(() => plans.map(summarize), [plans]);
+  /** 数値の行。小さいほど良い値は、1 つ目に対する倍率も出す */
+  const numberRow = (label: string, get: (i: number) => number | null, unit: string, lowerIsBetter = true) => {
+    const values = sums.map((_, i) => get(i));
+    const present = values.filter((v): v is number => v !== null);
+    const best = present.length > 1 ? Math.min(...present) : null;
+    return (
+      <tr>
+        <th>{label}</th>
+        {values.map((v, i) => {
+          const r = i === 0 ? null : ratioTo(values[0], v);
+          return (
+            <td key={i} className={lowerIsBetter && v !== null && v === best && present.length > 1 ? 'num best' : 'num'}>
+              {v === null ? '-' : `${unit === ' ms' ? fmtMs(v) : fmtInt(Math.round(v))}${unit}`}
+              {r !== null && <span className={r < 0.9 ? 'ratio better' : r > 1.1 ? 'ratio worse' : 'ratio'}>×{r.toFixed(2)}</span>}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
+  return (
+    <div className="comparison">
+      <div className="grid-scroll">
+        <table className="compare-table">
+          <thead>
+            <tr>
+              <th />
+              {snapshots.map((s) => (
+                <th key={s.id} title={s.parameters}>
+                  {s.name}
+                  <span className="hint">{s.source}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {numberRow('実行時間', (i) => sums[i].executionMs, ' ms')}
+            {numberRow('計画時間', (i) => sums[i].planningMs, ' ms')}
+            {numberRow('コスト（見積もり）', (i) => sums[i].totalCost, '')}
+            {numberRow('キャッシュから読んだブロック', (i) => sums[i].hit, '')}
+            {numberRow('ディスクから読んだブロック', (i) => sums[i].read, '')}
+            {numberRow('一時ファイルのブロック', (i) => sums[i].temp, '')}
+            {numberRow('結果の行数', (i) => sums[i].rows, '', false)}
+            <tr>
+              <th>汎用プラン</th>
+              {snapshots.map((s) => (
+                <td key={s.id}>{s.generic === null ? '-' : s.generic ? '汎用プラン' : '値ごとの計画'}</td>
+              ))}
+            </tr>
+            <tr>
+              <th>時間のかかったノード</th>
+              {sums.map((s, i) => (
+                <td key={i} className="list">
+                  {s.hotNodes.length === 0 ? '-' : s.hotNodes.map((h) => `${h.title}（${Math.round(h.share * 100)}%）`).join('\n')}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th>表の読み方</th>
+              {sums.map((s, i) => (
+                <td key={i} className="list">
+                  {s.scans.join('\n') || '-'}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th>指摘</th>
+              {sums.map((s, i) => (
+                <td key={i}>
+                  要確認 {s.findings.high} / 確認 {s.findings.medium} / 参考 {s.findings.info}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th>パラメータ</th>
+              {snapshots.map((s) => (
+                <td key={s.id} className="list params-cell">
+                  {s.parameters}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="hint">×の数字は、左端の結果に対する倍率です（時間やブロックは小さいほど良い）。</p>
+      <div className="compare-plans">
+        {snapshots.map((s, i) => (
+          <div key={s.id} className="compare-plan">
+            <h3>{s.name}</h3>
+            <PlanView shown={{ plan: plans[i], raw: s.raw, source: s.source, generic: s.generic }} idPrefix={`cmp${i}`} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -185,7 +388,7 @@ function fmtInt(n: number): string {
   return n.toLocaleString('ja-JP');
 }
 
-function PlanView({ shown }: { shown: Shown }) {
+function PlanView({ shown, onKeep, idPrefix = 'main' }: { shown: Shown; onKeep?: () => void; idPrefix?: string }) {
   const { plan } = shown;
   const rows = useMemo(() => flatten(plan.root), [plan]);
   const times = useMemo(() => timings(plan.root), [plan]);
@@ -208,7 +411,7 @@ function PlanView({ shown }: { shown: Shown }) {
   /** 指摘のノードを開いて、見える位置まで動かす */
   const reveal = (path: string) => {
     setOpen((prev) => new Set(prev).add(path));
-    requestAnimationFrame(() => document.getElementById(`plan-node-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    requestAnimationFrame(() => document.getElementById(`plan-node-${idPrefix}-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   };
 
   return (
@@ -222,9 +425,16 @@ function PlanView({ shown }: { shown: Shown }) {
         )}
         {plan.planningMs !== null && <span>計画時間 {fmtMs(plan.planningMs)} ms</span>}
         {!plan.analyzed && <span className="hint">見積もりのみ（ANALYZE なし）</span>}
-        <button type="button" onClick={() => navigator.clipboard.writeText(shown.raw).catch(() => undefined)}>
-          元の結果をコピー
-        </button>
+        <span className="plan-actions">
+          {onKeep && (
+            <button type="button" onClick={onKeep}>
+              比較用に残す
+            </button>
+          )}
+          <button type="button" onClick={() => navigator.clipboard.writeText(shown.raw).catch(() => undefined)}>
+            元の結果をコピー
+          </button>
+        </span>
       </div>
       {shown.generic !== null && (
         <div className={shown.generic ? 'notes warn generic' : 'notes info generic'}>
@@ -269,7 +479,7 @@ function PlanView({ shown }: { shown: Shown }) {
           <tbody>
             {rows.map(({ node, depth, path }) => (
               <Fragment key={path}>
-                <PlanRow path={path} mark={marks.get(path)} node={node} timing={times.get(node)!} depth={depth} total={total} analyzed={plan.analyzed} open={open.has(path)} onToggle={() => toggle(path)} />
+                <PlanRow path={path} idPrefix={idPrefix} mark={marks.get(path)} node={node} timing={times.get(node)!} depth={depth} total={total} analyzed={plan.analyzed} open={open.has(path)} onToggle={() => toggle(path)} />
                 {open.has(path) && (
                   <tr className="plan-details">
                     <td colSpan={columns}>
@@ -289,6 +499,7 @@ function PlanView({ shown }: { shown: Shown }) {
 
 function PlanRow({
   path,
+  idPrefix,
   mark,
   node,
   timing,
@@ -299,6 +510,7 @@ function PlanRow({
   onToggle,
 }: {
   path: string;
+  idPrefix: string;
   mark: Finding['severity'] | undefined;
   node: PlanNode;
   timing: Timing;
@@ -313,7 +525,7 @@ function PlanRow({
   const ratio = estimateRatio(node);
   const off = ratio !== null && (ratio >= MISESTIMATE || ratio <= 1 / MISESTIMATE);
   return (
-    <tr id={`plan-node-${path}`} className={`plan-row${open ? ' open' : ''}`} onClick={onToggle}>
+    <tr id={`plan-node-${idPrefix}-${path}`} className={`plan-row${open ? ' open' : ''}`} onClick={onToggle}>
       <td className="plan-node" style={{ paddingLeft: `${0.4 + depth * 1.1}rem` }}>
         <span className="twisty">{open ? '▾' : '▸'}</span>
         {mark && <span className={`finding-mark ${mark}`} title="指摘があります" />}

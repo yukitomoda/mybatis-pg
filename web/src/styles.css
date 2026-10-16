@@ -1032,8 +1032,10 @@ button.open-file:focus-visible {
   margin-bottom: 0.4rem;
 }
 
-.plan-summary button {
+.plan-summary .plan-actions {
   margin-left: auto;
+  display: inline-flex;
+  gap: 0.3rem;
 }
 
 .plan-scroll {
@@ -1218,4 +1220,133 @@ button.open-file:focus-visible {
 
 .notes.generic p {
   margin: 0.3rem 0 0;
+}
+
+/* ---- 比較 ---- */
+
+.snapshots {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.snapshots summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.snapshots ul {
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+
+.snapshots li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.snapshot-name {
+  white-space: nowrap;
+}
+
+.snapshot-params {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.snapshots .actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.compare-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare-table th,
+.compare-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.25rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare-table thead th {
+  position: static;
+  min-width: 12rem;
+}
+
+.compare-table thead th .hint {
+  display: block;
+  font-weight: normal;
+  font-size: 11px;
+}
+
+.compare-table tbody th {
+  color: var(--muted);
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.compare-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.compare-table td.best {
+  font-weight: 700;
+}
+
+.compare-table td.list {
+  white-space: pre-line;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.compare-table td.params-cell {
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 24rem;
+}
+
+.ratio {
+  margin-left: 0.4rem;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ratio.better {
+  color: var(--ok);
+}
+
+.ratio.worse {
+  color: var(--danger);
+}
+
+.compare-plans {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  margin-top: 0.8rem;
+}
+
+.compare-plan {
+  flex: 1 0 32rem;
+  min-width: 0;
+}
+
+.compare-plan h3 {
+  margin: 0 0 0.3rem;
 }
