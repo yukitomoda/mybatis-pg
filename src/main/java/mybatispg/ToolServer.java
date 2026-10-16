@@ -16,11 +16,11 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -85,13 +85,13 @@ public final class ToolServer {
     this.token = token.getBytes(StandardCharsets.UTF_8);
     this.server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
     this.port = server.getAddress().getPort();
-    this.allowedHosts = new HashSet<>(Arrays.asList("127.0.0.1:" + this.port, "localhost:" + this.port));
-    this.allowedOrigins = new HashSet<>(Arrays.asList("http://127.0.0.1:" + this.port, "http://localhost:" + this.port));
-    // リバースプロキシ（code-server の /proxy/{port}/ など）経由では、外部のホスト名と Origin のまま届く
+    // 起動した後に公開 URL を足すことがあるので、スレッドから安全に読み書きできる集合にする
+    this.allowedHosts = ConcurrentHashMap.newKeySet();
+    this.allowedHosts.addAll(Arrays.asList("127.0.0.1:" + this.port, "localhost:" + this.port));
+    this.allowedOrigins = ConcurrentHashMap.newKeySet();
+    this.allowedOrigins.addAll(Arrays.asList("http://127.0.0.1:" + this.port, "http://localhost:" + this.port));
     for (URI url : publicUrls) {
-      String hostPort = url.getHost().toLowerCase() + (url.getPort() < 0 ? "" : ":" + url.getPort());
-      allowedHosts.add(hostPort);
-      allowedOrigins.add(url.getScheme().toLowerCase() + "://" + hostPort);
+      addPublicUrl(url);
     }
     // /api/changes が応答を保留する間もスレッドを占有するため、必要に応じて増やせるプールにする
     this.executor = Executors.newCachedThreadPool(r -> {
@@ -115,6 +115,16 @@ public final class ToolServer {
     ToolServer s = new ToolServer(workspace, connections, globals, port, token, publicUrls);
     s.server.start();
     return s;
+  }
+
+  /**
+   * リバースプロキシ（code-server の /proxy/{port}/ など）経由で公開する URL を足す。
+   * そのホスト名と Origin からのアクセスも許可する（プロキシ経由では外部のホスト名と Origin のまま届く）。
+   */
+  public void addPublicUrl(URI url) {
+    String hostPort = url.getHost().toLowerCase() + (url.getPort() < 0 ? "" : ":" + url.getPort());
+    allowedHosts.add(hostPort);
+    allowedOrigins.add(url.getScheme().toLowerCase() + "://" + hostPort);
   }
 
   /** ファイルを開くエディタ。設定しなければ開けない */

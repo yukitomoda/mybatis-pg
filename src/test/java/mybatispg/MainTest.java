@@ -41,4 +41,24 @@ class MainTest {
     Main.migrateConfig(home.resolve(".mybatis-xml-editor"), home.resolve(".mybatis-pg"));
     assertTrue(!Files.exists(home.resolve(".mybatis-pg")));
   }
+
+  @Test
+  void ポートを指定しなければ空いているポートを順に使う() throws Exception {
+    MapperWorkspace ws = MapperWorkspace.ofPaths(java.util.Collections.singletonList(java.nio.file.Paths.get("src/test/resources/mappers")));
+    ToolServer a = Main.startServer(ws, ConnectionStore.inMemory(), GlobalStore.inMemory(), null, "t");
+    ToolServer b = Main.startServer(ws, ConnectionStore.inMemory(), GlobalStore.inMemory(), null, "t");
+    try {
+      assertTrue(a.getPort() >= 7171 && a.getPort() < 7271, String.valueOf(a.getPort()));
+      assertTrue(b.getPort() > a.getPort(), a.getPort() + " " + b.getPort());
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }
+
+  @Test
+  void 公開URLのポートを置き換える() {
+    assertEquals("https://ide.example.com/proxy/7172/", Main.resolvePort("https://ide.example.com/proxy/{port}/", 7172));
+    assertEquals("https://ide.example.com/proxy/7172/", Main.resolvePort("https://ide.example.com/proxy/{{port}}/", 7172));
+  }
 }

@@ -51,6 +51,7 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
   - フロントはReact + Vite。ビルド結果をjarに同梱する（社内ネットワークでCDNが使えない場合に備える）
   - XMLはブラウザで編集しないため、エディタ部品はSQLの表示とJSONの表示に使う程度。軽いCodeMirror 6で足りる見込み
   - 必須のセキュリティ対策: `127.0.0.1` のみにbind、Hostヘッダ検証、起動時トークンの検証、CORS不許可
+  - ポート: `--port` を省略すると7171から順に空いているポートを使い、プロジェクトごとなどに複数起動できる。`--port 0` ならOSが選ぶ。リバースプロキシ経由の公開URL（`--public-url`）には `{port}`（code-serverの `{{port}}` も）を書け、使ったポートに置き換える
   - ネイティブ（JavaFX等）やElectron / Tauriは採らない
 - **型**: Java型なしで動くことを必須とする
   - パラメータは `Map` / `List` / プリミティブで渡す

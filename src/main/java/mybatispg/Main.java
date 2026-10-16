@@ -1,6 +1,7 @@
 package mybatispg;
 
 import java.io.IOException;
+import java.net.BindException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,8 +14,8 @@ import java.util.List;
 /**
  * 使い方:
  * <pre>
- * java -jar mybatis-pg.jar [--port 番号] [--public-url URL] --project プロジェクトのディレクトリ
- * java -jar mybatis-pg.jar [--port 番号] [--public-url URL] mapperのファイルまたはディレクトリ...
+ * java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ
+ * java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...
  * </pre>
  */
 public final class Main {
@@ -28,8 +29,9 @@ public final class Main {
       + "  java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ\n"
       + "  java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...\n"
       + "オプション:\n"
-      + "  --port 番号          待ち受けるポート（既定: 7171）\n"
-      + "  --public-url URL     リバースプロキシ経由で公開する URL（例: https://example.com/proxy/7171/）。複数指定可\n"
+      + "  --port 番号          待ち受けるポート。省略すると 7171 から順に空いているポートを使う（複数起動できる）。0 なら OS が選ぶ\n"
+      + "  --public-url URL     リバースプロキシ経由で公開する URL。{port} は使ったポートに置き換える\n"
+      + "                       （例: https://example.com/proxy/{port}/）。複数指定可\n"
       + "  --editor コマンド    ファイルを開くコマンド。{file} と {line} を置き換える（既定: VS Code の code コマンドを探して使う）\n"
       + "                       例: --editor \"code --goto {file}:{line}\"\n"
       + "  --version            バージョンを表示して終了する";
@@ -38,10 +40,11 @@ public final class Main {
   }
 
   public static void main(String[] args) throws Exception {
-    int port = DEFAULT_PORT;
+    // null なら空いているポートを探す
+    Integer port = null;
     Path project = null;
     List<Path> sources = new ArrayList<>();
-    List<URI> publicUrls = new ArrayList<>();
+    List<String> publicUrls = new ArrayList<>();
     String editorCommand = null;
     for (int i = 0; i < args.length; i++) {
       if ("--version".equals(args[i])) {
@@ -52,7 +55,7 @@ public final class Main {
       } else if ("--editor".equals(args[i]) && i + 1 < args.length) {
         editorCommand = args[++i];
       } else if ("--public-url".equals(args[i]) && i + 1 < args.length) {
-        publicUrls.add(publicUrl(args[++i]));
+        publicUrls.add(args[++i]);
       } else if ("--project".equals(args[i]) && i + 1 < args.length) {
         project = absolute(args[++i]);
       } else if (args[i].startsWith("-")) {
@@ -106,13 +109,19 @@ public final class Main {
     System.out.println("共通パラメータ: " + globalsFile);
 
     String token = newToken();
-    ToolServer server = ToolServer.start(workspace, connections, globals, port, token, publicUrls);
+    ToolServer server = startServer(workspace, connections, globals, port, token);
+    List<URI> urls = new ArrayList<>();
+    for (String template : publicUrls) {
+      URI url = publicUrl(resolvePort(template, server.getPort()));
+      server.addPublicUrl(url);
+      urls.add(url);
+    }
     EditorLauncher editor = editorCommand != null ? EditorLauncher.of(editorCommand) : EditorLauncher.detect(System.getenv());
     server.setEditor(editor);
     System.out.println(editor.isAvailable() ? "エディタ: " + editor.describe()
         : "エディタ: コマンドが見つからないため、画面からファイルを開けません（--editor で指定できます）");
     System.out.println("ブラウザで開いてください: http://127.0.0.1:" + server.getPort() + "/?token=" + token);
-    for (URI url : publicUrls) {
+    for (URI url : urls) {
       System.out.println("公開 URL: " + url + "?token=" + token);
     }
   }
@@ -145,6 +154,33 @@ public final class Main {
     for (LoadError e : renderer.getLoadErrors()) {
       System.out.println("  " + e);
     }
+  }
+
+  /** 空いているポートを探すときに試す数（7171〜7270） */
+  private static final int PORT_TRIES = 100;
+
+  /**
+   * サーバを起動する。ポートの指定がなければ、既定のポートから順に空いているポートを探す（複数起動できるようにする）。
+   */
+  static ToolServer startServer(MapperWorkspace workspace, ConnectionStore connections, GlobalStore globals,
+      Integer port, String token) throws IOException {
+    if (port != null) {
+      return ToolServer.start(workspace, connections, globals, port, token);
+    }
+    for (int p = DEFAULT_PORT; p < DEFAULT_PORT + PORT_TRIES; p++) {
+      try {
+        return ToolServer.start(workspace, connections, globals, p, token);
+      } catch (BindException e) {
+        // 使われているので次を試す
+      }
+    }
+    throw new IOException(DEFAULT_PORT + "〜" + (DEFAULT_PORT + PORT_TRIES - 1)
+        + " のポートがすべて使われています。--port で指定してください");
+  }
+
+  /** 公開 URL の {port}（code-server の {{port}} も）を、使ったポートに置き換える */
+  static String resolvePort(String template, int port) {
+    return template.replace("{{port}}", String.valueOf(port)).replace("{port}", String.valueOf(port));
   }
 
   /** 末尾を / にそろえる（画面は相対パスで API を呼ぶため、ディレクトリとして開く必要がある） */
