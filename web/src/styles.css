@@ -983,3 +983,141 @@ button.open-file:focus-visible {
   display: inline-flex;
   gap: 0.3rem;
 }
+
+/* ---- EXPLAIN ---- */
+
+.explain-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+
+.explain-options input[type='number'] {
+  width: 4.5rem;
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+
+.explain > .hint {
+  margin: 0.2rem 0;
+  font-size: 12px;
+}
+
+.explain-paste textarea {
+  width: 100%;
+  min-height: 12rem;
+}
+
+.explain-paste .actions {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0.6rem;
+}
+
+.plan {
+  margin-top: 0.6rem;
+}
+
+.plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.plan-summary button {
+  margin-left: auto;
+}
+
+.plan-scroll {
+  max-height: none;
+}
+
+.plan-table td,
+.plan-table th {
+  white-space: nowrap;
+}
+
+.plan-table .num {
+  text-align: right;
+}
+
+.plan-row {
+  cursor: pointer;
+}
+
+.plan-row:hover td {
+  background: var(--code-bg);
+}
+
+.plan-node .twisty {
+  display: inline-block;
+  width: 0.9rem;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.plan-table td.self-time {
+  position: relative;
+  min-width: 7.5rem;
+}
+
+.self-time .bar {
+  position: absolute;
+  inset: 2px auto 2px 0;
+  background: var(--danger);
+  border-radius: 2px;
+}
+
+.self-time .value {
+  position: relative;
+}
+
+.self-time .share {
+  margin-left: 0.4rem;
+  color: var(--muted);
+}
+
+.plan-table td.misestimate {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.disk-read {
+  color: var(--warn);
+}
+
+.badge.temp {
+  margin-left: 0.3rem;
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.plan-details td {
+  white-space: normal;
+  background: var(--code-bg);
+}
+
+.plan-detail-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15rem 0.8rem;
+  margin: 0.2rem 0;
+}
+
+.plan-detail-list dt {
+  color: var(--muted);
+}
+
+.plan-detail-list dd {
+  margin: 0;
+  word-break: break-all;
+  white-space: pre-wrap;
+}

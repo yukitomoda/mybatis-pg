@@ -1,0 +1,39 @@
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=15283.46..15283.48 rows=10 width=26) (actual time=57.533..64.805 rows=10 loops=1)
+   Buffers: shared hit=4222, temp read=1636 written=2001
+   ->  Sort  (cost=15283.46..15325.18 rows=16690 width=26) (actual time=57.532..57.533 rows=10 loops=1)
+         Sort Key: (sum(o.amount)) DESC
+         Sort Method: top-N heapsort  Memory: 26kB
+         Buffers: shared hit=2263, temp read=825 written=998
+         ->  Finalize GroupAggregate  (cost=12767.88..14922.79 rows=16690 width=26) (actual time=51.422..56.430 rows=13756 loops=1)
+               Group Key: u.id
+               Buffers: shared hit=2263, temp read=825 written=998
+               ->  Gather Merge  (cost=12767.88..14682.26 rows=14726 width=26) (actual time=51.417..61.670 rows=13770 loops=1)
+                     Workers Planned: 1
+                     Workers Launched: 1
+                     Buffers: shared hit=4222, temp read=1636 written=2001
+                     ->  Partial GroupAggregate  (cost=11767.87..12025.58 rows=14726 width=26) (actual time=49.829..51.989 rows=6885 loops=2)
+                           Group Key: u.id
+                           Buffers: shared hit=4222, temp read=1636 written=2001
+                           ->  Sort  (cost=11767.87..11804.69 rows=14726 width=22) (actual time=49.819..50.660 rows=10317 loops=2)
+                                 Sort Key: u.id
+                                 Sort Method: external merge  Disk: 368kB
+                                 Worker 0:  Sort Method: external merge  Disk: 368kB
+                                 Buffers: shared hit=4222, temp read=1636 written=2001
+                                 ->  Parallel Hash Join  (cost=4218.43..10139.38 rows=14726 width=22) (actual time=39.760..47.439 rows=10317 loops=2)
+                                       Hash Cond: (o.user_id = u.id)
+                                       Buffers: shared hit=4195, temp read=1449 written=1776
+                                       ->  Parallel Seq Scan on orders o  (cost=0.00..3675.71 rows=176471 width=12) (actual time=0.010..10.749 rows=150000 loops=2)
+                                             Buffers: shared hit=1911
+                                       ->  Parallel Hash  (cost=4037.71..4037.71 rows=9818 width=18) (actual time=12.143..12.144 rows=6878 loops=2)
+                                             Buckets: 1024  Batches: 32  Memory Usage: 72kB
+                                             Buffers: shared hit=2273, temp written=248
+                                             ->  Parallel Seq Scan on users u  (cost=0.00..4037.71 rows=9818 width=18) (actual time=0.011..8.266 rows=6878 loops=2)
+                                                   Filter: ((name ~~ '%7%'::text) AND (status = 1))
+                                                   Rows Removed by Filter: 93122
+                                                   Buffers: shared hit=2273
+ Planning Time: 0.411 ms
+ Execution Time: 65.052 ms
+(35 rows)
+

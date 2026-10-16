@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLWarning;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -108,6 +109,85 @@ public final class QueryExecutor {
       } else {
         c.rollback();
       }
+      return result;
+    } catch (SQLException | RuntimeException e) {
+      String rollback = rollback(c);
+      throw new ExecutionException(Errors.describe(e) + hint(e) + "\n" + rollback, e);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない
+      }
+    }
+  }
+
+  public static final class ExplainOptions {
+    /** true なら実際に実行して計測する（EXPLAIN ANALYZE）。トランザクションは必ずロールバックする */
+    public boolean analyze = true;
+    /** 読んだブロック数も出す（ANALYZE のときだけ） */
+    public boolean buffers = true;
+    /** 読み取り専用のトランザクションで実行する（更新系はエラーになる） */
+    public boolean readOnly;
+    public int timeoutSeconds = 300;
+  }
+
+  public static final class ExplainResult {
+    /** EXPLAIN を付ける前の ? 付き SQL */
+    public final String sql;
+    /** EXPLAIN (FORMAT JSON) の結果をそのまま */
+    public final String plan;
+    public final List<String> warnings = new ArrayList<>();
+    public long elapsedMillis;
+
+    ExplainResult(String sql, String plan) {
+      this.sql = sql;
+      this.plan = plan;
+    }
+  }
+
+  /**
+   * 本番と同じ ? 付き SQL とバインド値で EXPLAIN を実行する。結果は JSON 形式。
+   * ANALYZE では SQL を実際に実行するが、トランザクションは必ずロールバックする。
+   */
+  public static ExplainResult explain(SqlRenderer renderer, String statementId, Object parameters,
+      ConnectionFactory connections, ExplainOptions options) throws ExecutionException {
+    SqlRenderer.Bound bound = renderer.bind(statementId, parameters);
+    // BUFFERS は ANALYZE と一緒でないと使えない（PostgreSQL 11）
+    String explain = "EXPLAIN (ANALYZE " + options.analyze + ", BUFFERS " + (options.analyze && options.buffers)
+        + ", FORMAT JSON) ";
+
+    Connection c;
+    try {
+      c = connections.open();
+    } catch (SQLException | RuntimeException e) {
+      throw new ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+    try {
+      c.setAutoCommit(false);
+      if (options.readOnly) {
+        // トランザクションの最初の文でなければならない
+        try (Statement s = c.createStatement()) {
+          s.execute("SET TRANSACTION READ ONLY");
+        }
+      }
+      long start = System.nanoTime();
+      String plan;
+      try (PreparedStatement ps = c.prepareStatement(explain + bound.sql())) {
+        ps.setQueryTimeout(options.timeoutSeconds);
+        bound.setParameters(ps);
+        try (ResultSet rs = ps.executeQuery()) {
+          StringBuilder sb = new StringBuilder();
+          while (rs.next()) {
+            sb.append(rs.getString(1));
+          }
+          plan = sb.toString();
+        }
+      }
+      ExplainResult result = new ExplainResult(bound.sql(), plan);
+      result.warnings.addAll(bound.warnings);
+      result.elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+      c.rollback();
       return result;
     } catch (SQLException | RuntimeException e) {
       String rollback = rollback(c);

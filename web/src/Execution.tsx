@@ -22,34 +22,14 @@ function saveSelected(id: string) {
   }
 }
 
-function message(e: unknown): string {
+export function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/**
- * 実行の操作と結果。実行は常にトランザクションの中で行い、既定ではロールバックする。
- * 「コミットする」を選んだときだけ、確認のうえコミットする（実行後は既定に戻す）。
- */
-export function ExecutePanel({
-  api,
-  statementId,
-  value,
-  ready,
-  onApiError,
-}: {
-  api: Api;
-  statementId: string;
-  value: PValue | undefined;
-  /** 入力に誤りがなく、SQL を組み立てられる状態 */
-  ready: boolean;
-  onApiError: (e: unknown) => void;
-}) {
+/** 接続先の一覧と、選んでいる接続先（実行タブと EXPLAIN タブで共有する） */
+export function useConnections(api: Api, onApiError: (e: unknown) => void) {
   const [connections, setConnections] = useState<ConnectionProfile[]>([]);
   const [selected, setSelected] = useState<string | null>(loadSelected);
-  const [commit, setCommit] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ExecuteResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
   const reload = () =>
@@ -62,7 +42,79 @@ export function ExecutePanel({
     reload();
   }, [api]);
 
-  const current = connections.find((c) => c.id === selected) ?? connections[0] ?? null;
+  const select = (id: string) => {
+    setSelected(id);
+    saveSelected(id);
+  };
+
+  return {
+    api,
+    connections,
+    current: connections.find((c) => c.id === selected) ?? connections[0] ?? null,
+    select,
+    reload,
+    editing,
+    setEditing,
+  };
+}
+
+export type Connections = ReturnType<typeof useConnections>;
+
+/** 接続先の選択と「接続先の設定」ボタン（設定のダイアログを含む） */
+export function ConnectionPicker({ conn }: { conn: Connections }) {
+  const { connections, current } = conn;
+  return (
+    <>
+      <select aria-label="接続先" value={current?.id ?? ''} onChange={(e) => conn.select(e.target.value)} disabled={connections.length === 0}>
+        {connections.length === 0 && <option value="">接続先がありません</option>}
+        {connections.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <button type="button" onClick={() => conn.setEditing(true)}>
+        接続先の設定
+      </button>
+      {conn.editing && (
+        <ConnectionDialog
+          api={conn.api}
+          connections={connections}
+          initialId={current?.id ?? null}
+          onChanged={conn.reload}
+          onClose={(id) => {
+            conn.setEditing(false);
+            if (id) conn.select(id);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * 実行の操作と結果。実行は常にトランザクションの中で行い、既定ではロールバックする。
+ * 「コミットする」を選んだときだけ、確認のうえコミットする（実行後は既定に戻す）。
+ */
+export function ExecutePanel({
+  conn,
+  statementId,
+  value,
+  ready,
+  onApiError,
+}: {
+  conn: Connections;
+  statementId: string;
+  value: PValue | undefined;
+  /** 入力に誤りがなく、SQL を組み立てられる状態 */
+  ready: boolean;
+  onApiError: (e: unknown) => void;
+}) {
+  const [commit, setCommit] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<ExecuteResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = conn.current;
 
   const run = async () => {
     if (!current) return;
@@ -70,7 +122,7 @@ export function ExecutePanel({
     setRunning(true);
     setError(null);
     try {
-      setResult(await api.execute(statementId, value, current.id, commit, MAX_ROWS));
+      setResult(await conn.api.execute(statementId, value, current.id, commit, MAX_ROWS));
     } catch (e) {
       onApiError(e);
       setResult(null);
@@ -84,25 +136,7 @@ export function ExecutePanel({
   return (
     <div className="execute">
       <div className="execute-bar">
-        <select
-          aria-label="接続先"
-          value={current?.id ?? ''}
-          onChange={(e) => {
-            setSelected(e.target.value);
-            saveSelected(e.target.value);
-          }}
-          disabled={connections.length === 0}
-        >
-          {connections.length === 0 && <option value="">接続先がありません</option>}
-          {connections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => setEditing(true)}>
-          接続先の設定
-        </button>
+        <ConnectionPicker conn={conn} />
         <label className="check commit-check">
           <input type="checkbox" checked={commit} onChange={(e) => setCommit(e.target.checked)} />
           コミットする
@@ -115,22 +149,6 @@ export function ExecutePanel({
 
       {error && <pre className="render-error">{error}</pre>}
       {result && !error && <ExecuteResult result={result} />}
-
-      {editing && (
-        <ConnectionDialog
-          api={api}
-          connections={connections}
-          initialId={current?.id ?? null}
-          onChanged={reload}
-          onClose={(id) => {
-            setEditing(false);
-            if (id) {
-              setSelected(id);
-              saveSelected(id);
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

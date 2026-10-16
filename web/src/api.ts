@@ -240,6 +240,21 @@ export function createApi(token: string) {
         headers: { 'Content-Type': 'application/json' },
         body: `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
       }),
+    /** EXPLAIN を実行する。plan は FORMAT JSON の結果の文字列 */
+    explain: (
+      statementId: string,
+      parameters: PValue | undefined,
+      connectionId: string,
+      options: { analyze: boolean; buffers: boolean; readOnly: boolean; timeoutSeconds: number },
+    ) =>
+      call<{ sql: string; plan: string; warnings: string[]; elapsedMillis: number; analyze: boolean }>(
+        'api/explain',
+        post(
+          `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},` +
+            `"analyze":${options.analyze},"buffers":${options.buffers},"readOnly":${options.readOnly},` +
+            `"timeoutSeconds":${options.timeoutSeconds},"parameters":${toJson(parameters, '')}}`,
+        ),
+      ),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
     changes: (since: number, signal?: AbortSignal) =>
       call<{ generation: number }>(`api/changes?since=${since}`, { signal }),

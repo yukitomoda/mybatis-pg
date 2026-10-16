@@ -253,6 +253,11 @@ public final class ToolServer {
           openInEditor(ex);
         }
         break;
+      case "/api/explain":
+        if (requireMethod(ex, method, "POST")) {
+          explain(ex);
+        }
+        break;
       case "/api/execute":
         if (requireMethod(ex, method, "POST")) {
           execute(ex);
@@ -682,6 +687,65 @@ public final class ToolServer {
     }
     Path shown = base != null && file.startsWith(base) && !file.equals(base) ? base.relativize(file) : file;
     return shown.toString().replace('\\', '/');
+  }
+
+  /**
+   * リクエスト: {"statementId", "parameters", "connectionId", "analyze"?, "buffers"?, "readOnly"?, "timeoutSeconds"?}。
+   * 応答の plan は EXPLAIN (FORMAT JSON) の結果の文字列（数値の精度を保つため、解析せずに渡す）。
+   */
+  private void explain(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String statementId = string(req, "statementId");
+    String connectionId = string(req, "connectionId");
+    if (statementId == null || connectionId == null) {
+      sendJson(ex, 400, error("statementId と connectionId を指定してください"));
+      return;
+    }
+    QueryExecutor.ExplainOptions options = new QueryExecutor.ExplainOptions();
+    try {
+      if (req.has("analyze")) {
+        options.analyze = req.get("analyze").getAsBoolean();
+      }
+      if (req.has("buffers")) {
+        options.buffers = req.get("buffers").getAsBoolean();
+      }
+      if (req.has("readOnly")) {
+        options.readOnly = req.get("readOnly").getAsBoolean();
+      }
+      if (req.has("timeoutSeconds")) {
+        options.timeoutSeconds = Math.max(1, Math.min(3600, req.get("timeoutSeconds").getAsInt()));
+      }
+    } catch (RuntimeException e) {
+      sendJson(ex, 400, error("analyze・buffers・readOnly は真偽値、timeoutSeconds は整数で指定してください"));
+      return;
+    }
+    Object parameters = req.has("parameters") ? Json.GSON.fromJson(req.get("parameters"), Object.class) : null;
+    SqlRenderer renderer = workspace.renderer();
+    if (!renderer.hasStatement(statementId)) {
+      sendJson(ex, 404, error("statement がありません: " + statementId));
+      return;
+    }
+    if (connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    QueryExecutor.ExplainResult r;
+    try {
+      r = QueryExecutor.explain(renderer, statementId, parameters, () -> connections.open(connectionId), options);
+    } catch (QueryExecutor.ExecutionException | RuntimeException e) {
+      sendJson(ex, 422, error(e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sql", r.sql);
+    body.put("plan", r.plan);
+    body.put("warnings", r.warnings);
+    body.put("elapsedMillis", r.elapsedMillis);
+    body.put("analyze", options.analyze);
+    sendJson(ex, 200, body);
   }
 
   private static Map<String, Object> toJson(ParamNode node) {

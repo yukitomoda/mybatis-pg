@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, OpenTarget, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
-import { ExecutePanel } from './Execution';
+import { ExecutePanel, useConnections } from './Execution';
+import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
@@ -51,13 +52,13 @@ function saveParams(id: string, value: PValue | undefined) {
   }
 }
 
-type Tab = 'sql' | 'execute' | 'template';
+type Tab = 'sql' | 'execute' | 'explain' | 'template';
 const TAB_KEY = 'mybatis-pg.tab';
 
 function loadTab(): Tab {
   try {
     const saved = localStorage.getItem(TAB_KEY);
-    return saved === 'execute' || saved === 'template' ? saved : 'sql';
+    return saved === 'execute' || saved === 'explain' || saved === 'template' ? saved : 'sql';
   } catch {
     return 'sql';
   }
@@ -121,6 +122,7 @@ function Workspace({ api }: { api: Api }) {
   };
 
   const opener = useOpener(api, handleError);
+  const conn = useConnections(api, handleError);
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -330,6 +332,7 @@ function Workspace({ api }: { api: Api }) {
               ['template', 'テンプレート'],
               ['sql', 'SQL'],
               ['execute', '実行'],
+              ['explain', 'EXPLAIN'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -387,7 +390,23 @@ function Workspace({ api }: { api: Api }) {
           {selected && schema ? (
             <ExecutePanel
               key={selected}
-              api={api}
+              conn={conn}
+              statementId={selected}
+              value={sent}
+              ready={numberIssues.length === 0 && !renderError}
+              onApiError={handleError}
+            />
+          ) : (
+            <p className="hint">左の一覧から statement を選んでください。</p>
+          )}
+        </div>
+
+        {/* 取得した計画が消えないよう、切り替えても EXPLAIN のタブは残しておく */}
+        <div hidden={tab !== 'explain'}>
+          {selected && schema ? (
+            <ExplainPanel
+              key={selected}
+              conn={conn}
               statementId={selected}
               value={sent}
               ready={numberIssues.length === 0 && !renderError}
