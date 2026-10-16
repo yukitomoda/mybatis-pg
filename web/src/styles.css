@@ -1121,3 +1121,97 @@ button.open-file:focus-visible {
   word-break: break-all;
   white-space: pre-wrap;
 }
+
+/* ---- 自動の指摘 ---- */
+
+.findings {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.findings li {
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  border-left: 4px solid var(--border);
+  background: var(--panel);
+}
+
+.findings li.high {
+  border-left-color: var(--danger);
+}
+
+.findings li.medium {
+  border-left-color: var(--warn);
+}
+
+.findings li.info {
+  border-left-color: var(--accent);
+}
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.5rem;
+}
+
+.finding-head .link {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.severity {
+  font-size: 11px;
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  color: #fff;
+}
+
+.severity.high {
+  background: var(--danger);
+}
+
+.severity.medium {
+  background: var(--warn);
+}
+
+.severity.info {
+  background: var(--accent);
+}
+
+.finding-evidence {
+  margin-top: 0.15rem;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.finding-advice {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.finding-mark {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+.finding-mark.high {
+  background: var(--danger);
+}
+
+.finding-mark.medium {
+  background: var(--warn);
+}
+
+.finding-mark.info {
+  background: var(--accent);
+}

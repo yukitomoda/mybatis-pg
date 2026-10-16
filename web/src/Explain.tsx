@@ -1,5 +1,7 @@
 // EXPLAIN タブ: 計画を取得（または貼り付け）して、ツリーで表示する
 import { Fragment, useMemo, useState } from 'react';
+import type { Finding } from './diagnose';
+import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import type { PValue } from './params';
@@ -178,6 +180,12 @@ function PlanView({ shown }: { shown: Shown }) {
   const { plan } = shown;
   const rows = useMemo(() => flatten(plan.root), [plan]);
   const times = useMemo(() => timings(plan.root), [plan]);
+  const findings = useMemo(() => diagnose(plan), [plan]);
+  const marks = useMemo(() => {
+    const m = new Map<string, Finding['severity']>();
+    for (const f of findings) if (!m.has(f.path)) m.set(f.path, f.severity);
+    return m;
+  }, [findings]);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const total = plan.executionMs ?? times.get(plan.root)!.inclusive;
   const toggle = (path: string) =>
@@ -188,6 +196,11 @@ function PlanView({ shown }: { shown: Shown }) {
       return next;
     });
   const columns = plan.analyzed ? 6 : 3;
+  /** 指摘のノードを開いて、見える位置まで動かす */
+  const reveal = (path: string) => {
+    setOpen((prev) => new Set(prev).add(path));
+    requestAnimationFrame(() => document.getElementById(`plan-node-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  };
 
   return (
     <div className="plan">
@@ -204,6 +217,7 @@ function PlanView({ shown }: { shown: Shown }) {
           元の結果をコピー
         </button>
       </div>
+      <Findings findings={findings} analyzed={plan.analyzed} onReveal={reveal} />
       <div className="grid-scroll plan-scroll">
         <table className="plan-table">
           <thead>
@@ -228,7 +242,7 @@ function PlanView({ shown }: { shown: Shown }) {
           <tbody>
             {rows.map(({ node, depth, path }) => (
               <Fragment key={path}>
-                <PlanRow node={node} timing={times.get(node)!} depth={depth} total={total} analyzed={plan.analyzed} open={open.has(path)} onToggle={() => toggle(path)} />
+                <PlanRow path={path} mark={marks.get(path)} node={node} timing={times.get(node)!} depth={depth} total={total} analyzed={plan.analyzed} open={open.has(path)} onToggle={() => toggle(path)} />
                 {open.has(path) && (
                   <tr className="plan-details">
                     <td colSpan={columns}>
@@ -247,6 +261,8 @@ function PlanView({ shown }: { shown: Shown }) {
 }
 
 function PlanRow({
+  path,
+  mark,
   node,
   timing,
   depth,
@@ -255,6 +271,8 @@ function PlanRow({
   open,
   onToggle,
 }: {
+  path: string;
+  mark: Finding['severity'] | undefined;
   node: PlanNode;
   timing: Timing;
   depth: number;
@@ -268,9 +286,10 @@ function PlanRow({
   const ratio = estimateRatio(node);
   const off = ratio !== null && (ratio >= MISESTIMATE || ratio <= 1 / MISESTIMATE);
   return (
-    <tr className={`plan-row${open ? ' open' : ''}`} onClick={onToggle}>
+    <tr id={`plan-node-${path}`} className={`plan-row${open ? ' open' : ''}`} onClick={onToggle}>
       <td className="plan-node" style={{ paddingLeft: `${0.4 + depth * 1.1}rem` }}>
         <span className="twisty">{open ? '▾' : '▸'}</span>
+        {mark && <span className={`finding-mark ${mark}`} title="指摘があります" />}
         {node.title}
         {node.neverExecuted && <span className="badge muted">実行されず</span>}
       </td>
@@ -307,6 +326,37 @@ function PlanRow({
         </>
       )}
     </tr>
+  );
+}
+
+const SEVERITY_LABELS: Record<Finding['severity'], string> = { high: '要確認', medium: '確認', info: '参考' };
+
+/** 自動の指摘の一覧 */
+function Findings({ findings, analyzed, onReveal }: { findings: Finding[]; analyzed: boolean; onReveal: (path: string) => void }) {
+  if (!analyzed) {
+    return <p className="hint">ANALYZE なしの計画では、実績に基づく指摘はできません。</p>;
+  }
+  if (findings.length === 0) {
+    return <p className="hint findings-none">よくある問題のパターンは見つかりませんでした。</p>;
+  }
+  return (
+    <ul className="findings">
+      {findings.map((f, i) => (
+        <li key={i} className={f.severity}>
+          <div className="finding-head">
+            <span className={`severity ${f.severity}`}>{SEVERITY_LABELS[f.severity]}</span>
+            <strong>{f.title}</strong>
+            <button type="button" className="link" onClick={() => onReveal(f.path)}>
+              {f.node}
+            </button>
+          </div>
+          <div className="finding-evidence">
+            <code>{f.evidence}</code>
+          </div>
+          <div className="finding-advice">{f.advice}</div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
