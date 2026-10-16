@@ -22,12 +22,14 @@ interface Options {
   timeoutSeconds: number;
   /** 6 回目の計画（汎用プランになるか）を見る */
   sixthExecution: boolean;
+  /** ANALYZE を繰り返す回数 */
+  repeat: number;
 }
 
 const OPTIONS_KEY = 'mybatis-pg.explain';
 
 function loadOptions(): Options {
-  const defaults: Options = { analyze: true, buffers: true, readOnly: false, timeoutSeconds: 60, sixthExecution: false };
+  const defaults: Options = { analyze: true, buffers: true, readOnly: false, timeoutSeconds: 60, sixthExecution: false, repeat: 1 };
   try {
     return { ...defaults, ...(JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}') as Partial<Options>) };
   } catch {
@@ -51,6 +53,8 @@ interface Shown {
   source: string;
   /** 6 回目の計画を見たとき、汎用プランだったか */
   generic: boolean | null;
+  /** 繰り返したときの各回の実行時間（ms） */
+  runs?: number[];
 }
 
 export function ExplainPanel({
@@ -126,8 +130,9 @@ export function ExplainPanel({
       setShown({
         plan: parsePlan(r.plan),
         raw: r.plan,
-        source: `${current.name} で取得（${options.sixthExecution ? '6 回目の計画、' : ''}${r.analyze ? 'ANALYZE、ロールバック済み' : '計画のみ'}、${r.elapsedMillis} ms）`,
+        source: `${current.name} で取得（${options.sixthExecution ? '6 回目の計画、' : ''}${r.analyze ? 'ANALYZE、ロールバック済み' : '計画のみ'}${r.runs ? `、${r.runs.length} 回の中央値` : ''}）`,
         generic: r.generic,
+        runs: r.runs,
       });
     } catch (e) {
       onApiError(e);
@@ -172,6 +177,18 @@ export function ExplainPanel({
         <label className="check" title="JDBC は同じ SQL を 6 回目以降、サーバ側で準備した文として実行し、値に依らない計画（汎用プラン）を使うことがある。そのときの計画を見る（5 回分は計画を作るだけで実行しない）">
           <input type="checkbox" checked={options.sixthExecution} onChange={(e) => set({ sixthExecution: e.target.checked })} />
           6 回目の計画（汎用プランの確認）
+        </label>
+        <label className="check" title="ANALYZE を繰り返して、実行時間のばらつきを見る。表示する計画は中央値の回のもの">
+          繰り返し
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={options.repeat}
+            disabled={!options.analyze}
+            onChange={(e) => set({ repeat: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+          />
+          回
         </label>
         <label className="check">
           タイムアウト
@@ -424,6 +441,7 @@ function PlanView({ shown, onKeep, idPrefix = 'main' }: { shown: Shown; onKeep?:
           </span>
         )}
         {plan.planningMs !== null && <span>計画時間 {fmtMs(plan.planningMs)} ms</span>}
+        {shown.runs && shown.runs.length > 1 && <Runs runs={shown.runs} />}
         {!plan.analyzed && <span className="hint">見積もりのみ（ANALYZE なし）</span>}
         <span className="plan-actions">
           {onKeep && (
@@ -565,6 +583,17 @@ function PlanRow({
         </>
       )}
     </tr>
+  );
+}
+
+/** 繰り返したときの実行時間（最小・中央値・最大と各回） */
+function Runs({ runs }: { runs: number[] }) {
+  const sorted = [...runs].sort((a, b) => a - b);
+  const median = sorted.length % 2 === 1 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  return (
+    <span className="runs" title={`各回: ${runs.map((r) => fmtMs(r)).join(', ')} ms（1 回目はキャッシュに乗っていないことがある）`}>
+      {runs.length} 回: 最小 {fmtMs(sorted[0])} / 中央値 <strong>{fmtMs(median)}</strong> / 最大 {fmtMs(sorted[sorted.length - 1])} ms
+    </span>
   );
 }
 

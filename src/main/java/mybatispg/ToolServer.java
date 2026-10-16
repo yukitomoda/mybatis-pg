@@ -63,6 +63,8 @@ public final class ToolServer {
 
   /** 結果セットから読む行数の上限（画面からの指定もこれを超えられない） */
   private static final int MAX_ROWS_LIMIT = 10_000;
+  /** EXPLAIN ANALYZE を繰り返す回数の上限 */
+  private static final int MAX_REPEAT = 20;
 
   private final MapperWorkspace workspace;
   private final ConnectionStore connections;
@@ -705,6 +707,7 @@ public final class ToolServer {
       return;
     }
     QueryExecutor.ExplainOptions options = new QueryExecutor.ExplainOptions();
+    int repeat = 1;
     try {
       if (req.has("analyze")) {
         options.analyze = req.get("analyze").getAsBoolean();
@@ -720,6 +723,9 @@ public final class ToolServer {
       }
       if (req.has("sixthExecution")) {
         options.sixthExecution = req.get("sixthExecution").getAsBoolean();
+      }
+      if (req.has("repeat")) {
+        repeat = Math.max(1, Math.min(MAX_REPEAT, req.get("repeat").getAsInt()));
       }
     } catch (RuntimeException e) {
       sendJson(ex, 400, error("analyze・buffers・readOnly は真偽値、timeoutSeconds は整数で指定してください"));
@@ -737,21 +743,52 @@ public final class ToolServer {
       return;
     }
     options.stringUnspecified = profile.params != null && profile.params.matches("(?i).*\\bstringtype=unspecified\\b.*");
-    QueryExecutor.ExplainResult r;
+    if (!options.analyze) {
+      repeat = 1;
+    }
+    // 繰り返すときは毎回別のトランザクションで実行し（毎回ロールバック）、実行時間が中央値の回の計画を返す
+    List<QueryExecutor.ExplainResult> results = new ArrayList<>();
+    List<Double> runs = new ArrayList<>();
     try {
-      r = QueryExecutor.explain(renderer, statementId, parameters, () -> connections.open(connectionId), options);
+      for (int i = 0; i < repeat; i++) {
+        QueryExecutor.ExplainResult one =
+            QueryExecutor.explain(renderer, statementId, parameters, () -> connections.open(connectionId), options);
+        results.add(one);
+        runs.add(executionTime(one.plan));
+      }
     } catch (QueryExecutor.ExecutionException | RuntimeException e) {
       sendJson(ex, 422, error(e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e)));
       return;
     }
+    List<Integer> order = new ArrayList<>();
+    for (int i = 0; i < results.size(); i++) {
+      order.add(i);
+    }
+    order.sort((a, b) -> Double.compare(runs.get(a), runs.get(b)));
+    QueryExecutor.ExplainResult r = results.get(order.get((order.size() - 1) / 2));
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("sql", r.sql);
     body.put("plan", r.plan);
+    if (repeat > 1) {
+      body.put("runs", runs);
+    }
     body.put("warnings", r.warnings);
     body.put("elapsedMillis", r.elapsedMillis);
     body.put("analyze", options.analyze);
     body.put("generic", r.generic);
     sendJson(ex, 200, body);
+  }
+
+  /** EXPLAIN (FORMAT JSON) の結果の Execution Time。なければ 0 */
+  private static double executionTime(String plan) {
+    try {
+      JsonElement top = com.google.gson.JsonParser.parseString(plan);
+      JsonElement first = top.isJsonArray() ? top.getAsJsonArray().get(0) : top;
+      JsonElement t = first.getAsJsonObject().get("Execution Time");
+      return t == null ? 0 : t.getAsDouble();
+    } catch (RuntimeException e) {
+      return 0;
+    }
   }
 
   private static Map<String, Object> toJson(ParamNode node) {

@@ -245,14 +245,23 @@ export function createApi(token: string) {
       statementId: string,
       parameters: PValue | undefined,
       connectionId: string,
-      options: { analyze: boolean; buffers: boolean; readOnly: boolean; timeoutSeconds: number; sixthExecution: boolean },
+      options: { analyze: boolean; buffers: boolean; readOnly: boolean; timeoutSeconds: number; sixthExecution: boolean; repeat: number },
     ) =>
-      call<{ sql: string; plan: string; warnings: string[]; elapsedMillis: number; analyze: boolean; generic: boolean | null }>(
+      call<{
+        sql: string;
+        plan: string;
+        warnings: string[];
+        elapsedMillis: number;
+        analyze: boolean;
+        generic: boolean | null;
+        /** 繰り返したときの、各回の実行時間（ms） */
+        runs?: number[];
+      }>(
         'api/explain',
         post(
           `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},` +
             `"analyze":${options.analyze},"buffers":${options.buffers},"readOnly":${options.readOnly},` +
-            `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"parameters":${toJson(parameters, '')}}`,
+            `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
