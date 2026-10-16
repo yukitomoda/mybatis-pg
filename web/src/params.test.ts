@@ -180,3 +180,15 @@ describe('日時・日付', () => {
     expect(defaultType(node('x', { typeHints: ['TIMESTAMP'] }))).toBe('timestamp');
   });
 });
+
+describe('PostgreSQL の型を指定した値', () => {
+  it('JSON に書いて読み戻せ、型の名前を確かめる', () => {
+    const v: PValue = { t: 'object', fields: [['doc', { t: 'pg', type: 'jsonb', v: '{"a": 1}' }]] };
+    const json = toJson(v, '');
+    expect(json).toBe('{"doc":{"$type":"pg","pgType":"jsonb","value":"{\\"a\\": 1}"}}');
+    expect(fromJson(json)).toEqual(v);
+    expect(invalidNumbers(fromJson('{"a":{"$type":"pg","pgType":"jsonb; drop","value":"1"}}')).map((i) => i.path)).toEqual(['a']);
+    expect(convertType({ t: 'string', v: 'x' }, 'pg')).toEqual({ t: 'pg', type: '', v: 'x' });
+    expect(convertType({ t: 'pg', type: 'uuid', v: 'x' }, 'string')).toEqual({ t: 'string', v: 'x' });
+  });
+});

@@ -22,6 +22,10 @@ public final class SqlLiteral {
     if (value instanceof Number) {
       return value.toString();
     }
+    if (value instanceof org.postgresql.util.PGobject) {
+      org.postgresql.util.PGobject o = (org.postgresql.util.PGobject) value;
+      return o.getValue() == null ? "NULL::" + o.getType() : "'" + o.getValue().replace("'", "''") + "'::" + o.getType();
+    }
     if (value instanceof java.sql.Timestamp) {
       return "TIMESTAMP '" + timestamp((java.sql.Timestamp) value) + "'";
     }

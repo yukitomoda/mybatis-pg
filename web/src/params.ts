@@ -22,6 +22,8 @@ export type PValue =
   | { t: 'timestamp'; v: string }
   /** 日付（date としてバインドする）。yyyy-MM-dd の形の文字列で持つ */
   | { t: 'date'; v: string }
+  /** PostgreSQL の型を指定した値（jsonb・uuid・enum など。TypeHandler が型を付けている値の代わり） */
+  | { t: 'pg'; type: string; v: string }
   | { t: 'boolean'; v: boolean }
   | { t: 'null' }
   | { t: 'list'; items: PValue[] }
@@ -38,6 +40,7 @@ export const TYPE_LABELS: Record<PType, string> = {
   number: '数値',
   timestamp: '日時',
   date: '日付',
+  pg: 'PG の型',
   boolean: '真偽値',
   null: 'NULL',
   list: 'リスト',
@@ -72,6 +75,8 @@ export function emptyValue(t: PType): PValue {
     case 'timestamp':
     case 'date':
       return { t, v: '' };
+    case 'pg':
+      return { t, type: '', v: '' };
     case 'boolean':
       return { t, v: false };
     case 'null':
@@ -90,12 +95,19 @@ export function isTextType(t: PType): t is TextType {
   return t === 'string' || t === 'number' || t === 'timestamp' || t === 'date';
 }
 
-/** 型を変える。文字で入力する型どうしでは、入力済みの文字を引き継ぐ */
+/** 型を変える。文字で入力する型（PostgreSQL の型を含む）どうしでは、入力済みの文字を引き継ぐ */
 export function convertType(value: PValue | undefined, t: PType): PValue {
-  if (value && isTextType(value.t) && isTextType(t) && 'v' in value && typeof value.v === 'string') {
-    return { t, v: value.v };
-  }
+  const text = value && (isTextType(value.t) || value.t === 'pg') && 'v' in value && typeof value.v === 'string' ? value.v : null;
+  if (text !== null && isTextType(t)) return { t, v: text };
+  if (text !== null && t === 'pg') return { t, type: value!.t === 'pg' ? value!.type : '', v: text };
   return emptyValue(t);
+}
+
+/** PostgreSQL の型の名前（schema.name、配列は name[]）。サーバと同じ決まり */
+const PG_TYPE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?(\[\])*$/;
+
+export function isValidPgType(text: string): boolean {
+  return PG_TYPE_PATTERN.test(text.trim());
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -290,6 +302,10 @@ export function invalidNumbers(value: PValue | undefined, path: Path = []): Issu
       return isValidTimestamp(value.v) ? [] : [{ path: pathLabel(path), message: `日時として解釈できません: "${value.v}"（例: 2026-01-03 23:35:00）` }];
     case 'date':
       return isValidDate(value.v) ? [] : [{ path: pathLabel(path), message: `日付として解釈できません: "${value.v}"（例: 2026-01-03）` }];
+    case 'pg':
+      return isValidPgType(value.type)
+        ? []
+        : [{ path: pathLabel(path), message: `PostgreSQL の型の名前を入力してください（例: jsonb、uuid、public.status、int4[]）: "${value.type}"` }];
     case 'list':
       return value.items.flatMap((item, i) => invalidNumbers(item, [...path, i]));
     case 'object':
@@ -330,9 +346,13 @@ function typed(type: string, text: string): string {
 
 /** 型付きの値なら、その値にする */
 function fromTyped(fields: [string, PValue][]): PValue | null {
-  if (fields.length !== 2) return null;
   const type = fields.find(([k]) => k === '$type')?.[1];
   const value = fields.find(([k]) => k === 'value')?.[1];
+  if (fields.length === 3 && type?.t === 'string' && type.v === 'pg' && value?.t === 'string') {
+    const pgType = fields.find(([k]) => k === 'pgType')?.[1];
+    if (pgType?.t === 'string') return { t: 'pg', type: pgType.v, v: value.v };
+  }
+  if (fields.length !== 2) return null;
   if (!type || type.t !== 'string' || !value || value.t !== 'string') return null;
   if (type.v === 'timestamp' || type.v === 'date' || type.v === 'number') return { t: type.v, v: value.v };
   return null;
@@ -354,6 +374,8 @@ export function toJson(value: PValue | undefined, indent = '  ', depth = 0): str
     case 'date':
       // JSON には日時の型がないので、型付きの値として送る（サーバで timestamp・date に直す）
       return typed(value.t, value.v);
+    case 'pg':
+      return `{"$type":"pg","pgType":${JSON.stringify(value.type)},"value":${JSON.stringify(value.v)}}`;
     case 'boolean':
       return value.v ? 'true' : 'false';
     case 'null':

@@ -323,6 +323,9 @@ public final class QueryExecutor {
     if (value instanceof java.sql.Timestamp) {
       return "timestamp";
     }
+    if (value instanceof org.postgresql.util.PGobject) {
+      return ((org.postgresql.util.PGobject) value).getType();
+    }
     if (value instanceof java.sql.Date) {
       return "date";
     }

@@ -367,14 +367,15 @@ export function resolveTemplates(value: PValue | undefined, cache: GenCache, now
       case 'string':
       case 'number':
       case 'timestamp':
-      case 'date': {
-        if (!hasTemplate(v.v)) return v.v.includes('\\{{') ? { t: v.t, v: unescape(v.v) } : v;
+      case 'date':
+      case 'pg': {
+        if (!hasTemplate(v.v)) return v.v.includes('\\{{') ? { ...v, v: unescape(v.v) } : v;
         const label = pathLabel(path);
         try {
           const r = evaluateTemplate(v.v, label, cache, v.t === 'number', now);
           if (v.t === 'number' && !isValidNumber(r.text)) throw new Error(`結果が数値になりません: ${r.text}`);
           generated.push({ path: label, source: v.v, result: r.text, volatile: r.volatile });
-          return { t: v.t, v: r.text };
+          return { ...v, v: r.text };
         } catch (e) {
           issues.push({ path: label, message: (e as Error).message });
           return v;

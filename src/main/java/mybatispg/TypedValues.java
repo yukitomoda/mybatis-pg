@@ -9,8 +9,17 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.postgresql.util.PGobject;
+
 /**
- * 画面から届いたパラメータのうち、型付きの値（{"$type": "timestamp", "value": "..."} など）を Java の値に直す。
+ * 画面から届いたパラメータを、本番のアプリに近い Java の値に直す。
+ * <ul>
+ * <li>型付きの値（{"$type": "timestamp", "value": "..."} など）を Java の日時などにする</li>
+ * <li>int の範囲に収まる整数は Integer にする（Long のままだと int8 でバインドされ、{@code date + ?} や
+ * {@code substr(s, ?)} などが「演算子・関数がない」エラーになる。int8 の列と比べてもインデックスは使える）</li>
+ * <li>PostgreSQL の型を指定した値（{"$type": "pg", "pgType": "jsonb", "value": "..."}）は、
+ * TypeHandler と同じく PGobject にして、その型でバインドする</li>
+ * </ul>
  *
  * <p>JSON には日時の型がないため、画面では日時・日付をこの形で送る。本番のアプリでは Java の日時型で渡り、
  * JDBC は timestamp・date としてバインドするので、それに合わせる（文字列のままだと varchar になり、
@@ -20,6 +29,10 @@ public final class TypedValues {
 
   public static final String TYPE_KEY = "$type";
   public static final String VALUE_KEY = "value";
+  public static final String PG_TYPE_KEY = "pgType";
+
+  /** 型の名前（schema.name、配列は name[]）。SQL に埋め込むので、これ以外は受け付けない */
+  private static final Pattern PG_TYPE = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?(\\[\\])*");
 
   private static final Pattern DATE_TIME =
       Pattern.compile("(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,9}))?)?)?");
@@ -35,6 +48,10 @@ public final class TypedValues {
       if (map.size() == 2 && map.get(TYPE_KEY) instanceof String && map.containsKey(VALUE_KEY)) {
         return typed((String) map.get(TYPE_KEY), map.get(VALUE_KEY));
       }
+      if (map.size() == 3 && "pg".equals(map.get(TYPE_KEY)) && map.get(PG_TYPE_KEY) instanceof String
+          && map.containsKey(VALUE_KEY)) {
+        return pgObject((String) map.get(PG_TYPE_KEY), map.get(VALUE_KEY));
+      }
       Map<String, Object> out = new LinkedHashMap<>();
       for (Map.Entry<String, Object> e : map.entrySet()) {
         out.put(e.getKey(), decode(e.getValue()));
@@ -48,7 +65,26 @@ public final class TypedValues {
       }
       return out;
     }
+    if (value instanceof Long && (Long) value >= Integer.MIN_VALUE && (Long) value <= Integer.MAX_VALUE) {
+      return ((Long) value).intValue();
+    }
     return value;
+  }
+
+  /** PostgreSQL の型を指定した値。TypeHandler が PGobject でするのと同じ */
+  static PGobject pgObject(String type, Object value) {
+    String t = type.trim();
+    if (!PG_TYPE.matcher(t).matches()) {
+      throw new IllegalArgumentException("PostgreSQL の型の名前が正しくありません: " + type + "（例: jsonb、uuid、public.status）");
+    }
+    PGobject o = new PGobject();
+    o.setType(t);
+    try {
+      o.setValue(value == null ? null : value.toString());
+    } catch (java.sql.SQLException e) {
+      throw new IllegalArgumentException(e.getMessage(), e);
+    }
+    return o;
   }
 
   private static Object typed(String type, Object value) {

@@ -410,7 +410,8 @@ public final class ToolServer {
       m.put("property", b.property);
       // 日時は画面で読める形にする（Gson の既定の形は読みにくい）
       m.put("value", b.value instanceof java.sql.Timestamp ? SqlLiteral.timestamp((java.sql.Timestamp) b.value)
-          : b.value instanceof java.util.Date ? b.value.toString() : b.value);
+          : b.value instanceof java.util.Date ? b.value.toString()
+          : b.value instanceof org.postgresql.util.PGobject ? ((org.postgresql.util.PGobject) b.value).getValue() : b.value);
       m.put("literal", SqlLiteral.of(b.value));
       bindings.add(m);
     }

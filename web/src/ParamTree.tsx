@@ -5,7 +5,7 @@ import type { GenContext } from './GenInput';
 import { GenPicker, GenPreview } from './GenInput';
 import type { ParamSchema, Path, PType, PValue } from './params';
 import type { TextType } from './params';
-import { TYPE_LABELS, convertType, isValidDate, isValidTimestamp, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
+import { TYPE_LABELS, convertType, isValidDate, isValidPgType, isValidTimestamp, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
 
 interface Props {
   schema: ParamSchema;
@@ -242,6 +242,28 @@ function Editor({
           genKey={genKey}
           gen={gen}
         />
+      );
+    }
+    case 'pg': {
+      const pg = value && value.t === 'pg' ? value : { t: 'pg' as const, type: '', v: '' };
+      return (
+        <div className="pg-editor">
+          <input
+            type="text"
+            className={isValidPgType(pg.type) ? 'pg-type' : 'pg-type invalid'}
+            aria-label={`${name} の PostgreSQL の型`}
+            placeholder="型（jsonb など）"
+            list="pg-types"
+            value={pg.type}
+            onChange={(e) => set({ ...pg, type: e.target.value })}
+          />
+          <TextEditor name={name} text={pg.v} kind="string" unset={false} onChange={(v) => set({ ...pg, v })} genKey={genKey} gen={gen} />
+          <datalist id="pg-types">
+            {['jsonb', 'json', 'uuid', 'inet', 'interval', 'timestamptz', 'time', 'bytea', 'text[]', 'int4[]', 'int8[]', 'uuid[]'].map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+        </div>
       );
     }
     case 'boolean':

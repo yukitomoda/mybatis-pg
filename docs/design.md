@@ -212,6 +212,8 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
   - 単一の `List` 引数の場合（本来は `list` / `collection` で参照する）
 - **リテラルとバインドの差**: 暗黙の型変換やインデックスの効き方が稀に変わる
 - **日付**: パラメータの型「日時」「日付」で入力すると、本番のアプリ（Javaの日時型）と同じく timestamp・date としてバインドし、値を埋め込んだSQLでは `TIMESTAMP '2026-01-03 23:35:00'`・`DATE '2026-01-03'` と書く。`#{x,jdbcType=TIMESTAMP}`・`jdbcType=DATE` の項目は、最初からこの型にする。文字列のまま入力すると varchar としてバインドされ、`timestamp_col < ?` などが型の不一致でエラーになる（接続パラメータに `stringtype=unspecified` があれば通る）。JSONには日時の型がないため、画面とサーバの間では `{"$type": "timestamp", "value": "..."}` の形で受け渡す
+- **整数の型**: JSONの整数は、intの範囲に収まればInteger（int4）、収まらなければLong（int8）としてバインドする。int8のままだと `date + ?` や `substr(s, ?)` が「演算子・関数がない」エラーになるため（本番のIntegerと同じにする）。int8の列と比べてもインデックスは使える
+- **TypeHandlerが型を付ける値**: jsonb・uuid・enumなどの列は、本番ではTypeHandlerがPGobjectなどで型を付けてバインドしている。前処理でTypeHandlerを外すため、文字列のままだと `uuid = character varying` のようなエラーになる。パラメータの型「PG の型」で型の名前（jsonb、uuid、public.status、int4[] など）を指定すると、PGobjectにしてその型でバインドし、値を埋め込んだSQLでは `'...'::jsonb` と書く。型の名前はSQLに埋め込むため、英数字と `_`・`.`・`[]` だけを受け付ける（`timestamp with time zone` のような空白を含む名前は `timestamptz` などの別名で書く）
 - **typeHandler**: 前処理で取り除くため、本番で値を変換するtypeHandler（例: enumをコード値に変える）を使っていても、入力した値がそのまま埋め込まれる。入力にはDBに入る形の値を書く
 - **`lang` 属性**: 別のLanguageDriverを指定したstatementはレンダリングできない。クラスを参照している場合、そのmapperは読み込めない
 - **Javaのメソッド呼び出し**: `<if test="@com.example.Util@isEmpty(x)">` のような式は、クラスがないため評価がエラーになる

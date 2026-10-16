@@ -31,6 +31,30 @@ class TypedValuesTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void intの範囲の整数はIntegerにしPostgreSQLの型を指定した値はPGobjectにする() {
+    Map<String, Object> m = (Map<String, Object>) decode("{\"small\":10,\"big\":3000000000,\"dec\":1.5,"
+        + "\"j\":{\"$type\":\"pg\",\"pgType\":\"jsonb\",\"value\":\"{\\\"a\\\": 1}\"},"
+        + "\"e\":{\"$type\":\"pg\",\"pgType\":\"public.status\",\"value\":\"active\"},"
+        + "\"a\":{\"$type\":\"pg\",\"pgType\":\"int4[]\",\"value\":\"{1,2}\"}}");
+    assertEquals(Integer.valueOf(10), m.get("small"));
+    assertEquals(Long.valueOf(3000000000L), m.get("big"));
+    assertEquals(new java.math.BigDecimal("1.5"), m.get("dec"));
+    org.postgresql.util.PGobject j = (org.postgresql.util.PGobject) m.get("j");
+    assertEquals("jsonb", j.getType());
+    assertEquals("{\"a\": 1}", j.getValue());
+    assertEquals("'{\"a\": 1}'::jsonb", SqlLiteral.of(j));
+    assertEquals("public.status", QueryExecutor.pgType(m.get("e"), false));
+    assertEquals("'{1,2}'::int4[]", SqlLiteral.of(m.get("a")));
+  }
+
+  @Test
+  void 型の名前はSQLに埋め込めるものだけ() {
+    assertThrows(IllegalArgumentException.class, () -> decode("{\"a\":{\"$type\":\"pg\",\"pgType\":\"jsonb); DROP TABLE x; --\",\"value\":\"1\"}}"));
+    assertThrows(IllegalArgumentException.class, () -> decode("{\"a\":{\"$type\":\"pg\",\"pgType\":\"\",\"value\":\"1\"}}"));
+  }
+
+  @Test
   void 誤り() {
     assertThrows(IllegalArgumentException.class, () -> decode("{\"a\":{\"$type\":\"timestamp\",\"value\":\"tomorrow\"}}"));
     assertThrows(IllegalArgumentException.class, () -> decode("{\"a\":{\"$type\":\"date\",\"value\":\"2026-01-03 10:00\"}}"));
