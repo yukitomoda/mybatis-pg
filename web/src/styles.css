@@ -1423,3 +1423,95 @@ button.open-file:focus-visible {
 .index-table code {
   word-break: break-all;
 }
+
+/* ---- 一括チェック ---- */
+
+button.bulk-open {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+dialog.bulk {
+  width: min(90rem, calc(100vw - 2rem));
+  height: min(52rem, calc(100vh - 2rem));
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+dialog.bulk[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.bulk::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+dialog.bulk .spacer {
+  flex: 1;
+}
+
+dialog.bulk input[type='search'] {
+  min-width: 14rem;
+}
+
+.bulk-scroll {
+  flex: 1;
+  max-height: none;
+}
+
+.bulk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bulk-table th,
+.bulk-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+}
+
+.bulk-table th {
+  position: sticky;
+  top: 0;
+  background: var(--code-bg);
+}
+
+.bulk-table td.num {
+  text-align: right;
+}
+
+.bulk-table tbody tr {
+  cursor: pointer;
+}
+
+.bulk-table tbody tr:hover td {
+  background: var(--code-bg);
+}
+
+.bulk-table .bulk-id {
+  font-family: var(--mono);
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulk-table .bulk-error {
+  max-width: 40rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulk-table .severity {
+  margin-left: 0.3rem;
+}
+
+.bulk-table th .link.sorted {
+  font-weight: 700;
+}

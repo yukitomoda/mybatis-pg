@@ -138,6 +138,11 @@ public class SqlRenderer {
     return ids;
   }
 
+  /** statement の種類（SELECT・INSERT・UPDATE・DELETE など） */
+  public String statementType(String statementId) {
+    return configuration.getMappedStatement(statementId, false).getSqlCommandType().name();
+  }
+
   /** statement を定義したファイルのパス（読み込み時に resource として渡したもの） */
   public String statementSource(String statementId) {
     return configuration.getMappedStatement(statementId, false).getResource();

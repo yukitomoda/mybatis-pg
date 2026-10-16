@@ -4,6 +4,8 @@ export interface StatementEntry {
   id: string;
   /** 定義したファイル。/ 区切りの相対パス（基準の外なら絶対パス） */
   file: string;
+  /** SELECT・INSERT・UPDATE・DELETE など */
+  type?: string;
 }
 
 export type TreeNode =

@@ -294,6 +294,7 @@ public final class ToolServer {
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("id", id);
       m.put("file", displayPath(renderer.statementSource(id)));
+      m.put("type", renderer.statementType(id));
       statements.add(m);
     }
     Map<String, Object> body = new LinkedHashMap<>();

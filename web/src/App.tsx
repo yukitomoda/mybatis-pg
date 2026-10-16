@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, OpenTarget, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
+import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
@@ -11,6 +12,7 @@ import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
 import type { ParamSchema, PValue } from './params';
 import { effectiveValue, fromJson, invalidNumbers, missingParams, toJson } from './params';
+import { loadParams, saveParams } from './paramStore';
 import { tidySql } from './sql';
 import { tokenize } from './template';
 import type { StatementEntry, TreeNode } from './tree';
@@ -31,26 +33,6 @@ export function App() {
 }
 
 // ---- 保存 ----
-
-const STORAGE_PREFIX = 'mybatis-pg.params:';
-
-function loadParams(id: string): PValue | undefined {
-  try {
-    const text = localStorage.getItem(STORAGE_PREFIX + id);
-    return text ? fromJson(text) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function saveParams(id: string, value: PValue | undefined) {
-  try {
-    if (value === undefined) localStorage.removeItem(STORAGE_PREFIX + id);
-    else localStorage.setItem(STORAGE_PREFIX + id, toJson(value, ''));
-  } catch {
-    // 保存できない環境（プライベートウィンドウなど）では保存しない
-  }
-}
 
 type Tab = 'sql' | 'execute' | 'explain' | 'template';
 const TAB_KEY = 'mybatis-pg.tab';
@@ -112,6 +94,7 @@ function Workspace({ api }: { api: Api }) {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
   const panes = usePaneWidths();
+  const [bulk, setBulk] = useState(false);
   /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
   const [editing, setEditing] = useState<'local' | 'global'>('local');
 
@@ -262,7 +245,24 @@ function Workspace({ api }: { api: Api }) {
   return (
     <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
+        <button type="button" className="bulk-open" onClick={() => setBulk(true)} title="保存してある値で、statement をまとめて EXPLAIN する">
+          一括チェック
+        </button>
         <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} />
+        {bulk && (
+          <BulkCheck
+            api={api}
+            conn={conn}
+            statements={statements}
+            globalValues={globals.values}
+            onOpen={(id) => {
+              select(id);
+              setTab('explain');
+              saveTab('explain');
+            }}
+            onClose={() => setBulk(false)}
+          />
+        )}
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
