@@ -187,6 +187,7 @@ public class SqlRenderer {
     // 4. 値を解決し、目印をリテラルに置き換える
     List<Binding> bindings = new ArrayList<>();
     StringBuilder literal = new StringBuilder();
+    StringBuilder numbered = new StringBuilder();
     int pos = 0;
     for (int i = 0; i < mappings.size(); i++) {
       ParameterMapping pm = mappings.get(i);
@@ -195,11 +196,13 @@ public class SqlRenderer {
       Object value = resolveValue(pm, boundSql, parameterObject);
       bindings.add(new Binding(i + 1, pm.getProperty(), value));
       literal.append(markedSql, pos, at).append(SqlLiteral.of(value));
+      numbered.append(markedSql, pos, at).append('$').append(i + 1);
       pos = at + marker.length();
     }
     literal.append(markedSql.substring(pos));
+    numbered.append(markedSql.substring(pos));
 
-    return new Result(boundSql.getSql(), bindings, literal.toString());
+    return new Result(boundSql.getSql(), bindings, literal.toString(), numbered.toString());
   }
 
   /**
@@ -280,11 +283,14 @@ public class SqlRenderer {
     public final String placeholderSql;
     public final List<Binding> bindings;
     public final String literalSql;
+    /** パラメータを $1, $2, ... にした SQL（PREPARE 用） */
+    public final String numberedSql;
 
-    Result(String placeholderSql, List<Binding> bindings, String literalSql) {
+    Result(String placeholderSql, List<Binding> bindings, String literalSql, String numberedSql) {
       this.placeholderSql = placeholderSql;
       this.bindings = bindings;
       this.literalSql = literalSql;
+      this.numberedSql = numberedSql;
     }
   }
 }

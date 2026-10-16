@@ -92,4 +92,23 @@ class QueryExecutorPgTest {
         () -> explain("insert", params("id", 5000L, "name", "x"), o));
     assertTrue(e.getMessage().contains("read-only"), e.getMessage());
   }
+
+  @Test
+  void 六回目の計画を見る() throws Exception {
+    QueryExecutor.ExplainOptions o = new QueryExecutor.ExplainOptions();
+    o.sixthExecution = true;
+    QueryExecutor.ExplainResult r = explain("find", params("ids", java.util.Arrays.asList(1L, 2L)), o);
+    assertTrue(r.plan.contains("\"Plan\""), r.plan);
+    assertTrue(r.generic != null, "汎用プランかどうかを判定する");
+    // 更新系でも 5 回実行されることはなく、最後の ANALYZE もロールバックする
+    explain("insert", params("id", 5000L, "name", "x"), o);
+    assertEquals(1000, count());
+  }
+
+  @Test
+  void パラメータがなければ汎用プランの確認はできない() {
+    QueryExecutor.ExplainOptions o = new QueryExecutor.ExplainOptions();
+    o.sixthExecution = true;
+    assertThrows(IllegalStateException.class, () -> explain("find", params(), o));
+  }
 }

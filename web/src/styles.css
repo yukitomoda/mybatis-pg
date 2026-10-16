@@ -1215,3 +1215,7 @@ button.open-file:focus-visible {
 .finding-mark.info {
   background: var(--accent);
 }
+
+.notes.generic p {
+  margin: 0.3rem 0 0;
+}

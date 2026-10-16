@@ -718,6 +718,9 @@ public final class ToolServer {
       if (req.has("timeoutSeconds")) {
         options.timeoutSeconds = Math.max(1, Math.min(3600, req.get("timeoutSeconds").getAsInt()));
       }
+      if (req.has("sixthExecution")) {
+        options.sixthExecution = req.get("sixthExecution").getAsBoolean();
+      }
     } catch (RuntimeException e) {
       sendJson(ex, 400, error("analyze・buffers・readOnly は真偽値、timeoutSeconds は整数で指定してください"));
       return;
@@ -728,10 +731,12 @@ public final class ToolServer {
       sendJson(ex, 404, error("statement がありません: " + statementId));
       return;
     }
-    if (connections.get(connectionId) == null) {
+    ConnectionStore.Profile profile = connections.get(connectionId);
+    if (profile == null) {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
+    options.stringUnspecified = profile.params != null && profile.params.matches("(?i).*\\bstringtype=unspecified\\b.*");
     QueryExecutor.ExplainResult r;
     try {
       r = QueryExecutor.explain(renderer, statementId, parameters, () -> connections.open(connectionId), options);
@@ -745,6 +750,7 @@ public final class ToolServer {
     body.put("warnings", r.warnings);
     body.put("elapsedMillis", r.elapsedMillis);
     body.put("analyze", options.analyze);
+    body.put("generic", r.generic);
     sendJson(ex, 200, body);
   }
 

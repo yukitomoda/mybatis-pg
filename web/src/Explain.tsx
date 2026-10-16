@@ -17,12 +17,14 @@ interface Options {
   buffers: boolean;
   readOnly: boolean;
   timeoutSeconds: number;
+  /** 6 回目の計画（汎用プランになるか）を見る */
+  sixthExecution: boolean;
 }
 
 const OPTIONS_KEY = 'mybatis-pg.explain';
 
 function loadOptions(): Options {
-  const defaults: Options = { analyze: true, buffers: true, readOnly: false, timeoutSeconds: 60 };
+  const defaults: Options = { analyze: true, buffers: true, readOnly: false, timeoutSeconds: 60, sixthExecution: false };
   try {
     return { ...defaults, ...(JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}') as Partial<Options>) };
   } catch {
@@ -44,6 +46,8 @@ interface Shown {
   /** 元の結果（コピー用） */
   raw: string;
   source: string;
+  /** 6 回目の計画を見たとき、汎用プランだったか */
+  generic: boolean | null;
 }
 
 export function ExplainPanel({
@@ -82,7 +86,8 @@ export function ExplainPanel({
       setShown({
         plan: parsePlan(r.plan),
         raw: r.plan,
-        source: `${current.name} で取得（${r.analyze ? 'ANALYZE、ロールバック済み' : '計画のみ'}、${r.elapsedMillis} ms）`,
+        source: `${current.name} で取得（${options.sixthExecution ? '6 回目の計画、' : ''}${r.analyze ? 'ANALYZE、ロールバック済み' : '計画のみ'}、${r.elapsedMillis} ms）`,
+        generic: r.generic,
       });
     } catch (e) {
       onApiError(e);
@@ -95,7 +100,7 @@ export function ExplainPanel({
 
   const showPasted = () => {
     try {
-      setShown({ plan: parsePlan(pasted), raw: pasted, source: '貼り付けた結果' });
+      setShown({ plan: parsePlan(pasted), raw: pasted, source: '貼り付けた結果', generic: null });
       setError(null);
       setPasting(false);
     } catch (e) {
@@ -123,6 +128,10 @@ export function ExplainPanel({
         <label className="check" title="更新系の SQL はエラーにする">
           <input type="checkbox" checked={options.readOnly} onChange={(e) => set({ readOnly: e.target.checked })} />
           読み取り専用
+        </label>
+        <label className="check" title="JDBC は同じ SQL を 6 回目以降、サーバ側で準備した文として実行し、値に依らない計画（汎用プラン）を使うことがある。そのときの計画を見る（5 回分は計画を作るだけで実行しない）">
+          <input type="checkbox" checked={options.sixthExecution} onChange={(e) => set({ sixthExecution: e.target.checked })} />
+          6 回目の計画（汎用プランの確認）
         </label>
         <label className="check">
           タイムアウト
@@ -217,6 +226,24 @@ function PlanView({ shown }: { shown: Shown }) {
           元の結果をコピー
         </button>
       </div>
+      {shown.generic !== null && (
+        <div className={shown.generic ? 'notes warn generic' : 'notes info generic'}>
+          {shown.generic ? (
+            <>
+              <strong>6 回目以降は汎用プラン（パラメータの値を使わない計画）が選ばれます。</strong>
+              アプリで同じ SQL を繰り返し実行すると、この計画で動きます。値によって最適な計画が違う場合（特定の値だけ行が多いなど）は、遅くなることがあります。
+              値ごとの計画と比べるには、このオプションを外して EXPLAIN してください。
+              {findings.some((f) => f.title.startsWith('実際の行数が見積もり')) && (
+                <p className="generic-misestimate">
+                  汎用プランでは、パラメータの値を見ずに行数を見積もります。下の「見積もりのずれ」は、そのために起きている可能性があります。値ごとの計画では見積もりが合っているなら、汎用プランが原因です。
+                </p>
+              )}
+            </>
+          ) : (
+            <>6 回目以降も、値ごとの計画が選ばれます（汎用プランは使われません）。</>
+          )}
+        </div>
+      )}
       <Findings findings={findings} analyzed={plan.analyzed} onReveal={reveal} />
       <div className="grid-scroll plan-scroll">
         <table className="plan-table">

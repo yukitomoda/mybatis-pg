@@ -42,6 +42,9 @@ class SqlRendererTest {
     assertEquals("SELECT id, '?' AS q /* ? */ FROM users WHERE id = 10 AND tags ?| array['a', 'b'] -- ? "
         + "AND name = 'O''Reilly'", normalize(r.literalSql));
     assertEquals(Arrays.asList("1: id = 10", "2: name = O'Reilly"), strings(r.bindings));
+    // PREPARE 用には、パラメータの位置だけを $1, $2 にする
+    assertEquals("SELECT id, '?' AS q /* ? */ FROM users WHERE id = $1 AND tags ?| array['a', 'b'] -- ? "
+        + "AND name = $2", normalize(r.numberedSql));
   }
 
   @Test

@@ -9,6 +9,7 @@ import java.sql.SQLWarning;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * statement を DB で実行する。
@@ -130,6 +131,13 @@ public final class QueryExecutor {
     /** 読み取り専用のトランザクションで実行する（更新系はエラーになる） */
     public boolean readOnly;
     public int timeoutSeconds = 300;
+    /**
+     * 汎用プランの確認。PREPARE してから計画を 5 回作り（実行はしない）、6 回目の計画を EXPLAIN する。
+     * JDBC が同じ SQL を繰り返し実行したときに、サーバが選ぶ計画が見える。
+     */
+    public boolean sixthExecution;
+    /** 接続パラメータに stringtype=unspecified があるか（PREPARE するときの文字列の型が変わる） */
+    public boolean stringUnspecified;
   }
 
   public static final class ExplainResult {
@@ -139,6 +147,8 @@ public final class QueryExecutor {
     public final String plan;
     public final List<String> warnings = new ArrayList<>();
     public long elapsedMillis;
+    /** 6 回目の計画を見たとき、汎用プラン（パラメータの値を使わない計画）だったか。それ以外は null */
+    public Boolean generic;
 
     ExplainResult(String sql, String plan) {
       this.sql = sql;
@@ -152,6 +162,9 @@ public final class QueryExecutor {
    */
   public static ExplainResult explain(SqlRenderer renderer, String statementId, Object parameters,
       ConnectionFactory connections, ExplainOptions options) throws ExecutionException {
+    if (options.sixthExecution) {
+      return explainSixth(renderer, statementId, parameters, connections, options);
+    }
     SqlRenderer.Bound bound = renderer.bind(statementId, parameters);
     // BUFFERS は ANALYZE と一緒でないと使えない（PostgreSQL 11）
     String explain = "EXPLAIN (ANALYZE " + options.analyze + ", BUFFERS " + (options.analyze && options.buffers)
@@ -199,6 +212,115 @@ public final class QueryExecutor {
         // 閉じられなくても結果は変わらない
       }
     }
+  }
+
+  /** PREPARE する文の名前 */
+  private static final String PREPARED = "mybatis_pg_explain";
+
+  /** 汎用プランの確認: PREPARE して、計画を 5 回作ってから 6 回目を EXPLAIN する */
+  private static ExplainResult explainSixth(SqlRenderer renderer, String statementId, Object parameters,
+      ConnectionFactory connections, ExplainOptions options) throws ExecutionException {
+    SqlRenderer.Bound bound = renderer.bind(statementId, parameters);
+    SqlRenderer.Result rendered = renderer.render(statementId, parameters);
+    if (rendered.bindings.isEmpty()) {
+      throw new IllegalStateException("バインドするパラメータがないため、汎用プランと値ごとの計画の違いはありません");
+    }
+    // パラメータの型は JDBC が送る型に合わせる。値は型を決めないリテラルで渡す
+    List<String> types = new ArrayList<>();
+    List<String> values = new ArrayList<>();
+    for (SqlRenderer.Binding b : rendered.bindings) {
+      types.add(pgType(b.value, options.stringUnspecified));
+      values.add(SqlLiteral.of(b.value));
+    }
+    String prepare = "PREPARE " + PREPARED + "(" + String.join(", ", types) + ") AS " + rendered.numberedSql;
+    String execute = "EXECUTE " + PREPARED + "(" + String.join(", ", values) + ")";
+    String explain = "EXPLAIN (ANALYZE " + options.analyze + ", BUFFERS " + (options.analyze && options.buffers)
+        + ", FORMAT JSON) " + execute;
+
+    Connection c;
+    try {
+      c = connections.open();
+    } catch (SQLException | RuntimeException e) {
+      throw new ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+    try {
+      c.setAutoCommit(false);
+      long start = System.nanoTime();
+      String plan;
+      try (Statement s = c.createStatement()) {
+        if (options.readOnly) {
+          s.execute("SET TRANSACTION READ ONLY");
+        }
+        s.setQueryTimeout(options.timeoutSeconds);
+        s.execute(prepare);
+        // 計画だけを作る（実行しない）。サーバは 5 回までは値ごとの計画を作り、6 回目から汎用プランを使うかを決める
+        for (int i = 0; i < 5; i++) {
+          try (ResultSet rs = s.executeQuery("EXPLAIN (FORMAT JSON) " + execute)) {
+            while (rs.next()) {
+              // 読み捨てる
+            }
+          }
+        }
+        try (ResultSet rs = s.executeQuery(explain)) {
+          StringBuilder sb = new StringBuilder();
+          while (rs.next()) {
+            sb.append(rs.getString(1));
+          }
+          plan = sb.toString();
+        }
+      }
+      ExplainResult result = new ExplainResult(bound.sql(), plan);
+      result.warnings.addAll(bound.warnings);
+      result.elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+      // 汎用プランでは、条件にパラメータ（$1 など）がそのまま残る
+      result.generic = Pattern.compile("\\$\\d+").matcher(plan).find();
+      c.rollback();
+      return result;
+    } catch (SQLException | RuntimeException e) {
+      String rollback = rollback(c);
+      throw new ExecutionException(Errors.describe(e) + hint(e) + "\n" + rollback, e);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない（PREPARE した文も接続とともに消える）
+      }
+    }
+  }
+
+  /**
+   * JDBC（pgjdbc）がパラメータに付ける型。MyBatis の TypeHandler が値の Java の型で setXxx を呼ぶのに合わせる。
+   * unknown は、サーバが文脈から型を決める（stringtype=unspecified の文字列や NULL と同じ）。
+   */
+  static String pgType(Object value, boolean stringUnspecified) {
+    if (value == null) {
+      return "unknown";
+    }
+    if (value instanceof String) {
+      return stringUnspecified ? "unknown" : "varchar";
+    }
+    if (value instanceof Long) {
+      return "int8";
+    }
+    if (value instanceof Integer) {
+      return "int4";
+    }
+    if (value instanceof Short) {
+      return "int2";
+    }
+    if (value instanceof java.math.BigDecimal) {
+      return "numeric";
+    }
+    if (value instanceof Double) {
+      return "float8";
+    }
+    if (value instanceof Float) {
+      return "float4";
+    }
+    if (value instanceof Boolean) {
+      return "bool";
+    }
+    return "unknown";
   }
 
   /** 原因がわかりにくいエラーに説明を足す */
