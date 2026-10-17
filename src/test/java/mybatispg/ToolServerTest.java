@@ -190,6 +190,32 @@ class ToolServerTest {
   }
 
   @Test
+  void 下書きの保存() throws Exception {
+    String content = api("GET", "/api/file?path=mappers/UserMapper.xml", null, 200).get("content").getAsString();
+    com.google.gson.Gson gson = new com.google.gson.Gson();
+    String edited = content.replace("FROM users", "FROM users /* x */");
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":" + gson.toJson(content) + ",\"content\":" + gson.toJson(edited) + "}", 200);
+    JsonObject d = api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").get(0).getAsJsonObject();
+    assertEquals("mappers/UserMapper.xml", d.get("file").getAsString());
+    assertEquals(edited, d.get("content").getAsString());
+    assertTrue(d.get("loaded").getAsBoolean());
+    assertFalse(d.get("changed").getAsBoolean());
+
+    // 編集を始めたときと今のファイルが違えば changed
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":\"old\",\"content\":" + gson.toJson(edited) + "}", 200);
+    assertTrue(api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").get(0).getAsJsonObject().get("changed").getAsBoolean());
+    // 中身が今のファイルと同じになった下書きは、一覧を取るときに消す
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":\"old\",\"content\":" + gson.toJson(content) + "}", 200);
+    assertEquals(0, api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").size());
+
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":" + gson.toJson(content) + ",\"content\":\"x\"}", 200);
+    api("POST", "/api/drafts/discard", "{\"files\":[\"mappers/UserMapper.xml\",\"gone.xml\"]}", 200);
+    assertEquals(0, api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").size());
+    api("POST", "/api/drafts/save", "{\"file\":\"../pom.xml\",\"base\":\"\",\"content\":\"x\"}", 400);
+    api("POST", "/api/drafts/discard", "{\"files\":\"x\"}", 400);
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);

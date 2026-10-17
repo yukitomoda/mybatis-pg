@@ -70,6 +70,8 @@ public final class ToolServer {
   private final MapperWorkspace workspace;
   private final ConnectionStore connections;
   private final GlobalStore globals;
+  /** 下書きの保存先。起動した後に useDrafts で決める */
+  private volatile DraftStore draftStore = DraftStore.inMemory();
   private volatile EditorLauncher editor = EditorLauncher.disabled();
   private final byte[] token;
   private final HttpServer server;
@@ -116,6 +118,11 @@ public final class ToolServer {
     ToolServer s = new ToolServer(workspace, connections, globals, port, token, publicUrls);
     s.server.start();
     return s;
+  }
+
+  /** 下書きの保存先を決める */
+  public void useDrafts(DraftStore store) {
+    this.draftStore = store;
   }
 
   /**
@@ -208,6 +215,21 @@ public final class ToolServer {
       case "/api/file":
         if (requireMethod(ex, method, "GET")) {
           file(ex);
+        }
+        break;
+      case "/api/drafts":
+        if (requireMethod(ex, method, "GET")) {
+          listDrafts(ex);
+        }
+        break;
+      case "/api/drafts/save":
+        if (requireMethod(ex, method, "POST")) {
+          saveDraft(ex);
+        }
+        break;
+      case "/api/drafts/discard":
+        if (requireMethod(ex, method, "POST")) {
+          discardDrafts(ex);
         }
         break;
       case "/api/draft/check":
@@ -762,7 +784,7 @@ public final class ToolServer {
   // ---- 下書き（保存していない mapper XML の編集内容） ----
 
   /** 下書きで読み込んだもの。同じ内容で何度も読み込まないよう、最近のものを覚えておく */
-  private final Map<String, SqlRenderer> drafts = new LinkedHashMap<String, SqlRenderer>(16, 0.75f, true) {
+  private final Map<String, SqlRenderer> draftRenderers = new LinkedHashMap<String, SqlRenderer>(16, 0.75f, true) {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -775,11 +797,11 @@ public final class ToolServer {
     SqlRenderer base = workspace.renderer();
     // 元のファイルや他のファイルが読み込み直されたら、作り直す
     String key = System.identityHashCode(base) + "\u0000" + file + "\u0000" + content;
-    synchronized (drafts) {
-      SqlRenderer r = drafts.get(key);
+    synchronized (draftRenderers) {
+      SqlRenderer r = draftRenderers.get(key);
       if (r == null) {
         r = base.withDraft(file, content);
-        drafts.put(key, r);
+        draftRenderers.put(key, r);
       }
       return r;
     }
@@ -819,6 +841,79 @@ public final class ToolServer {
       return null;
     }
     return renderer;
+  }
+
+  /**
+   * 保存してある下書き: {"drafts": [{"file", "base", "content", "updatedAt", "loaded", "changed"}]}（更新の新しい順）。
+   * loaded はそのファイルを読み込んでいるか（消したり名前を変えたりしていないか）、changed は編集を始めた後にファイルが変わったか。
+   * 中身が今のファイルと同じになった下書き（外のエディタで同じ変更を保存したなど）は、ここで消す。
+   */
+  private void listDrafts(HttpExchange ex) throws IOException {
+    List<Map<String, Object>> out = new ArrayList<>();
+    for (DraftStore.Draft d : draftStore.list()) {
+      Path file = mapperFile(d.file);
+      String current = null;
+      if (file != null) {
+        try {
+          current = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+          // 読めなければ、変わったかどうかは分からないものとする
+        }
+      }
+      if (d.content.equals(current)) {
+        draftStore.delete(d.file);
+        continue;
+      }
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("file", d.file);
+      m.put("base", d.base);
+      m.put("content", d.content);
+      m.put("updatedAt", d.updatedAt);
+      m.put("loaded", file != null);
+      m.put("changed", current != null && !current.equals(d.base));
+      out.add(m);
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("drafts", out);
+    sendJson(ex, 200, body);
+  }
+
+  /** 下書きを保存する: {"file", "base", "content"}。content が base と同じなら消す */
+  private void saveDraft(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String file = string(req, "file");
+    String base = string(req, "base");
+    String content = string(req, "content");
+    if (mapperFile(file) == null || base == null || content == null) {
+      sendJson(ex, 400, error("下書きのファイルが、読み込んでいる mapper XML ではありません"));
+      return;
+    }
+    draftStore.save(file, base, content);
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
+  }
+
+  /** 下書きを消す: {"files": [...]}（読み込んでいないファイルの下書きも消せる） */
+  private void discardDrafts(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    List<String> files;
+    try {
+      files = strings(req, "files");
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    for (String f : files) {
+      if (f != null) {
+        draftStore.delete(f);
+      }
+    }
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
   }
 
   /** mapper XML の中身: {"file", "content"}。読み込んでいる mapper XML だけを返す */

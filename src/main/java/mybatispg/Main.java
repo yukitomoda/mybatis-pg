@@ -108,8 +108,14 @@ public final class Main {
     GlobalStore globals = GlobalStore.load(globalsFile, base == null ? "" : base.toString());
     System.out.println("共通パラメータ: " + globalsFile);
 
+    // mapper XML の編集中の内容（プロジェクトごと）
+    Path draftsDir = configDir.resolve("drafts");
+    DraftStore drafts = DraftStore.open(draftsDir, base == null ? "" : base.toString());
+    System.out.println("編集中の mapper XML: " + draftsDir);
+
     String token = newToken();
     ToolServer server = startServer(workspace, connections, globals, port, token);
+    server.useDrafts(drafts);
     List<URI> urls = new ArrayList<>();
     for (String template : publicUrls) {
       URI url = publicUrl(resolvePort(template, server.getPort()));
