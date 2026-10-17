@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.1",
     "@codemirror/lang-xml": "6.1.0",
     "@codemirror/language": "6.13.1",
     "@codemirror/lint": "6.9.7",

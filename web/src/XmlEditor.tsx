@@ -1,10 +1,11 @@
 // mapper XML のエディタ（CodeMirror）
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { indentLess, indentMore } from '@codemirror/commands';
+import { HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { xml } from '@codemirror/lang-xml';
 import type { Diagnostic } from '@codemirror/lint';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
@@ -35,6 +36,46 @@ const highlight = HighlightStyle.define([
   { tag: [tags.comment, tags.processingInstruction, tags.documentMeta], color: 'var(--muted)' },
 ]);
 
+/** ファイルの字下げの書き方（タブ文字か、スペース何個か）を、行頭の字下げから推し量る */
+export function detectIndent(text: string): string {
+  let tabs = 0;
+  const widths = new Map<number, number>();
+  let prev = 0;
+  for (const line of text.split('\n')) {
+    const m = /^[ \t]*/.exec(line)![0];
+    if (m.length === line.length) continue;
+    if (m.startsWith('\t')) {
+      tabs++;
+      continue;
+    }
+    // 前の行との字下げの差を数える
+    const diff = Math.abs(m.length - prev);
+    if (diff === 2 || diff === 4) widths.set(diff, (widths.get(diff) ?? 0) + 1);
+    prev = m.length;
+  }
+  const two = widths.get(2) ?? 0;
+  const four = widths.get(4) ?? 0;
+  if (tabs > two + four) return '\t';
+  return four > two ? '    ' : '  ';
+}
+
+/**
+ * Tab キー: 選択がなければカーソルの位置に字下げを入れ、選択があればその行をまとめて字下げする。Shift+Tab で戻す。
+ * （Esc を押してから Tab を押すと、エディタの外へ移れる）
+ */
+const tabKeys = keymap.of([
+  {
+    key: 'Tab',
+    run: (view) => {
+      if (view.state.selection.ranges.some((r) => !r.empty)) return indentMore(view);
+      const unit = view.state.facet(indentUnit);
+      view.dispatch(view.state.replaceSelection(unit));
+      return true;
+    },
+    shift: indentLess,
+  },
+]);
+
 export function XmlEditor({
   value,
   onChange,
@@ -62,6 +103,8 @@ export function XmlEditor({
         extensions: [
           basicSetup,
           xml(),
+          indentUnit.of(detectIndent(value)),
+          tabKeys,
           syntaxHighlighting(highlight),
           lintGutter(),
           theme,

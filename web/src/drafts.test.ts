@@ -19,3 +19,12 @@ describe('statementLine', () => {
     expect(statementLine(xml, 'a.B.nothing')).toBeNull();
   });
 });
+
+describe('detectIndent', () => {
+  it('ファイルの字下げに合わせる', async () => {
+    const { detectIndent } = await import('./XmlEditor');
+    expect(detectIndent('<a>\n  <b>\n    <c/>\n  </b>\n</a>')).toBe('  ');
+    expect(detectIndent('<a>\n    <b>\n        <c/>\n    </b>\n</a>')).toBe('    ');
+    expect(detectIndent('<a>\n\t<b>\n\t\t<c/>\n\t</b>\n</a>')).toBe('\t');
+  });
+});
