@@ -87,6 +87,8 @@ export interface Binding {
 export interface RenderResponse {
   placeholderSql: string;
   literalSql: string;
+  /** バインド変数を $1, $2, ... にした SQL */
+  numberedSql: string;
   bindings: Binding[];
 }
 
@@ -367,9 +369,18 @@ export function createApi(token: string) {
             `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
-    /** SQL の一部（サブクエリ・CTE など）を読み取り専用で実行する（必ずロールバックする） */
-    runPart: (connectionId: string, sql: string, maxRows = 200) =>
-      call<ResultTable & { total: number | null; elapsedMillis: number }>('api/part', post(JSON.stringify({ connectionId, sql, maxRows }))),
+    /**
+     * statement の SQL の一部（サブクエリ・CTE など）を、本番と同じバインド変数で、読み取り専用で実行する（必ずロールバックする）。
+     * sql は番号付き（$1, $2, ...。render の numberedSql と同じ番号）
+     */
+    runPart: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, sql: string, maxRows = 200) =>
+      call<ResultTable & { total: number | null; elapsedMillis: number }>(
+        'api/part',
+        post(
+          `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},` +
+            `"sql":${JSON.stringify(sql)},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
+        ),
+      ),
     tables: (connectionId: string, tables: string[]) =>
       call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */

@@ -1,6 +1,7 @@
 // DB での実行と、接続先の設定
-import { useEffect, useRef, useState } from 'react';
-import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, ResultTable, VaultStatus } from './api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, RenderResponse, ResultTable, VaultStatus } from './api';
+import { countParts, PartsPanel } from './Subquery';
 import type { PValue } from './params';
 
 const CONNECTION_KEY = 'mybatis-pg.connection';
@@ -240,6 +241,7 @@ export function ExecutePanel({
   value,
   draft,
   ready,
+  rendered,
   onApiError,
 }: {
   conn: Connections;
@@ -249,9 +251,12 @@ export function ExecutePanel({
   draft: DraftParam;
   /** 入力に誤りがなく、SQL を組み立てられる状態 */
   ready: boolean;
+  /** 組み立てた SQL（部分ごとに実行するのに使う） */
+  rendered: RenderResponse | null;
   onApiError: (e: unknown) => void;
 }) {
   const [commit, setCommit] = useState(false);
+  const partCount = useMemo(() => (rendered ? countParts(rendered.numberedSql) : 0), [rendered?.numberedSql]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ExecuteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -290,6 +295,13 @@ export function ExecutePanel({
 
       {error && <pre className="render-error">{error}</pre>}
       {result && !error && <ExecuteResult result={result} />}
+
+      {rendered && ready && partCount > 0 && (
+        <details className="parts">
+          <summary>部分ごとに実行（サブクエリ・CTE {partCount} 個）</summary>
+          <PartsPanel conn={conn} statementId={statementId} value={value} draft={draft} rendered={rendered} onApiError={onApiError} />
+        </details>
+      )}
     </div>
   );
 }
