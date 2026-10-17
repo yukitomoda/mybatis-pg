@@ -190,10 +190,27 @@ function Workspace({ api }: { api: Api }) {
   }, [api, generation, drafts.version, playgroundVersion]);
 
   const target = statements.find((s) => s.id === selected) ?? null;
+  /**
+   * 選んでいる statement が最後にあったファイル。XML の誤りで statement が一時的に一覧から消えても、
+   * そのファイルをエディタで開いたままにして、誤りを直せるようにする
+   */
+  const [lastFile, setLastFile] = useState<{ id: string; file: string } | null>(loadLastFile);
+  if (target && (lastFile?.id !== target.id || lastFile.file !== target.file)) {
+    setLastFile({ id: target.id, file: target.file });
+    saveLastFile({ id: target.id, file: target.file });
+  }
+  const editorFile = target?.file ?? (lastFile && lastFile.id === selected ? lastFile.file : null);
+  const brokenFile = !target && editorFile !== null && playgrounds.some((p) => p.file === editorFile && p.errors.length > 0);
   // 編集中の mapper XML があれば、組み立て・実行・EXPLAIN にその内容を使う
   const draftP = draftParam(drafts.get(target?.file));
   // プレイグラウンドは自動で保存するので、保存するたびに組み立て直す
   const playgroundKey = target?.playground ? playgroundVersion : 0;
+
+  /** statement が見つからないときの説明（XML を読み込めないためか、消えたためか。表示するときに決める） */
+  const notFoundMessage = brokenFile
+    ? 'XML を読み込めないため、この statement を使えません。テンプレートのタブで XML を直してください'
+    : 'この statement は見つかりません（削除または改名された可能性があります）';
+  const describe = (message: string | null) => (message === NOT_FOUND ? notFoundMessage : message);
 
   // パラメータの木（XML が変わったら取り直す）
   useEffect(() => {
@@ -214,7 +231,7 @@ function Workspace({ api }: { api: Api }) {
         if (!active) return;
         handleError(e);
         setSchema(null);
-        const message = e instanceof ApiError && e.status === 404 ? 'この statement は見つかりません（削除または改名された可能性があります）' : String(e.message ?? e);
+        const message = e instanceof ApiError && e.status === 404 ? NOT_FOUND : String(e.message ?? e);
         setSchemaError(message);
         // 前の SQL が今の XML のものに見えないよう、消してエラーを出す
         setResult(null);
@@ -426,7 +443,7 @@ function Workspace({ api }: { api: Api }) {
           {selected && <code className="statement-id">{selected}</code>}
         </header>
         {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
-        {schemaError && <p className="error-text">{schemaError}</p>}
+        {schemaError && <p className="error-text">{describe(schemaError)}</p>}
         {selected && schema && (
           <>
             <div className="tabs mode" role="tablist">
@@ -515,7 +532,7 @@ function Workspace({ api }: { api: Api }) {
                 未設定の項目（NULL として扱われます）: {missing.map((m) => <code key={m}>{m}</code>)}
               </div>
             )}
-            {renderError && <pre className="render-error">{renderError}</pre>}
+            {renderError && <pre className="render-error">{describe(renderError)}</pre>}
             {resolved.generated.length > 0 && (
               <div className="notes info generated">
                 式で作った値:
@@ -583,17 +600,17 @@ function Workspace({ api }: { api: Api }) {
               playground={playgroundOf(looseFile)}
             />
           ) : selected ? (
-            !templateSeen ? null : target ? (
+            !templateSeen ? null : editorFile ? (
               <FileEditor
                 api={api}
                 statementId={selected}
-                file={target.file}
+                file={editorFile}
                 drafts={drafts}
                 generation={generation}
                 onApiError={handleError}
                 opener={opener}
                 visible={tab === 'template'}
-                playground={playgroundOf(target.file)}
+                playground={playgroundOf(editorFile)}
               />
             ) : (
               <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
@@ -809,6 +826,29 @@ function StatementTree({
       </nav>
     </div>
   );
+}
+
+/** statement が見つからないことを表す印（説明は表示するときに決める） */
+const NOT_FOUND = '\u0000not-found';
+
+const LAST_FILE_KEY = 'mybatis-pg.last-file';
+
+/** 選んでいた statement が最後にあったファイル（読み込み直しても、XML の誤りを直せるように覚えておく） */
+function loadLastFile(): { id: string; file: string } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_FILE_KEY) ?? 'null');
+    return v && typeof v.id === 'string' && typeof v.file === 'string' ? { id: v.id, file: v.file } : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastFile(v: { id: string; file: string }) {
+  try {
+    localStorage.setItem(LAST_FILE_KEY, JSON.stringify(v));
+  } catch {
+    // 覚えられない環境では、開いている間だけ覚える
+  }
 }
 
 /** statement 一覧で、プレイグラウンドの欄を閉じたかを覚えておく key（ディレクトリと同じく、既定は開く） */
