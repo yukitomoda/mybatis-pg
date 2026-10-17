@@ -9,7 +9,7 @@ import type { GlobalSet, StatementsSettings } from './globalModel';
 import type { ParamSchema } from './params';
 import { flatten, parsePlan } from './plan';
 import type { Readiness } from './readiness';
-import { isReady, readiness } from './readiness';
+import { isReady, problemLabel, readiness } from './readiness';
 import type { StatementEntry } from './tree';
 
 interface Row {
@@ -96,16 +96,28 @@ export function BulkCheck({
   }, [schemas, statements, globalSets, globalStatements, shown]);
 
   // 足りないものがある statement は、選んであっても実行しない
-  const targets = statements.filter((s) => selection.has(s.id) && isReady(status?.get(s.id)));
-  const skipped = status ? statements.filter((s) => selection.has(s.id) && !isReady(status.get(s.id))).length : 0;
+  // 調べ終わるまでは実行しない
+  const selected = status ? statements.filter((s) => selection.has(s.id) && status.has(s.id)) : [];
+  const readyTargets = selected.filter((s) => isReady(status?.get(s.id)));
+  const notReady = selected.filter((s) => !isReady(status?.get(s.id)));
+  /** 値が足りないものを選んでいるときに、実行の前に出す確認 */
+  const [confirming, setConfirming] = useState(false);
+  const [runCount, setRunCount] = useState(0);
   const select = (ids: Set<string>) => {
     setSelection(ids);
     saveSelection(ids);
   };
 
-  const run = async () => {
+  const start = () => {
+    if (notReady.length > 0) setConfirming(true);
+    else run(readyTargets);
+  };
+
+  const run = async (targets: StatementEntry[]) => {
     const current = conn.current;
     if (!current) return;
+    setConfirming(false);
+    setRunCount(targets.length);
     cancelled.current = false;
     setRunning(true);
     setRows([]);
@@ -128,9 +140,8 @@ export function BulkCheck({
         error: null,
       };
       try {
-        // 実行の直前にも確かめ、足りないものがあれば SQL を発行しない
         const ready = status?.get(s.id);
-        if (!ready || !isReady(ready)) throw new Error('値が足りないため実行しませんでした');
+        if (!ready) throw new Error('パラメータを調べられませんでした');
         const r = await api.explain(s.id, ready.value, current.id, {
           analyze: analyze && !planOnly,
           buffers: analyze && !planOnly,
@@ -207,17 +218,40 @@ export function BulkCheck({
             </label>
             {running ? (
               <button type="button" onClick={() => (cancelled.current = true)}>
-                止める（{progress} / {targets.length}）
+                止める（{progress} / {runCount}）
               </button>
             ) : (
-              <button type="button" className="run" disabled={!conn.current || targets.length === 0} onClick={run}>
-                選んだ {targets.length} 件をチェック
+              <button type="button" className="run" disabled={!conn.current || selected.length === 0 || confirming} onClick={start}>
+                選んだ {selected.length} 件をチェック
               </button>
             )}
           </div>
           <p className="hint">計画のみ（既定）では SQL を実行しません。行をクリックすると、その statement の EXPLAIN タブを開きます。</p>
           {schemaError && <p className="error-text">{schemaError}</p>}
-          {skipped > 0 && <p className="notes warn">選んだうち {skipped} 件は、値が足りないため実行しません。</p>}
+          {confirming && (
+            <div className="notes warn bulk-confirm" role="alertdialog" aria-label="値が足りない statement の確認">
+              <p>選んだうち {notReady.length} 件は値が足りません。未設定の項目は NULL として扱われるため、エラーになったり実際とは違う計画になったりします。</p>
+              <ul>
+                {notReady.slice(0, 10).map((s) => (
+                  <li key={s.id}>
+                    <code>{s.id}</code> {problemLabel(status!.get(s.id)!).detail}
+                  </li>
+                ))}
+                {notReady.length > 10 && <li>ほか {notReady.length - 10} 件</li>}
+              </ul>
+              <div className="actions">
+                <button type="button" className="run" disabled={readyTargets.length === 0} onClick={() => run(readyTargets)}>
+                  値がそろった {readyTargets.length} 件だけチェック
+                </button>
+                <button type="button" onClick={() => run(selected)}>
+                  足りないものも含めて {selected.length} 件チェック
+                </button>
+                <button type="button" className="link" onClick={() => setConfirming(false)}>
+                  やめる
+                </button>
+              </div>
+            </div>
+          )}
           {rows.length > 0 && (
             <div className="grid-scroll bulk-scroll">
               <table className="bulk-table">

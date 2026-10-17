@@ -1,4 +1,5 @@
-// 一括チェックで実行する statement を選ぶツリー（フォルダ・ファイルごとにまとめて選べる）。値が足りないものは選べない
+// 一括チェックで実行する statement を選ぶツリー（フォルダ・ファイルごとにまとめて選べる）。
+// まとめて選ぶときは値がそろったものだけを選ぶ。値が足りないものは 1 つずつなら選べる（実行の前に確認する）
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Readiness } from './readiness';
 import { isReady, problemLabel } from './readiness';
@@ -29,22 +30,37 @@ function idsUnder(n: TreeNode): string[] {
   return n.kind === 'file' ? n.statements.map((s) => s.id) : n.children.flatMap(idsUnder);
 }
 
-/** ids: その中で選べる（値がそろった）statement */
-function Check({ ids, selected, onChange, label }: { ids: string[]; selected: Set<string>; onChange: (ids: string[], on: boolean) => void; label: string }) {
+/**
+ * フォルダ・ファイルのチェック。付けると値がそろったもの（readyIds）だけを選び、外すと中のすべて（ids）を外す。
+ */
+function Check({
+  ids,
+  readyIds,
+  selected,
+  onChange,
+  label,
+}: {
+  ids: string[];
+  readyIds: string[];
+  selected: Set<string>;
+  onChange: (ids: string[], on: boolean) => void;
+  label: string;
+}) {
   const ref = useRef<HTMLInputElement>(null);
   const count = ids.filter((id) => selected.has(id)).length;
-  const all = count > 0 && count === ids.length;
+  const all = readyIds.length > 0 && readyIds.every((id) => selected.has(id));
+  const partial = count > 0 && !all;
   useEffect(() => {
-    if (ref.current) ref.current.indeterminate = count > 0 && !all;
-  }, [count, all]);
+    if (ref.current) ref.current.indeterminate = partial;
+  }, [partial]);
   return (
     <input
       ref={ref}
       type="checkbox"
       aria-label={`${label} を選ぶ`}
       checked={all}
-      disabled={ids.length === 0}
-      onChange={(e) => onChange(ids, e.target.checked)}
+      disabled={readyIds.length === 0 && count === 0}
+      onChange={(e) => onChange(e.target.checked ? readyIds : ids, e.target.checked)}
     />
   );
 }
@@ -82,7 +98,7 @@ export function BulkPicker({
   // 絞り込んでいるときは、すべて開く
   const expandAll = query.trim() !== '' || onlySelected;
   const readyVisible = visible.filter((s) => ready(s.id)).map((s) => s.id);
-  const selectedCount = statements.filter((s) => selected.has(s.id) && ready(s.id)).length;
+  const selectedCount = statements.filter((s) => selected.has(s.id)).length;
 
   const set = (ids: string[], on: boolean) => {
     const next = new Set(selected);
@@ -107,7 +123,7 @@ export function BulkPicker({
         return (
           <li key={n.key}>
             <div className="pick-line">
-              <Check ids={idsUnder(n).filter(ready)} selected={selected} onChange={set} label={n.label} />
+              <Check ids={idsUnder(n)} readyIds={idsUnder(n).filter(ready)} selected={selected} onChange={set} label={n.label} />
               <button type="button" className={`node ${n.kind}`} aria-expanded={isOpen} onClick={() => toggle(n.key)} title={n.key}>
                 <span className="twisty">{isOpen ? '▾' : '▸'}</span>
                 {n.label}
@@ -124,12 +140,7 @@ export function BulkPicker({
                     return (
                       <li key={s.id}>
                         <label className={problem ? 'pick-line stmt not-ready' : 'pick-line stmt'} title={s.id}>
-                          <input
-                            type="checkbox"
-                            checked={!problem && selected.has(s.id)}
-                            disabled={!r || !!problem}
-                            onChange={(e) => set([s.id], e.target.checked)}
-                          />
+                          <input type="checkbox" checked={selected.has(s.id)} disabled={!r} onChange={(e) => set([s.id], e.target.checked)} />
                           <span className="node stmt">{shortId(s.id)}</span>
                           {problem && (
                             <button
