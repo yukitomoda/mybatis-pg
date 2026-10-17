@@ -106,4 +106,14 @@ class SqlRendererTest {
     }
     return out;
   }
+
+  @Test
+  void 番号付きのSQLをはてなに戻す_文字列やコメントの中は変えない() {
+    java.util.List<Integer> numbers = new java.util.ArrayList<>();
+    String sql = SqlRenderer.toPlaceholders(
+        "SELECT '$1', E'\\'$2', \"$3\", $q$ $4 $q$, x$5 -- $6\n /* $7 /* $8 */ */ FROM t WHERE a = $9 AND b IN ($10,$11)",
+        numbers::add);
+    assertEquals("SELECT '$1', E'\\'$2', \"$3\", $q$ $4 $q$, x$5 -- $6\n /* $7 /* $8 */ */ FROM t WHERE a = ? AND b IN (?,?)", sql);
+    assertEquals(java.util.Arrays.asList(9, 10, 11), numbers);
+  }
 }

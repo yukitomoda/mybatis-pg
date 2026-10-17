@@ -628,6 +628,7 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("placeholderSql", r.placeholderSql);
     body.put("literalSql", r.literalSql);
+    body.put("numberedSql", r.numberedSql);
     body.put("bindings", bindings);
     sendJson(ex, 200, body);
   }
@@ -1261,7 +1262,8 @@ public final class ToolServer {
   }
 
   /**
-   * SQL の一部（サブクエリ・CTE など）を読み取り専用で実行する: {"connectionId", "sql", "maxRows"?, "timeoutSeconds"?}。
+   * statement の SQL の一部（サブクエリ・CTE など）を、本番と同じバインド変数で、読み取り専用で実行する。
+   * リクエスト: {"statementId", "parameters", "draft"?, "connectionId", "sql": 番号付き（$1, $2, ...。render の numberedSql と同じ番号）, "maxRows"?, "timeoutSeconds"?}。
    * 応答: {"columns", "columnTypes", "rows", "truncated", "total", "elapsedMillis"}。
    */
   private void runPart(HttpExchange ex) throws IOException {
@@ -1269,10 +1271,22 @@ public final class ToolServer {
     if (req == null) {
       return;
     }
+    String statementId = string(req, "statementId");
     String connectionId = string(req, "connectionId");
     String sql = string(req, "sql");
     if (sql == null || sql.trim().isEmpty()) {
       sendJson(ex, 400, error("sql がありません"));
+      return;
+    }
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
       return;
     }
     if (connectionId == null || connections.get(connectionId) == null) {
@@ -1281,9 +1295,16 @@ public final class ToolServer {
     }
     int maxRows = req.has("maxRows") ? Math.max(1, Math.min(10000, req.get("maxRows").getAsInt())) : 200;
     int timeout = req.has("timeoutSeconds") ? Math.max(1, Math.min(600, req.get("timeoutSeconds").getAsInt())) : 30;
+    SqlRenderer.Bound part;
+    try {
+      part = renderer.bind(statementId, parameters).part(sql);
+    } catch (RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
     QueryExecutor.PartResult r;
     try {
-      r = QueryExecutor.queryPart(sql, () -> connections.open(connectionId), maxRows, timeout);
+      r = QueryExecutor.queryPart(part.sql(), part::setParameters, () -> connections.open(connectionId), maxRows, timeout);
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
       return;

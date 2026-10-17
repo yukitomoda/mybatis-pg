@@ -113,7 +113,7 @@ class QueryExecutorPgTest {
   }
 
   private static QueryExecutor.PartResult part(String sql, int maxRows) throws Exception {
-    return QueryExecutor.queryPart(sql, () -> DriverManager.getConnection(URL), maxRows, 30);
+    return QueryExecutor.queryPart(sql, null, () -> DriverManager.getConnection(URL), maxRows, 30);
   }
 
   @Test
@@ -136,5 +136,21 @@ class QueryExecutorPgTest {
     // ; で区切った別の文は、包んだ括弧の中で構文エラーになる
     assertThrows(QueryExecutor.ExecutionException.class, () -> part("SELECT 1; DELETE FROM items", 10));
     assertEquals(1000, count());
+  }
+
+  @Test
+  void 部分のSQLを本番と同じバインド変数で実行する_foreachの要素も() throws Exception {
+    Map<String, Object> p = params("ids", java.util.Arrays.asList(3L, 5L, 7L));
+    SqlRenderer.Result rendered = RENDERER.render("exec.ItemMapper.find", p);
+    assertTrue(rendered.numberedSql.contains("IN ($1,$2,$3)"), rendered.numberedSql);
+    SqlRenderer.Bound bound = RENDERER.bind("exec.ItemMapper.find", p);
+    // 2 番目の値だけを使う部分
+    SqlRenderer.Bound part = bound.part("SELECT id FROM items WHERE id = $2");
+    QueryExecutor.PartResult r = QueryExecutor.queryPart(part.sql(), part::setParameters, () -> DriverManager.getConnection(URL), 10, 30);
+    assertEquals(java.util.Collections.singletonList(java.util.Collections.singletonList("5")), r.table.rows);
+    // 全体
+    SqlRenderer.Bound whole = bound.part(rendered.numberedSql);
+    assertEquals(Long.valueOf(3), QueryExecutor.queryPart(whole.sql(), whole::setParameters, () -> DriverManager.getConnection(URL), 10, 30).total);
+    assertThrows(IllegalArgumentException.class, () -> bound.part("SELECT $4"));
   }
 }

@@ -319,6 +319,115 @@ public class SqlRenderer {
     public void setParameters(PreparedStatement ps) throws SQLException {
       new DefaultParameterHandler(ms, parameterObject, boundSql).setParameters(ps);
     }
+
+    /**
+     * SQL の一部（サブクエリなど）を、番号付き（$1, $2, ...。render の numberedSql と同じ番号）で受け取り、
+     * ? に戻して実行できる形にする。使っている番号のバインド変数だけを、本番と同じ手順で渡す。
+     */
+    public Bound part(String numberedSql) {
+      List<ParameterMapping> all = boundSql.getParameterMappings();
+      List<ParameterMapping> used = new ArrayList<>();
+      String sql = toPlaceholders(numberedSql, n -> {
+        if (n < 1 || n > all.size()) {
+          throw new IllegalArgumentException("バインド変数の番号がありません: $" + n);
+        }
+        used.add(all.get(n - 1));
+      });
+      BoundSql part = new BoundSql(ms.getConfiguration(), sql, used, parameterObject);
+      // foreach の要素の変数（__frch_...）などを引き継ぐ
+      for (Map.Entry<String, Object> e : additionalParameters(boundSql).entrySet()) {
+        part.setAdditionalParameter(e.getKey(), e.getValue());
+      }
+      return new Bound(ms, parameterObject, part, warnings);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> additionalParameters(BoundSql boundSql) {
+    try {
+      Field f = BoundSql.class.getDeclaredField("additionalParameters");
+      f.setAccessible(true);
+      return (Map<String, Object>) f.get(boundSql);
+    } catch (ReflectiveOperationException e) {
+      throw new IllegalStateException("BoundSql の追加のパラメータを読めません", e);
+    }
+  }
+
+  /**
+   * SQL の $1, $2, ... を ? に戻し、出てきた順に番号を渡す。文字列・引用・ドル記号の引用・コメントの中は変えない。
+   */
+  static String toPlaceholders(String sql, java.util.function.IntConsumer onNumber) {
+    StringBuilder out = new StringBuilder(sql.length());
+    int i = 0;
+    int n = sql.length();
+    while (i < n) {
+      char c = sql.charAt(i);
+      char next = i + 1 < n ? sql.charAt(i + 1) : '\0';
+      int end = i + 1;
+      if (c == '-' && next == '-') {
+        end = sql.indexOf('\n', i);
+        end = end < 0 ? n : end;
+      } else if (c == '/' && next == '*') {
+        int depth = 0;
+        end = i;
+        while (end < n) {
+          if (sql.startsWith("/*", end)) {
+            depth++;
+            end += 2;
+          } else if (sql.startsWith("*/", end)) {
+            depth--;
+            end += 2;
+            if (depth == 0) {
+              break;
+            }
+          } else {
+            end++;
+          }
+        }
+      } else if (c == '\'' || c == '"' || ((c == 'E' || c == 'e') && next == '\'' && (i == 0 || !isWordChar(sql.charAt(i - 1))))) {
+        boolean escapes = c != '\'' && c != '"';
+        char quote = escapes ? '\'' : c;
+        end = escapes ? i + 2 : i + 1;
+        while (end < n) {
+          char d = sql.charAt(end);
+          if (escapes && d == '\\') {
+            end += 2;
+          } else if (d == quote && end + 1 < n && sql.charAt(end + 1) == quote) {
+            end += 2;
+          } else if (d == quote) {
+            end++;
+            break;
+          } else {
+            end++;
+          }
+        }
+      } else if (c == '$' && Character.isDigit(next) && (i == 0 || !isWordChar(sql.charAt(i - 1)))) {
+        end = i + 1;
+        while (end < n && Character.isDigit(sql.charAt(end))) {
+          end++;
+        }
+        onNumber.accept(Integer.parseInt(sql.substring(i + 1, end)));
+        out.append('?');
+        i = end;
+        continue;
+      } else if (c == '$') {
+        java.util.regex.Matcher m = DOLLAR_TAG.matcher(sql).region(i, n);
+        if (m.lookingAt()) {
+          int close = sql.indexOf(m.group(), m.end());
+          end = close < 0 ? n : close + m.group().length();
+        }
+      }
+      end = Math.min(Math.max(end, i + 1), n);
+      out.append(sql, i, end);
+      i = end;
+    }
+    return out.toString();
+  }
+
+  private static final java.util.regex.Pattern DOLLAR_TAG = java.util.regex.Pattern.compile("\\$([A-Za-z_][A-Za-z0-9_]*)?\\$");
+
+  private static boolean isWordChar(char c) {
+    return Character.isLetterOrDigit(c) || c == '_';
   }
 
   public static class Result {

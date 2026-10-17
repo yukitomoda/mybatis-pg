@@ -360,13 +360,20 @@ public final class QueryExecutor {
     public long elapsedMillis;
   }
 
+  /** バインド変数を設定する */
+  public interface ParameterSetter {
+    void set(PreparedStatement ps) throws SQLException;
+  }
+
   /**
-   * SQL の一部（サブクエリ・CTE など、値を埋め込んだもの）を、読み取り専用のトランザクションで実行し、必ずロールバックする。
+   * SQL の一部（サブクエリ・CTE など）を、読み取り専用のトランザクションで実行し、必ずロールバックする。
    * SQL は SELECT * FROM (...) で包む（1 つの問い合わせだけを実行し、; で区切った別の文は構文エラーになる）。
    * あわせて全体の件数を数える。
+   *
+   * @param parameters SQL の ? に値を設定する（null ならバインド変数なし）
    */
-  public static PartResult queryPart(String sql, ConnectionFactory connections, int maxRows, int timeoutSeconds)
-      throws ExecutionException {
+  public static PartResult queryPart(String sql, ParameterSetter parameters, ConnectionFactory connections, int maxRows,
+      int timeoutSeconds) throws ExecutionException {
     Connection c;
     try {
       c = connections.open();
@@ -381,19 +388,24 @@ public final class QueryExecutor {
       PartResult result = new PartResult();
       long start = System.nanoTime();
       // 改行で包む（末尾の -- コメントで閉じ括弧が消えないように）
-      String wrapped = "SELECT * FROM (\n" + sql + "\n) AS part";
-      try (java.sql.Statement s = c.createStatement()) {
-        s.setQueryTimeout(timeoutSeconds);
-        s.setMaxRows(maxRows + 1);
-        try (ResultSet rs = s.executeQuery(wrapped)) {
+      try (PreparedStatement ps = c.prepareStatement("SELECT * FROM (\n" + sql + "\n) AS part")) {
+        ps.setQueryTimeout(timeoutSeconds);
+        ps.setMaxRows(maxRows + 1);
+        if (parameters != null) {
+          parameters.set(ps);
+        }
+        try (ResultSet rs = ps.executeQuery()) {
           result.table = read(rs, maxRows);
         }
       }
       result.elapsedMillis = (System.nanoTime() - start) / 1_000_000;
       if (result.table.truncated) {
-        try (java.sql.Statement s = c.createStatement()) {
-          s.setQueryTimeout(timeoutSeconds);
-          try (ResultSet rs = s.executeQuery("SELECT count(*) FROM (\n" + sql + "\n) AS part")) {
+        try (PreparedStatement ps = c.prepareStatement("SELECT count(*) FROM (\n" + sql + "\n) AS part")) {
+          ps.setQueryTimeout(timeoutSeconds);
+          if (parameters != null) {
+            parameters.set(ps);
+          }
+          try (ResultSet rs = ps.executeQuery()) {
             result.total = rs.next() ? rs.getLong(1) : null;
           }
         }
