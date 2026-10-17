@@ -249,9 +249,10 @@ export function GlobalsScreen({
           keyOf={(s) => s.id}
           label={(s) => s.name}
           selected={(s) => s.id === selected?.id}
+          onPick={(s) => setSelectedId(s.id)}
           onReorder={globals.reorder}
           render={(s) => (
-            <button type="button" className="global-item" onClick={() => setSelectedId(s.id)}>
+            <button type="button" className="global-item">
               {s.name}
             </button>
           )}

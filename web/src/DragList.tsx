@@ -10,6 +10,7 @@ export function DragList<T>({
   render,
   onReorder,
   selected,
+  onPick,
 }: {
   items: T[];
   keyOf: (item: T) => string;
@@ -18,6 +19,8 @@ export function DragList<T>({
   render: (item: T, index: number) => ReactNode;
   onReorder: (items: T[]) => void;
   selected?: (item: T) => boolean;
+  /** 行のどこを押しても選べるようにする */
+  onPick?: (item: T) => void;
 }) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
@@ -38,6 +41,7 @@ export function DragList<T>({
             key={keyOf(item)}
             className={classes.join(' ') || undefined}
             draggable
+            onClick={onPick && (() => onPick(item))}
             onDragStart={(e) => {
               setDragging(i);
               e.dataTransfer.effectAllowed = 'move';

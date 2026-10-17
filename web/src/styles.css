@@ -1716,3 +1716,15 @@ button.bulk-open {
   display: block;
   margin: 0.2rem 0 0.8rem;
 }
+
+/* 共通パラメータの画面の一覧は、行のどこを押しても選べる */
+.globals-list .drag-list li {
+  cursor: pointer;
+  padding: 0 0 0 0.4rem;
+}
+
+.globals-list .drag-list .global-item {
+  align-self: stretch;
+  padding: 0.5rem 0.4rem 0.5rem 0;
+  cursor: pointer;
+}
