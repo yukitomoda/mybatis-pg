@@ -7,7 +7,7 @@ import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
-import { AppliedGlobals, GlobalsScreen, useGlobals } from './Globals';
+import { GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
 import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
@@ -122,6 +122,8 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
+  /** パラメータ欄のタブ: 個別の値か、共通パラメータか */
+  const [paramTab, setParamTab] = useState<'local' | 'global'>('local');
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
   /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
@@ -323,8 +325,16 @@ function Workspace({ api }: { api: Api }) {
         {schemaError && <p className="error-text">{schemaError}</p>}
         {selected && schema && (
           <>
-            {target && (
-              <AppliedGlobals
+            <div className="tabs mode" role="tablist">
+              <button type="button" role="tab" aria-selected={paramTab === 'local'} className={paramTab === 'local' ? 'tab selected' : 'tab'} onClick={() => setParamTab('local')}>
+                個別
+              </button>
+              <button type="button" role="tab" aria-selected={paramTab === 'global'} className={paramTab === 'global' ? 'tab selected' : 'tab'} onClick={() => setParamTab('global')}>
+                共通<span className="hint">（{applied.length}）</span>
+              </button>
+            </div>
+            {paramTab === 'global' && target ? (
+              <StatementGlobals
                 globals={globals}
                 statementId={target.id}
                 onSettings={(id) => {
@@ -332,16 +342,19 @@ function Workspace({ api }: { api: Api }) {
                   go('globals');
                 }}
               />
+            ) : (
+              <>
+                <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
+                {warnings.length > 0 && (
+                  <ul className="notes warn">
+                    {warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+                <JsonPanel value={value} onApply={changeValue} />
+              </>
             )}
-            <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
-            {warnings.length > 0 && (
-              <ul className="notes warn">
-                {warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            )}
-            <JsonPanel value={value} onApply={changeValue} />
             <details className="json-panel">
               <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
               <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>

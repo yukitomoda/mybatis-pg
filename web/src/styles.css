@@ -1587,21 +1587,8 @@ button.bulk-open {
   margin-bottom: 0.5rem;
 }
 
-.globals-list ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.globals-list ol li {
-  display: flex;
-  align-items: center;
-  border-radius: 4px;
-}
 
-.globals-list ol li.selected {
-  background: var(--accent-bg);
-}
 
 
 .globals-list .global-item {
@@ -1610,20 +1597,10 @@ button.bulk-open {
   text-align: left;
   border: none;
   background: none;
-  padding: 0.3rem 0.4rem;
+  padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.globals-list .global-move {
-  visibility: hidden;
-  white-space: nowrap;
-}
-
-.globals-list ol li:hover .global-move,
-.globals-list ol li.selected .global-move {
-  visibility: visible;
 }
 
 .globals-values {
@@ -1651,98 +1628,91 @@ button.bulk-open {
   margin-top: 0;
 }
 
-/* ---- クエリ画面: この statement に関わる共通パラメータ ---- */
 
-.applied-globals {
-  margin-bottom: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-}
+/* ---- ドラッグで並べ替える一覧 ---- */
 
-.applied-globals header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.applied-globals h3 {
-  margin: 0 0 0.2rem;
-}
-
-.applied-globals table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.applied-globals td {
-  padding: 0.1rem 0.4rem 0.1rem 0;
-  vertical-align: baseline;
-}
-
-.applied-globals td:first-child {
-  width: 1.4rem;
-}
-
-.applied-globals .global-name .link {
-  padding: 0;
-  font-weight: 600;
-  color: var(--text);
-  text-decoration: none;
-}
-
-.applied-globals tr.off .global-name .link {
-  color: var(--muted);
-}
-
-.applied-globals .values {
-  font-family: var(--mono);
-  font-size: 12px;
-  max-width: 1px;
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.excludes {
+.drag-list {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.drag-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.drag-list li:hover {
+  background: var(--hover-bg, rgba(127, 127, 127, 0.08));
+}
+
+.drag-list li.selected {
+  background: var(--accent-bg);
+}
+
+.drag-list li.dragging {
+  opacity: 0.4;
+}
+
+.drag-list li.drop-before {
+  border-top-color: var(--accent);
+}
+
+.drag-list li.drop-after {
+  border-bottom-color: var(--accent);
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+  padding: 0 0.15rem;
+}
+
+.drag-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 3px;
+}
+
+/* ---- クエリ画面の共通タブ ---- */
+
+.statement-globals {
+  margin: 0.5rem 0 1rem;
+}
+
+.statement-globals .drag-list li {
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.statement-globals .global-name {
+  white-space: nowrap;
+}
+
+.statement-globals .values {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--mono);
   font-size: 12px;
 }
 
-.excludes li {
+.statement-globals-actions {
   display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
 }
 
-.applied-globals header .link {
-  margin-left: 0.6rem;
-}
-
-.applied-globals .global-move {
-  width: 3.6rem;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.applied-globals .global-move .icon {
-  padding: 0 0.35rem;
-}
-
-.applied-globals .global-name {
-  white-space: nowrap;
-}
-
-/* 出どころの共通パラメータの名前が長くても、隣の欄に重ならないようにする */
-.row .usages .badge.global {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
+.global-default {
+  display: block;
+  margin: 0.2rem 0 0.8rem;
 }

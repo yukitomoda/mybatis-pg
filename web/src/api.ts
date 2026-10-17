@@ -2,7 +2,7 @@
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
-import type { GlobalSet, StatementsSettings } from './globalModel';
+import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
 import type { StatementEntry } from './tree';
 
 export interface LoadError {
@@ -129,7 +129,7 @@ export class ApiError extends Error {
 export interface GlobalsResponse {
   /** 一覧の順が既定の順番（下ほど優先） */
   sets: GlobalSet[];
-  /** statement ごとの設定（無効にしたもの、入れ替えた順番） */
+  /** statement ごとの設定（追加したもの、外したもの、並べ替えた順番） */
   statements: StatementsSettings;
 }
 
@@ -155,6 +155,10 @@ function parseGlobals(text: string): GlobalsResponse {
         ? sets.items.map((s) => ({
             id: str(getAt(s, ['id'])) ?? '',
             name: str(getAt(s, ['name'])) ?? '',
+            isDefault: (() => {
+              const d = getAt(s, ['default']);
+              return d?.t === 'boolean' && d.v;
+            })(),
             values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
           }))
         : [],
@@ -164,7 +168,7 @@ function parseGlobals(text: string): GlobalsResponse {
         if (!st || st.t !== 'object') return [];
         return st.fields.map(([id, v]) => {
           const order = getAt(v, ['order']);
-          return [id, { disabled: strs(getAt(v, ['disabled'])), order: order && order.t === 'list' ? strs(order) : undefined }];
+          return [id, { added: strs(getAt(v, ['added'])), removed: strs(getAt(v, ['removed'])), order: order && order.t === 'list' ? strs(order) : undefined }];
         });
       })(),
     ),
@@ -232,11 +236,13 @@ export function createApi(token: string) {
       globalsCall('create', JSON.stringify({ name, copyFrom })),
     renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
     deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
-    /** 既定の順番を変える（-1 で上へ、1 で下へ） */
-    moveGlobal: (id: string, offset: number) => globalsCall('move', JSON.stringify({ id, offset })),
-    /** statement ごとの設定（無効にするもの、順番。順番が null なら既定の順番） */
-    statementGlobals: (statement: string, disabled: string[], order: string[] | null) =>
-      globalsCall('statement', JSON.stringify({ statement, disabled, order })),
+    /** すべての statement に既定で入れるか */
+    defaultGlobal: (id: string, on: boolean) => globalsCall('default', JSON.stringify({ id, on })),
+    /** 既定の順番（すべての id を並べる） */
+    reorderGlobals: (ids: string[]) => globalsCall('reorder', JSON.stringify({ ids })),
+    /** statement ごとの設定（追加するもの、外すもの、順番。順番が null なら既定の順番） */
+    statementGlobals: (statement: string, settings: StatementSettings) =>
+      globalsCall('statement', JSON.stringify({ statement, added: settings.added, removed: settings.removed, order: settings.order ?? null })),
     saveGlobalValues: (id: string, values: PValue) =>
       globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
     parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),

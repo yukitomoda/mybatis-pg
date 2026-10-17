@@ -1,10 +1,11 @@
-// 共通パラメータ（すべての statement に適用する値の集まり）: 状態、共通パラメータの画面、クエリ画面の一覧
+// 共通パラメータ（複数の statement で共有する値の集まり）: 状態、共通パラメータの画面、クエリ画面の共通タブ
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, GlobalsResponse, ParameterName } from './api';
 import type { GenContext } from './GenInput';
+import { DragList } from './DragList';
 import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
-import { entries } from './globalModel';
+import { addTo, applicable, customized, NO_SETTINGS, removeFrom } from './globalModel';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt, toJson } from './params';
@@ -32,8 +33,10 @@ export interface Globals {
   create: (copyFrom: GlobalSet | null) => Promise<string | null>;
   rename: (set: GlobalSet) => void;
   remove: (set: GlobalSet) => Promise<boolean>;
+  /** すべての statement に既定で入れるか */
+  setDefault: (set: GlobalSet, on: boolean) => void;
   /** 既定の順番を変える */
-  move: (set: GlobalSet, offset: number) => void;
+  reorder: (sets: GlobalSet[]) => void;
   /** statement ごとの設定を変える（順番が undefined なら既定の順番） */
   setStatement: (statementId: string, settings: StatementSettings) => void;
 }
@@ -109,12 +112,17 @@ export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals 
       if (!window.confirm(`共通パラメータ「${set.name}」を削除しますか？`)) return false;
       return (await run(() => api.deleteGlobal(set.id))) !== null;
     },
-    move: (set, offset) => {
-      run(() => api.moveGlobal(set.id, offset));
+    setDefault: (set, on) => {
+      setState((s) => ({ ...s, sets: s.sets.map((x) => (x.id === set.id ? { ...x, isDefault: on } : x)) }));
+      run(() => api.defaultGlobal(set.id, on));
+    },
+    reorder: (sets) => {
+      setState((s) => ({ ...s, sets }));
+      run(() => api.reorderGlobals(sets.map((x) => x.id)));
     },
     setStatement: (statementId, settings) => {
       setState((s) => ({ ...s, statements: { ...s.statements, [statementId]: settings } }));
-      run(() => api.statementGlobals(statementId, settings.disabled, settings.order ?? null));
+      run(() => api.statementGlobals(statementId, settings));
     },
   };
 }
@@ -131,74 +139,65 @@ function summary(values: PValue): string {
   return values.fields.map(([k, v]) => `${k} = ${short(v)}`).join(', ');
 }
 
-// ---- クエリ画面: この statement での共通パラメータ ----
+// ---- クエリ画面: 共通タブ ----
 
 /**
- * 共通パラメータを、この statement での順番（下ほど優先）に並べる。
- * チェックで有効・無効を切り替え、↑↓ で順番を入れ替える（この statement だけに効く）。
+ * この statement に適用する共通パラメータを、優先順（下ほど優先）に並べる。
+ * 追加・外す・ドラッグで並べ替えができる（この statement だけに効く）。
  */
-export function AppliedGlobals({ globals, statementId, onSettings }: { globals: Globals; statementId: string; onSettings: (setId: string | null) => void }) {
+export function StatementGlobals({ globals, statementId, onSettings }: { globals: Globals; statementId: string; onSettings: (setId: string | null) => void }) {
   const settings = globals.statements[statementId];
-  const list = entries(globals.sets, settings);
-  const disabled = settings?.disabled ?? [];
-  const toggle = (id: string, on: boolean) =>
-    globals.setStatement(statementId, { disabled: on ? disabled.filter((x) => x !== id) : [...disabled, id], order: settings?.order });
-  const move = (i: number, d: number) => {
-    const ids = list.map((e) => e.set.id);
-    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
-    globals.setStatement(statementId, { disabled, order: ids });
-  };
+  const list = applicable(globals.sets, settings);
+  const rest = globals.sets.filter((s) => !list.includes(s));
+  const save = (st: StatementSettings) => globals.setStatement(statementId, st);
   return (
-    <section className="applied-globals">
-      <header>
-        <h3>共通パラメータ</h3>
-        <span>
-          {settings?.order && (
-            <button type="button" className="link" onClick={() => globals.setStatement(statementId, { disabled, order: undefined })}>
-              既定の順番に戻す
+    <section className="statement-globals">
+      <DragList
+        items={list}
+        keyOf={(s) => s.id}
+        label={(s) => s.name}
+        onReorder={(next) => save({ ...(settings ?? NO_SETTINGS), order: next.map((s) => s.id) })}
+        render={(s) => (
+          <>
+            <button type="button" className="link global-name" onClick={() => onSettings(s.id)}>
+              {s.name}
             </button>
-          )}
-          <button type="button" className="link" onClick={() => onSettings(null)}>
-            設定
-          </button>
-        </span>
-      </header>
-      {list.length === 0 ? (
-        <p className="hint">共通パラメータはまだありません。「設定」から作れます。</p>
-      ) : (
-        <table>
-          <tbody>
-            {list.map((e, i) => (
-              <tr key={e.set.id} className={e.disabled ? 'off' : undefined}>
-                <td>
-                  <input
-                    type="checkbox"
-                    aria-label={`${e.set.name} をこの statement で使う`}
-                    checked={!e.disabled}
-                    onChange={(ev) => toggle(e.set.id, ev.target.checked)}
-                  />
-                </td>
-                <td className="global-name">
-                  <button type="button" className="link" onClick={() => onSettings(e.set.id)}>
-                    {e.set.name}
-                  </button>
-                </td>
-                <td className="values" title={summary(e.set.values)}>
-                  {e.disabled ? '無効' : summary(e.set.values)}
-                </td>
-                <td className="global-move">
-                  <button type="button" className="icon" aria-label={`${e.set.name} を上へ`} disabled={i === 0} onClick={() => move(i, -1)}>
-                    ↑
-                  </button>
-                  <button type="button" className="icon" aria-label={`${e.set.name} を下へ`} disabled={i === list.length - 1} onClick={() => move(i, 1)}>
-                    ↓
-                  </button>
-                </td>
-              </tr>
+            <span className="values" title={summary(s.values)}>
+              {summary(s.values)}
+            </span>
+            <button type="button" className="icon" aria-label={`${s.name} を外す`} title="外す" onClick={() => save(removeFrom(settings, s))}>
+              ×
+            </button>
+          </>
+        )}
+      />
+      <div className="statement-globals-actions">
+        {rest.length > 0 && (
+          <select
+            aria-label="共通パラメータを追加"
+            value=""
+            onChange={(e) => {
+              const set = rest.find((s) => s.id === e.target.value);
+              if (set) save(addTo(settings, set, list));
+            }}
+          >
+            <option value="">＋ 追加</option>
+            {rest.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
             ))}
-          </tbody>
-        </table>
-      )}
+          </select>
+        )}
+        {customized(settings) && (
+          <button type="button" className="link" onClick={() => save(NO_SETTINGS)}>
+            既定に戻す
+          </button>
+        )}
+        <button type="button" className="link" onClick={() => onSettings(null)}>
+          設定
+        </button>
+      </div>
     </section>
   );
 }
@@ -228,10 +227,10 @@ export function GlobalsScreen({
   }, [focusId]);
   const { sets } = globals;
   const selected = sets.find((s) => s.id === selectedId) ?? null;
-  // 選んだ共通パラメータを無効にしている statement
-  const disabledIn = selected
+  // 既定で入れるものはそれを外している statement、そうでないものはそれを追加している statement
+  const changedIn = selected
     ? Object.entries(globals.statements)
-        .filter(([, st]) => st.disabled.includes(selected.id))
+        .filter(([, st]) => (selected.isDefault ? st.removed : st.added).includes(selected.id))
         .map(([id]) => id)
         .sort()
     : [];
@@ -245,24 +244,19 @@ export function GlobalsScreen({
             ＋ 新規
           </button>
         </div>
-        <ol>
-          {sets.map((s, i) => (
-            <li key={s.id} className={s.id === selected?.id ? 'selected' : undefined}>
-              <button type="button" className="global-item" onClick={() => setSelectedId(s.id)}>
-                {s.name}
-              </button>
-              <span className="global-move">
-                <button type="button" className="icon" aria-label={`${s.name} を上へ`} disabled={i === 0} onClick={() => globals.move(s, -1)}>
-                  ↑
-                </button>
-                <button type="button" className="icon" aria-label={`${s.name} を下へ`} disabled={i === sets.length - 1} onClick={() => globals.move(s, 1)}>
-                  ↓
-                </button>
-              </span>
-            </li>
-          ))}
-          {sets.length === 0 && <li className="hint">まだありません。「新規」で作ってください。</li>}
-        </ol>
+        <DragList
+          items={sets}
+          keyOf={(s) => s.id}
+          label={(s) => s.name}
+          selected={(s) => s.id === selected?.id}
+          onReorder={globals.reorder}
+          render={(s) => (
+            <button type="button" className="global-item" onClick={() => setSelectedId(s.id)}>
+              {s.name}
+            </button>
+          )}
+        />
+        {sets.length === 0 && <p className="hint">まだありません。「新規」で作ってください。</p>}
         {globals.error && <p className="error-text">{globals.error}</p>}
       </aside>
 
@@ -288,31 +282,42 @@ export function GlobalsScreen({
                 </button>
               </span>
             </header>
+            <label className="check global-default">
+              <input type="checkbox" checked={selected.isDefault} onChange={(e) => globals.setDefault(selected, e.target.checked)} />
+              すべての statement に入れる
+            </label>
             <h3>値</h3>
             <GlobalValues api={api} set={selected} globals={globals} generation={generation} gen={gen} />
             {renderJson(selected.values, (v) => globals.setValues(selected.id, v))}
           </section>
           <section className="globals-places">
-            <h3>無効にしている statement</h3>
-            {disabledIn.length === 0 ? (
-              <p className="hint">すべての statement で有効です。</p>
+            <h3>{selected.isDefault ? '外している statement' : '追加している statement'}</h3>
+            {changedIn.length === 0 ? (
+              <p className="hint">ありません。</p>
             ) : (
               <ul className="excludes">
-                {disabledIn.map((id) => (
-                  <li key={id}>
-                    <code>{id}</code>
-                    <button
-                      type="button"
-                      className="link"
-                      onClick={() => {
-                        const st = globals.statements[id];
-                        globals.setStatement(id, { disabled: st.disabled.filter((x) => x !== selected.id), order: st.order });
-                      }}
-                    >
-                      有効に戻す
-                    </button>
-                  </li>
-                ))}
+                {changedIn.map((id) => {
+                  const st = globals.statements[id];
+                  return (
+                    <li key={id}>
+                      <code>{id}</code>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() =>
+                          globals.setStatement(
+                            id,
+                            selected.isDefault
+                              ? { ...st, removed: st.removed.filter((x) => x !== selected.id) }
+                              : removeFrom(st, selected),
+                          )
+                        }
+                      >
+                        {selected.isDefault ? '入れ直す' : '外す'}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
