@@ -14,18 +14,22 @@ import java.util.UUID;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 
 /**
  * 共通パラメータ（複数の statement で共有する値の集まり）を管理する。
  *
  * <p>ファイルにはプロジェクトごとに保存する。他のプロジェクトの内容はそのまま残す。
  * <pre>
- * {"projects": {"/path/to/project": {"active": "id", "sets": [{"id": "...", "name": "...", "values": {...}}]}}}
+ * {"projects": {"/path/to/project": {"sets": [
+ *   {"id": "...", "name": "...", "values": {...}, "enabled": true, "scope": {"all": false, "items": ["shop/order/", ...]}}
+ * ]}}}
+ * </pre>
+ * 範囲（scope）の items は、フォルダ（末尾が /）・ファイルの相対パスか、statement の id。
+ * 以前の形（"active" で 1 つを選ぶ）は、読み込んだときに、選んでいたものをオン・範囲を全体として引き継ぐ。
+ * <pre>
  * </pre>
  * 値は JSON のまま持ち、数値は書かれた文字のまま保つ。
  */
@@ -64,30 +68,35 @@ public final class GlobalStore {
     return new GlobalStore(null, "", new JsonObject());
   }
 
-  /** このプロジェクトの内容: {"active": id または null, "sets": [...]} */
+  /** このプロジェクトの内容: {"sets": [...]}（並び順は優先順位に使う） */
   public synchronized JsonObject snapshot() {
-    JsonObject p = project();
     JsonObject copy = new JsonObject();
-    copy.add("active", p.get("active"));
-    copy.add("sets", p.get("sets").deepCopy());
+    copy.add("sets", project().get("sets").deepCopy());
     return copy;
   }
 
   /**
    * 作る。
    *
-   * @param copyFrom null でなければ、その共通パラメータの値を引き継ぐ
+   * 作る。新しいものはオンで、範囲は全体。
+   *
+   * @param copyFrom null でなければ、その共通パラメータの値と範囲を引き継ぐ
    */
   public synchronized JsonObject create(String name, String copyFrom) throws IOException {
     String trimmed = validName(name, null);
     JsonObject values = new JsonObject();
+    JsonObject scope = allScope();
     if (copyFrom != null) {
-      values = find(copyFrom).getAsJsonObject("values").deepCopy();
+      JsonObject from = find(copyFrom);
+      values = from.getAsJsonObject("values").deepCopy();
+      scope = from.getAsJsonObject("scope").deepCopy();
     }
     JsonObject set = new JsonObject();
     set.addProperty("id", UUID.randomUUID().toString());
     set.addProperty("name", trimmed);
     set.add("values", values);
+    set.addProperty("enabled", true);
+    set.add("scope", scope);
     sets().add(set);
     write();
     return set.deepCopy();
@@ -99,33 +108,79 @@ public final class GlobalStore {
     write();
   }
 
-  /** 選んでいるものを消したら、選択を「なし」にする */
   public synchronized void delete(String id) throws IOException {
-    JsonArray sets = sets();
-    sets.remove(find(id));
-    if (id.equals(activeId())) {
-      project().add("active", JsonNull.INSTANCE);
-    }
+    sets().remove(find(id));
     write();
   }
 
-  /** @param id null なら「なし」 */
-  public synchronized void select(String id) throws IOException {
-    if (id != null) {
-      find(id);
-    }
-    project().add("active", id == null ? JsonNull.INSTANCE : new JsonPrimitive(id));
+  public synchronized void setEnabled(String id, boolean enabled) throws IOException {
+    find(id).addProperty("enabled", enabled);
     write();
+  }
+
+  /**
+   * 範囲を変える。
+   *
+   * @param items all が false のときに効く、フォルダ（末尾が /）・ファイルの相対パスか statement の id
+   */
+  public synchronized void setScope(String id, boolean all, java.util.List<String> items) throws IOException {
+    JsonObject set = find(id);
+    JsonObject scope = new JsonObject();
+    scope.addProperty("all", all);
+    JsonArray list = new JsonArray();
+    for (String item : items) {
+      if (item != null && !item.trim().isEmpty()) {
+        list.add(item.trim());
+      }
+    }
+    scope.add("items", list);
+    set.add("scope", scope);
+    write();
+  }
+
+  /** 並び順を変える（同じ範囲の狭さなら、下にあるほうが優先） */
+  public synchronized void move(String id, int offset) throws IOException {
+    JsonArray sets = sets();
+    JsonObject set = find(id);
+    int from = indexOf(sets, set);
+    int to = Math.max(0, Math.min(sets.size() - 1, from + offset));
+    if (from == to) {
+      return;
+    }
+    sets.remove(from);
+    JsonArray reordered = new JsonArray();
+    for (int i = 0; i < sets.size(); i++) {
+      if (i == to) {
+        reordered.add(set);
+      }
+      reordered.add(sets.get(i));
+    }
+    if (to >= sets.size()) {
+      reordered.add(set);
+    }
+    project().add("sets", reordered);
+    write();
+  }
+
+  private static int indexOf(JsonArray sets, JsonObject set) {
+    for (int i = 0; i < sets.size(); i++) {
+      if (sets.get(i) == set) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private static JsonObject allScope() {
+    JsonObject scope = new JsonObject();
+    scope.addProperty("all", true);
+    scope.add("items", new JsonArray());
+    return scope;
   }
 
   public synchronized void saveValues(String id, JsonObject values) throws IOException {
     find(id).add("values", values.deepCopy());
     write();
-  }
-
-  private String activeId() {
-    JsonElement a = project().get("active");
-    return a == null || a.isJsonNull() ? null : a.getAsString();
   }
 
   private JsonObject project() {
@@ -139,11 +194,20 @@ public final class GlobalStore {
       p = new JsonObject();
       projects.add(projectKey, p);
     }
-    if (!p.has("active")) {
-      p.add("active", JsonNull.INSTANCE);
-    }
     if (!p.has("sets") || !p.get("sets").isJsonArray()) {
       p.add("sets", new JsonArray());
+    }
+    // 以前の形（"active" で 1 つを選ぶ）を引き継ぐ: 選んでいたものをオンにし、範囲は全体にする
+    JsonElement active = p.remove("active");
+    String activeId = active == null || active.isJsonNull() ? null : active.getAsString();
+    for (JsonElement e : p.getAsJsonArray("sets")) {
+      JsonObject set = e.getAsJsonObject();
+      if (!set.has("enabled")) {
+        set.addProperty("enabled", active == null || set.get("id").getAsString().equals(activeId));
+      }
+      if (!set.has("scope") || !set.get("scope").isJsonObject()) {
+        set.add("scope", allScope());
+      }
     }
     return p;
   }
