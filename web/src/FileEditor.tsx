@@ -1,6 +1,7 @@
 // テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, OpenTarget } from './api';
+import { ApiError } from './api';
 import type { Drafts } from './drafts';
 import { statementLine } from './drafts';
 import type { EditorError } from './XmlEditor';
@@ -32,11 +33,16 @@ export function FileEditor({
   /** タブが表示されている */
   visible: boolean;
 }) {
-  /** 保存されているファイルの内容 */
-  const [saved, setSaved] = useState<string | null>(null);
+  /** 保存されているファイルの内容（どのファイルのものかも持ち、別のファイルの内容を取り違えないようにする） */
+  const [loaded, setLoaded] = useState<{ file: string; content: string } | null>(null);
+  const saved = loaded?.file === file ? loaded.content : null;
+  const setSaved = (content: string) => setLoaded({ file, content });
   const [loadError, setLoadError] = useState<string | null>(null);
   const draft = drafts.get(file);
-  const [text, setText] = useState<string | null>(null);
+  /** 編集中の文字（どのファイルのものかも持つ） */
+  const [editing, setEditing] = useState<{ file: string; text: string } | null>(null);
+  const text = editing?.file === file ? editing.text : null;
+  const setText = (t: string | null) => setEditing(t === null ? null : { file, text: t });
   const [errors, setErrors] = useState<EditorError[]>([]);
   const [missing, setMissing] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -48,7 +54,7 @@ export function FileEditor({
     api.file(file).then(
       (r) => {
         if (!active) return;
-        setSaved(r.content);
+        setLoaded({ file, content: r.content });
         setLoadError(null);
       },
       (e) => {
@@ -68,7 +74,8 @@ export function FileEditor({
     setErrors([]);
     setMissing(false);
   }, [file]);
-  const content = text ?? draft?.content ?? saved;
+  // ファイルの内容を読み込むまでは、エディタを出さない（前のファイルの内容を新しいファイルのものとして扱わないように）
+  const content = saved === null ? null : (text ?? draft?.content ?? saved);
 
   /** まだ下書きに入れていない入力 */
   const pending = useRef<(() => void) | null>(null);
@@ -87,6 +94,48 @@ export function FileEditor({
   };
   // 別のファイルに移るときや閉じるときは、入力を残さず下書きに入れる
   useEffect(() => flush, [file]);
+
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  /** 編集した内容をファイルに保存する */
+  const save = async () => {
+    const current = text ?? draft?.content;
+    if (saving || saved === null || current === undefined || current === null || (!draft && text === null)) return;
+    if (errors.length > 0 && !window.confirm('XML にエラーがあります。このままファイルに保存しますか？')) return;
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      // 下書きの保存が後から届いて、下書きが残らないようにする
+      flush();
+      await drafts.settle(file);
+      const base = draft?.base ?? saved;
+      try {
+        await api.saveFile(file, base, current, false);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 409)) throw e;
+        if (!window.confirm(`編集を始めた後に、${file} が変更されています。上書きして保存しますか？`)) return;
+        await api.saveFile(file, base, current, true);
+      }
+      drafts.forget(file);
+      setSaved(current);
+      setText(null);
+      setSaveMessage({ ok: true, text: '保存しました' });
+    } catch (e) {
+      onApiError(e);
+      setSaveMessage({ ok: false, text: 'ファイルに保存できません: ' + (e instanceof Error ? e.message : String(e)) });
+    } finally {
+      setSaving(false);
+    }
+  };
+  // 「保存しました」は少しで消す。編集を始めたら消す
+  useEffect(() => {
+    if (!saveMessage?.ok) return;
+    const t = window.setTimeout(() => setSaveMessage(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [saveMessage]);
+  useEffect(() => {
+    if (text !== null) setSaveMessage((m) => (m?.ok ? null : m));
+  }, [text]);
 
   // 下書きを読み込んでみて、エラーを出す
   useEffect(() => {
@@ -139,6 +188,9 @@ export function FileEditor({
         )}
         <span className="actions">
           {/* 編集の有無で行の高さが変わらないよう、ボタンは常に出す */}
+          <button type="button" className="run" disabled={!draft || saving} title="Ctrl+S" onClick={save}>
+            ファイルに保存
+          </button>
           <button
             type="button"
             disabled={!draft}
@@ -161,11 +213,13 @@ export function FileEditor({
       </div>
       {stale && <p className="notes warn">編集を始めた後に、ファイルが変更されました。編集中の内容は変更前のファイルをもとにしています。</p>}
       <Suspense fallback={<p className="hint">エディタを読み込んでいます…</p>}>
-        <XmlEditor key={file} value={content} onChange={change} errors={errors} focus={focus} label={`${file} の編集`} />
+        <XmlEditor key={file} value={content} onChange={change} errors={errors} focus={focus} label={`${file} の編集`} onSave={save} />
       </Suspense>
       {/* エラーは高さの変わらない 1 行に出す（出たり消えたりしてもエディタが動かないように） */}
       <div className="editor-status" role="status">
-        {drafts.error ? (
+        {saveMessage ? (
+          <span className={saveMessage.ok ? 'ok-text' : 'error-text'}>{saveMessage.text}</span>
+        ) : drafts.error ? (
           <span className="error-text">{drafts.error}</span>
         ) : errors.length > 0 ? (
           <button

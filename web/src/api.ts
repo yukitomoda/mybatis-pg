@@ -239,6 +239,9 @@ export function createApi(token: string) {
         : call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
     /** mapper XML の中身 */
     file: (path: string) => call<{ file: string; content: string }>(`api/file?path=${encodeURIComponent(path)}`),
+    /** 編集した内容をファイルに保存する。編集を始めた後にファイルが変わっていたら、force がなければ 409 */
+    saveFile: (file: string, base: string, content: string, force: boolean) =>
+      call<object>('api/file/save', post(JSON.stringify({ file, base, content, force }))),
     /** 保存してある下書き（更新の新しい順） */
     drafts: () =>
       call<{ drafts: { file: string; base: string; content: string; updatedAt: number; loaded: boolean; changed: boolean }[] }>('api/drafts'),

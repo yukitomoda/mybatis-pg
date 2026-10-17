@@ -4,7 +4,7 @@ import { HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/lang
 import { xml } from '@codemirror/lang-xml';
 import type { Diagnostic } from '@codemirror/lint';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
-import { EditorState } from '@codemirror/state';
+import { Annotation, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
@@ -15,6 +15,9 @@ export interface EditorError {
   line: number | null;
   message: string;
 }
+
+/** 外から内容を入れ替えた変更の印。入力ではないので onChange を呼ばない */
+const external = Annotation.define<boolean>();
 
 /** 画面の色（ライト・ダーク）に合わせる */
 const theme = EditorView.theme({
@@ -82,6 +85,7 @@ export function XmlEditor({
   errors,
   focus,
   label,
+  onSave,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -89,11 +93,15 @@ export function XmlEditor({
   /** 表示する行（1 始まり）。key が変わったときだけ移る（同じ key のまま表示し直しても、スクロールの位置を保つ） */
   focus: { key: string; line: number } | null;
   label: string;
+  /** Ctrl+S（Mac は ⌘S） */
+  onSave: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
+  const saveRef = useRef(onSave);
+  saveRef.current = onSave;
 
   useEffect(() => {
     const v = new EditorView({
@@ -105,12 +113,22 @@ export function XmlEditor({
           xml(),
           indentUnit.of(detectIndent(value)),
           tabKeys,
+          keymap.of([
+            {
+              key: 'Mod-s',
+              preventDefault: true,
+              run: () => {
+                saveRef.current();
+                return true;
+              },
+            },
+          ]),
           syntaxHighlighting(highlight),
           lintGutter(),
           theme,
           EditorView.contentAttributes.of({ 'aria-label': label }),
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) changeRef.current(u.state.doc.toString());
+            if (u.docChanged && !u.transactions.some((t) => t.annotation(external))) changeRef.current(u.state.doc.toString());
           }),
         ],
       }),
@@ -126,7 +144,7 @@ export function XmlEditor({
   useEffect(() => {
     const v = view.current;
     if (!v || v.state.doc.toString() === value) return;
-    v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+    v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, annotations: external.of(true) });
   }, [value]);
 
   // statement の行へ移る

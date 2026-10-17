@@ -40,6 +40,10 @@ export interface Drafts {
   /** 編集した内容を保存する。元の内容と同じになったら消す */
   set: (file: string, base: string, content: string) => void;
   discard: (files: string[]) => void;
+  /** そのファイルの下書きの保存が送り終わるのを待つ */
+  settle: (file: string) => Promise<unknown>;
+  /** ファイルに保存して、サーバで下書きが消えたことを反映する */
+  forget: (file: string) => void;
   files: Set<string>;
   /** 更新の新しい順 */
   list: Draft[];
@@ -103,13 +107,21 @@ export function useDrafts(api: Api, generation: number, onApiError: (e: unknown)
     get: (file) => (file === undefined ? undefined : drafts.get(file)),
     set: (file, base, content) => {
       const old = drafts.get(file);
-      update(file, content === base ? undefined : { file, base, content, updatedAt: Date.now(), loaded: true, changed: old?.changed ?? false });
+      // エディタは改行を LF にそろえるので、改行の違いは除いて比べる
+      update(
+        file,
+        content === base.replace(/\r\n/g, '\n') || content === base
+          ? undefined
+          : { file, base, content, updatedAt: Date.now(), loaded: true, changed: old?.changed ?? false },
+      );
       enqueue(file, () => api.saveDraft(file, base, content));
     },
     discard: (files) => {
       for (const f of files) update(f, undefined);
       for (const f of files) enqueue(f, () => api.discardDrafts([f]));
     },
+    settle: (file) => queues.current.get(file) ?? Promise.resolve(),
+    forget: (file) => update(file, undefined),
     files: new Set(drafts.keys()),
     list: [...drafts.values()].sort((a, b) => b.updatedAt - a.updatedAt),
     error,

@@ -1934,3 +1934,7 @@ button.bulk-open {
   font-family: var(--mono);
   text-align: left;
 }
+
+.ok-text {
+  color: var(--ok);
+}
