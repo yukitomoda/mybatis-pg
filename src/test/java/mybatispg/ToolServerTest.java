@@ -283,6 +283,45 @@ class ToolServerTest {
   }
 
   @Test
+  void プレイグラウンド(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+    server.usePlaygrounds(PlaygroundStore.at(dir));
+    try {
+      api("POST", "/api/playground/create", "{\"name\":\"売上の調査\"}", 200);
+      api("POST", "/api/playground/create", "{\"name\":\"売上の調査\"}", 400);
+      api("POST", "/api/playground/create", "{\"name\":\"../x\"}", 400);
+      JsonObject list = api("GET", "/api/statements", null, 200);
+      assertTrue(list.getAsJsonArray("statements").toString().contains(
+          "{\"id\":\"playground.売上の調査.example\",\"file\":\"playground:売上の調査\",\"type\":\"SELECT\",\"playground\":true}"), list.toString());
+      assertEquals("[{\"file\":\"playground:売上の調査\",\"name\":\"売上の調査\",\"errors\":[]}]", list.getAsJsonArray("playgrounds").toString());
+
+      // 中身はファイルの API で読み書きする。プロジェクトの sql 断片を include できる
+      String content = api("GET", "/api/file?path=" + java.net.URLEncoder.encode("playground:売上の調査", "UTF-8"), null, 200).get("content").getAsString();
+      String edited = content.replace("SELECT 1", "SELECT <include refid=\"sample.Common.userColumns\"/> FROM users WHERE id = #{id}");
+      com.google.gson.Gson gson = new com.google.gson.Gson();
+      api("POST", "/api/file/save", "{\"file\":\"playground:売上の調査\",\"base\":" + gson.toJson(content) + ",\"content\":" + gson.toJson(edited) + ",\"force\":true}", 200);
+      JsonObject rendered = api("POST", "/api/render", "{\"statementId\":\"playground.売上の調査.example\",\"parameters\":{\"id\":7}}", 200);
+      assertTrue(rendered.get("literalSql").getAsString().contains("id, name, status  FROM users WHERE id = 7"), rendered.toString());
+      assertTrue(api("GET", "/api/parameters?id=" + java.net.URLEncoder.encode("playground.売上の調査.example", "UTF-8"), null, 200).get("tree").toString().contains("\"name\":\"id\""));
+      assertTrue(api("GET", "/api/parameters-all", null, 200).getAsJsonObject("trees").has("playground.売上の調査.example"));
+
+      // 読み込めないときもプレイグラウンドは一覧に出し、エラーを付ける
+      api("POST", "/api/file/save", "{\"file\":\"playground:売上の調査\",\"base\":\"\",\"content\":\"<mapper\",\"force\":true}", 200);
+      list = api("GET", "/api/statements", null, 200);
+      assertTrue(list.getAsJsonArray("playgrounds").get(0).getAsJsonObject().getAsJsonArray("errors").size() > 0, list.toString());
+      assertFalse(list.getAsJsonArray("statements").toString().contains("playground."), list.toString());
+
+      api("POST", "/api/playground/rename", "{\"name\":\"売上の調査\",\"newName\":\"検証\"}", 200);
+      assertEquals("playground:検証", api("GET", "/api/statements", null, 200).getAsJsonArray("playgrounds").get(0).getAsJsonObject().get("file").getAsString());
+      api("POST", "/api/playground/delete", "{\"name\":\"検証\"}", 200);
+      assertEquals(0, api("GET", "/api/statements", null, 200).getAsJsonArray("playgrounds").size());
+      // プレイグラウンドのパスでも、ないファイルは返さない
+      api("GET", "/api/file?path=" + java.net.URLEncoder.encode("playground:検証", "UTF-8"), null, 404);
+    } finally {
+      server.usePlaygrounds(PlaygroundStore.at(null));
+    }
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);

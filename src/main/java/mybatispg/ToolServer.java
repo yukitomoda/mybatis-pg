@@ -72,6 +72,8 @@ public final class ToolServer {
   private final GlobalStore globals;
   /** 下書きの保存先。起動した後に useDrafts で決める */
   private volatile DraftStore draftStore = DraftStore.inMemory();
+  /** プレイグラウンドの保存先。起動した後に usePlaygrounds で決める */
+  private volatile PlaygroundStore playgrounds = PlaygroundStore.at(null);
   private volatile EditorLauncher editor = EditorLauncher.disabled();
   private final byte[] token;
   private final HttpServer server;
@@ -123,6 +125,11 @@ public final class ToolServer {
   /** 下書きの保存先を決める */
   public void useDrafts(DraftStore store) {
     this.draftStore = store;
+  }
+
+  /** プレイグラウンドの保存先を決める */
+  public void usePlaygrounds(PlaygroundStore store) {
+    this.playgrounds = store;
   }
 
   /**
@@ -235,6 +242,13 @@ public final class ToolServer {
       case "/api/file/save":
         if (requireMethod(ex, method, "POST")) {
           saveFile(ex);
+        }
+        break;
+      case "/api/playground/create":
+      case "/api/playground/rename":
+      case "/api/playground/delete":
+        if (requireMethod(ex, method, "POST")) {
+          updatePlayground(ex, path.substring("/api/playground/".length()));
         }
         break;
       case "/api/draft/check":
@@ -354,13 +368,31 @@ public final class ToolServer {
     final String file;
     /** 下書きで足した（保存されているファイルにない） */
     final boolean added;
+    final boolean playground;
 
-    StatementRef(SqlRenderer renderer, String id, String file, boolean added) {
+    StatementRef(SqlRenderer renderer, String id, String file, boolean added, boolean playground) {
       this.renderer = renderer;
       this.id = id;
       this.file = file;
       this.added = added;
+      this.playground = playground;
     }
+  }
+
+  /**
+   * プレイグラウンドを 1 つずつ読み込んだもの: 画面のパス → 読み込んだもの。
+   * プロジェクトの mapper XML の sql 断片を include できる（下書きと同じ仕組みで読み込む）。
+   */
+  private Map<String, SqlRenderer> playgroundRenderers() throws IOException {
+    Map<String, SqlRenderer> out = new LinkedHashMap<>();
+    for (String name : playgrounds.names()) {
+      String shown = PlaygroundStore.PREFIX + name;
+      Path file = playgrounds.file(shown);
+      if (file != null) {
+        out.put(shown, draftRenderer(file, MapperText.read(file)));
+      }
+    }
+    return out;
   }
 
   /**
@@ -383,12 +415,20 @@ public final class ToolServer {
     for (String id : base.statementIds()) {
       String file = displayPath(base.statementSource(id));
       if (!drafted.containsKey(file)) {
-        out.add(new StatementRef(base, id, file, false));
+        out.add(new StatementRef(base, id, file, false, false));
       }
     }
     for (Map.Entry<String, SqlRenderer> e : drafted.entrySet()) {
       for (String id : e.getValue().statementIds()) {
-        out.add(new StatementRef(e.getValue(), id, e.getKey(), !base.hasStatement(id)));
+        out.add(new StatementRef(e.getValue(), id, e.getKey(), !base.hasStatement(id), false));
+      }
+    }
+    for (Map.Entry<String, SqlRenderer> e : playgroundRenderers().entrySet()) {
+      for (String id : e.getValue().statementIds()) {
+        // プロジェクトと同じ id は、プロジェクトのものを使う
+        if (!base.hasStatement(id)) {
+          out.add(new StatementRef(e.getValue(), id, e.getKey(), false, true));
+        }
       }
     }
     return out;
@@ -406,11 +446,24 @@ public final class ToolServer {
       if (s.added) {
         m.put("added", true);
       }
+      if (s.playground) {
+        m.put("playground", true);
+      }
       statements.add(m);
+    }
+    // statement がない・読み込めないプレイグラウンドも一覧に出す
+    List<Map<String, Object>> playgroundList = new ArrayList<>();
+    for (Map.Entry<String, SqlRenderer> e : playgroundRenderers().entrySet()) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("file", e.getKey());
+      m.put("name", e.getKey().substring(PlaygroundStore.PREFIX.length()));
+      m.put("errors", e.getValue().getLoadErrors());
+      playgroundList.add(m);
     }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("generation", generation);
     body.put("statements", statements);
+    body.put("playgrounds", playgroundList);
     body.put("loadErrors", renderer.getLoadErrors());
     sendJson(ex, 200, body);
   }
@@ -686,10 +739,13 @@ public final class ToolServer {
     sendJson(ex, 200, new LinkedHashMap<String, Object>());
   }
 
-  /** 画面のパス（相対パスか絶対パス）から、読み込んでいる mapper XML を探す */
+  /** 画面のパス（相対パスか絶対パス、プレイグラウンドなら playground:名前）から、読み込んでいる mapper XML を探す */
   private Path mapperFile(String shown) {
     if (shown == null) {
       return null;
+    }
+    if (shown.startsWith(PlaygroundStore.PREFIX)) {
+      return playgrounds.file(shown);
     }
     for (Path p : workspace.mapperFiles()) {
       if (displayPath(p.toString()).equals(shown) || p.toString().equals(shown)
@@ -844,7 +900,7 @@ public final class ToolServer {
 
     @Override
     protected boolean removeEldestEntry(Map.Entry<String, SqlRenderer> eldest) {
-      return size() > 8;
+      return size() > 32;
     }
   };
 
@@ -870,6 +926,14 @@ public final class ToolServer {
     JsonElement d = req == null ? null : req.get("draft");
     if (d == null || d.isJsonNull()) {
       SqlRenderer renderer = workspace.renderer();
+      if (statementId != null && !renderer.hasStatement(statementId)) {
+        // プレイグラウンドの statement
+        for (SqlRenderer r : playgroundRenderers().values()) {
+          if (r.hasStatement(statementId)) {
+            return r;
+          }
+        }
+      }
       if (statementId == null || !renderer.hasStatement(statementId)) {
         sendJson(ex, 404, error("statement がありません: " + statementId));
         return null;
@@ -1010,6 +1074,38 @@ public final class ToolServer {
   /** 改行の違い（CRLF と LF）を除いて同じか。エディタは改行を LF にそろえるため */
   private static boolean sameText(String a, String b) {
     return a.replace("\r\n", "\n").equals(b.replace("\r\n", "\n"));
+  }
+
+  /**
+   * プレイグラウンドを作る・名前を変える・消す。
+   * <ul>
+   * <li>create: {"name"}</li>
+   * <li>rename: {"name", "newName"}</li>
+   * <li>delete: {"name"}</li>
+   * </ul>
+   */
+  private void updatePlayground(HttpExchange ex, String action) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    try {
+      switch (action) {
+        case "create":
+          playgrounds.create(string(req, "name"));
+          break;
+        case "rename":
+          playgrounds.rename(string(req, "name"), string(req, "newName"));
+          break;
+        default:
+          playgrounds.delete(string(req, "name"));
+          break;
+      }
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
   }
 
   /** mapper XML の中身: {"file", "content"}。読み込んでいる mapper XML だけを返す */

@@ -116,6 +116,10 @@ public final class Main {
     String token = newToken();
     ToolServer server = startServer(workspace, connections, globals, port, token);
     server.useDrafts(drafts);
+    // このアプリだけで使う mapper XML（プロジェクトごと）
+    Path playgroundDir = configDir.resolve("playground");
+    server.usePlaygrounds(PlaygroundStore.open(playgroundDir, base == null ? "" : base.toString()));
+    System.out.println("プレイグラウンド: " + playgroundDir);
     List<URI> urls = new ArrayList<>();
     for (String template : publicUrls) {
       URI url = publicUrl(resolvePort(template, server.getPort()));
