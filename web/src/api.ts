@@ -2,6 +2,7 @@
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
+import type { GlobalSet, Scope } from './scope';
 import type { StatementEntry } from './tree';
 
 export interface LoadError {
@@ -125,15 +126,8 @@ export class ApiError extends Error {
   }
 }
 
-export interface GlobalSet {
-  id: string;
-  name: string;
-  values: PValue;
-}
-
 export interface GlobalsResponse {
-  /** 選んでいる共通パラメータ。null は「なし」 */
-  active: string | null;
+  /** 並び順は優先順位に使う（同じ範囲の狭さなら下にあるほうが優先） */
   sets: GlobalSet[];
 }
 
@@ -153,14 +147,23 @@ function parseGlobals(text: string): GlobalsResponse {
   const str = (v: PValue | undefined) => (v && v.t === 'string' ? v.v : null);
   const sets = getAt(root, ['sets']);
   return {
-    active: str(getAt(root, ['active'])),
     sets:
       sets && sets.t === 'list'
-        ? sets.items.map((s) => ({
-            id: str(getAt(s, ['id'])) ?? '',
-            name: str(getAt(s, ['name'])) ?? '',
-            values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
-          }))
+        ? sets.items.map((s) => {
+            const enabled = getAt(s, ['enabled']);
+            const all = getAt(s, ['scope', 'all']);
+            const items = getAt(s, ['scope', 'items']);
+            return {
+              id: str(getAt(s, ['id'])) ?? '',
+              name: str(getAt(s, ['name'])) ?? '',
+              values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
+              enabled: enabled?.t === 'boolean' ? enabled.v : true,
+              scope: {
+                all: all?.t === 'boolean' ? all.v : true,
+                items: items?.t === 'list' ? items.items.map((i) => str(i) ?? '').filter(Boolean) : [],
+              },
+            };
+          })
         : [],
   };
 }
@@ -226,7 +229,9 @@ export function createApi(token: string) {
       globalsCall('create', JSON.stringify({ name, copyFrom })),
     renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
     deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
-    selectGlobal: (id: string | null) => globalsCall('select', JSON.stringify({ id })),
+    enableGlobal: (id: string, enabled: boolean) => globalsCall('enable', JSON.stringify({ id, enabled })),
+    scopeGlobal: (id: string, scope: Scope) => globalsCall('scope', JSON.stringify({ id, scope })),
+    moveGlobal: (id: string, offset: number) => globalsCall('move', JSON.stringify({ id, offset })),
     saveGlobalValues: (id: string, values: PValue) =>
       globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
     parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),

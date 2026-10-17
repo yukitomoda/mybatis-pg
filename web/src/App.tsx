@@ -7,7 +7,8 @@ import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
-import { GlobalBar, GlobalEditor, useGlobals } from './Globals';
+import { GlobalPanel, useGlobals } from './Globals';
+import { applicable, combine, originAt } from './scope';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
 import type { ParamSchema, PValue } from './params';
@@ -171,8 +172,12 @@ function Workspace({ api }: { api: Api }) {
 
   const globals = useGlobals(api, handleError);
   const editingGlobal = editing === 'global';
-  // レンダリングと実行に使う値（共通パラメータ + 個別の値 + foreach の空リスト）
-  const effective = useMemo(() => effectiveValue(schema, globals.values, value), [schema, globals.values, value]);
+  // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
+  const target = statements.find((s) => s.id === selected) ?? null;
+  const applied = useMemo(() => applicable(globals.sets, target), [globals.sets, target]);
+  const base = useMemo(() => combine(applied), [applied]);
+  // レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値）
+  const effective = useMemo(() => effectiveValue(schema, base, value), [schema, base, value]);
   // 生成値（式）を計算した値。一度作った値は genCache に覚え、↻ で作り直す
   const genCache = useRef<GenCache>(new Map()).current;
   const [genVersion, setGenVersion] = useState(0);
@@ -254,7 +259,7 @@ function Workspace({ api }: { api: Api }) {
             api={api}
             conn={conn}
             statements={statements}
-            globalValues={globals.values}
+            globalSets={globals.sets}
             onOpen={(id) => {
               select(id);
               setTab('explain');
@@ -283,21 +288,20 @@ function Workspace({ api }: { api: Api }) {
             className={editingGlobal ? 'tab selected' : 'tab'}
             onClick={() => setEditing('global')}
           >
-            共通<span className="hint">（{globals.active ? globals.active.name : 'なし'}）</span>
+            共通<span className="hint">（{globals.sets.filter((s) => s.enabled).length} 件オン）</span>
           </button>
         </div>
 
         {editingGlobal ? (
           <>
-            <GlobalBar globals={globals} />
-            {globals.active ? (
-              <>
-                <GlobalEditor api={api} globals={globals} generation={generation} gen={gen} />
-                <JsonPanel value={globals.values} onApply={globals.setValues} />
-              </>
-            ) : (
-              <p className="hint">使う共通パラメータを選ぶか、「新規」で作ってください。選んだ共通パラメータの値は、すべての statement に重ねて使われます。</p>
-            )}
+            <GlobalPanel
+              api={api}
+              globals={globals}
+              statements={statements}
+              generation={generation}
+              gen={gen}
+              renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
+            />
           </>
         ) : (
           <>
@@ -305,7 +309,22 @@ function Workspace({ api }: { api: Api }) {
             {schemaError && <p className="error-text">{schemaError}</p>}
             {selected && schema && (
               <>
-                <ParamTree schema={schema} value={value} onChange={changeValue} global={globals.values} gen={gen} />
+                <p className="applied-globals">
+                  {applied.length === 0 ? (
+                    <span className="hint">この statement に効いている共通パラメータはありません</span>
+                  ) : (
+                    <>
+                      <span className="hint">効いている共通パラメータ（右ほど優先）:</span>
+                      {applied.map((s, i) => (
+                        <span key={s.id}>
+                          {i > 0 && <span className="hint"> ＜ </span>}
+                          <span className="badge global">{s.name}</span>
+                        </span>
+                      ))}
+                    </>
+                  )}
+                </p>
+                <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
                 {warnings.length > 0 && (
                   <ul className="notes warn">
                     {warnings.map((w) => (

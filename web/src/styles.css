@@ -1529,3 +1529,104 @@ dialog.bulk input[type='search'] {
   font-family: var(--mono);
   font-size: 12px;
 }
+
+/* ---- 共通パラメータの一覧と範囲 ---- */
+
+.global-panel > .hint {
+  margin: 0 0 0.4rem;
+  font-size: 12px;
+}
+
+.global-list {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.global-list td {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.global-list tr {
+  cursor: pointer;
+}
+
+.global-list tr.selected td {
+  background: var(--accent-bg);
+}
+
+.global-list td:first-child {
+  width: 1.6rem;
+}
+
+.global-list .global-name {
+  font-weight: 600;
+}
+
+.global-list .global-scope {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.global-list .global-move {
+  width: 4rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.global-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.global-editor h3 {
+  margin: 0.8rem 0 0.4rem;
+}
+
+.scope-mode {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.3rem;
+}
+
+.scope-tree {
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.scope-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scope-tree ul ul {
+  padding-left: 1.1rem;
+}
+
+.scope-tree .stmt {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.scope-tree .covered {
+  color: var(--muted);
+}
+
+.applied-globals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+}

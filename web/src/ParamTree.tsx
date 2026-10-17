@@ -21,6 +21,8 @@ interface Props {
   free?: boolean;
   /** 生成値（式）の計算 */
   gen: GenContext;
+  /** 共通から来ている値の、出どころの共通パラメータの名前 */
+  originOf?: (path: Path) => string | null;
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -38,13 +40,14 @@ interface Context {
   /** 個別の値がないときに来る値。共通を使わない編集では undefined */
   inherited: PValue | undefined;
   global: PValue | undefined;
+  originOf: (path: Path) => string | null;
   layered: boolean;
   free: boolean;
   gen: GenContext;
   update: (path: Path, v: PValue | undefined) => void;
 }
 
-export function ParamTree({ schema, value, onChange, global, free = false, gen }: Props) {
+export function ParamTree({ schema, value, onChange, global, free = false, gen, originOf = () => null }: Props) {
   const layered = !free;
   const effective = layered ? effectiveValue(schema, global, value) : value;
   const inherited = layered ? effectiveValue(schema, global, undefined) : undefined;
@@ -52,7 +55,7 @@ export function ParamTree({ schema, value, onChange, global, free = false, gen }
     const next = layered ? overrideAt(value, effective, path, v) : overrideAt(value, value, path, v);
     onChange(next && next.t === 'object' && next.fields.length === 0 ? undefined : next);
   };
-  const ctx: Context = { local: value, effective, inherited, global, layered, free, gen, update };
+  const ctx: Context = { local: value, effective, inherited, global, originOf, layered, free, gen, update };
   return (
     <div className="tree" role="tree">
       <Children ctx={ctx} schema={free ? null : schema} path={[]} depth={0} />
@@ -96,7 +99,9 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const shown = local ?? getAt(ctx.effective, path);
   const inherited = ctx.layered ? inheritedAt(ctx.local, ctx.inherited, path) : undefined;
   // 個別の値がなく、共通または既定から来ている
-  const origin = local === undefined && shown !== undefined ? (getAt(ctx.global, path) !== undefined ? '共通' : '既定') : null;
+  // 共通から来ているなら、どの共通パラメータの値か（名前）。既定の値なら「既定」
+  const fromGlobal = getAt(ctx.global, path) !== undefined;
+  const origin = local === undefined && shown !== undefined ? (fromGlobal ? (ctx.originOf(path) ?? '共通') : '既定') : null;
   const type = shown?.t;
   const set = (v: PValue | undefined) => ctx.update(path, v);
   // XML で参照されているのに値がない（多くは入力のし忘れ）
@@ -120,7 +125,7 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
         </span>
         <span className="usages">
           {origin && (
-            <span className={origin === '共通' ? 'badge global' : 'badge muted'} title={origin === '共通' ? '共通パラメータの値' : '既定の値'}>
+            <span className={fromGlobal ? 'badge global' : 'badge muted'} title={fromGlobal ? `共通パラメータ「${origin}」の値` : '既定の値'}>
               {origin}
             </span>
           )}

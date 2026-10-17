@@ -1,10 +1,15 @@
-// 共通パラメータ（複数の statement で共有する値の集まり）の選択と編集
+// 共通パラメータ（複数の statement で共有する値の集まり）: 一覧・オンとオフ・範囲・値の編集
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import type { Api, GlobalsResponse, GlobalSet, ParameterName } from './api';
+import type { Api, GlobalsResponse, ParameterName } from './api';
 import type { GenContext } from './GenInput';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt } from './params';
+import type { GlobalSet, Scope } from './scope';
+import { describeScope } from './scope';
+import type { StatementEntry, TreeNode } from './tree';
+import { buildTree, shortId } from './tree';
 
 /** 共通パラメータの編集では XML の項目を使わない */
 const FREE_SCHEMA: ParamSchema = { name: null, usages: [], typeHints: [], properties: [], element: null };
@@ -18,19 +23,20 @@ function message(e: unknown): string {
 
 export interface Globals {
   sets: GlobalSet[];
-  active: GlobalSet | null;
-  /** 選んでいる共通パラメータの値（編集中のものを含む） */
-  values: PValue | undefined;
-  setValues: (v: PValue | undefined) => void;
   error: string | null;
-  create: (copy: boolean) => void;
-  rename: () => void;
-  remove: () => void;
-  select: (id: string | null) => void;
+  /** 値を変える（少し待ってから保存する） */
+  setValues: (id: string, v: PValue | undefined) => void;
+  /** 作った共通パラメータの id を返す */
+  create: (copyFrom: GlobalSet | null) => Promise<string | null>;
+  rename: (set: GlobalSet) => void;
+  remove: (set: GlobalSet) => void;
+  setEnabled: (set: GlobalSet, enabled: boolean) => void;
+  setScope: (set: GlobalSet, scope: Scope) => void;
+  move: (set: GlobalSet, offset: number) => void;
 }
 
 export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals {
-  const [state, setState] = useState<GlobalsResponse>({ active: null, sets: [] });
+  const [state, setState] = useState<GlobalsResponse>({ sets: [] });
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ id: string; values: PValue; timer: number } | null>(null);
 
@@ -56,89 +62,174 @@ export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals 
   }, [api]);
 
   // 名前の変更などの前に、編集中の値を保存しておく（応答の内容で上書きされないように）
-  const run = (f: () => Promise<GlobalsResponse>) => {
+  const run = (f: () => Promise<GlobalsResponse>) =>
     flush()
       .then(f)
       .then(
         (s) => {
           setState(s);
           setError(null);
+          return s;
         },
         (e) => {
           onApiError(e);
           window.alert(message(e));
+          return null;
         },
       );
-  };
 
-  const active = state.sets.find((s) => s.id === state.active) ?? null;
+  // 画面にはすぐ反映し、保存は後から行う
+  const patch = (id: string, change: Partial<GlobalSet>) =>
+    setState((s) => ({ sets: s.sets.map((x) => (x.id === id ? { ...x, ...change } : x)) }));
 
   return {
     sets: state.sets,
-    active,
-    values: active?.values,
     error,
-    setValues: (v) => {
-      if (!active) return;
+    setValues: (id, v) => {
       const values = v ?? EMPTY_ROOT;
-      setState((s) => ({ ...s, sets: s.sets.map((set) => (set.id === active.id ? { ...set, values } : set)) }));
+      patch(id, { values });
+      if (pending.current && pending.current.id !== id) flush();
       if (pending.current) window.clearTimeout(pending.current.timer);
-      pending.current = { id: active.id, values, timer: window.setTimeout(flush, SAVE_DELAY) };
+      pending.current = { id, values, timer: window.setTimeout(flush, SAVE_DELAY) };
     },
-    create: (copy) => {
-      const name = window.prompt(copy && active ? `「${active.name}」を複製します。新しい名前:` : '新しい共通パラメータの名前:');
-      if (!name) return;
-      run(async () => {
-        const created = await api.createGlobal(name, copy && active ? active.id : null);
-        const added = created.sets.find((s) => !state.sets.some((old) => old.id === s.id));
-        return added ? api.selectGlobal(added.id) : created;
-      });
+    create: async (copyFrom) => {
+      const name = window.prompt(copyFrom ? `「${copyFrom.name}」を複製します。新しい名前:` : '新しい共通パラメータの名前:');
+      if (!name) return null;
+      const before = new Set(state.sets.map((s) => s.id));
+      const s = await run(() => api.createGlobal(name, copyFrom ? copyFrom.id : null));
+      return s?.sets.find((x) => !before.has(x.id))?.id ?? null;
     },
-    rename: () => {
-      if (!active) return;
-      const name = window.prompt('新しい名前:', active.name);
-      if (!name || name === active.name) return;
-      run(() => api.renameGlobal(active.id, name));
+    rename: (set) => {
+      const name = window.prompt('新しい名前:', set.name);
+      if (!name || name === set.name) return;
+      run(() => api.renameGlobal(set.id, name));
     },
-    remove: () => {
-      if (!active || !window.confirm(`共通パラメータ「${active.name}」を削除しますか？`)) return;
-      run(() => api.deleteGlobal(active.id));
+    remove: (set) => {
+      if (!window.confirm(`共通パラメータ「${set.name}」を削除しますか？`)) return;
+      run(() => api.deleteGlobal(set.id));
     },
-    select: (id) => run(() => api.selectGlobal(id)),
+    setEnabled: (set, enabled) => {
+      patch(set.id, { enabled });
+      run(() => api.enableGlobal(set.id, enabled));
+    },
+    setScope: (set, scope) => {
+      patch(set.id, { scope });
+      run(() => api.scopeGlobal(set.id, scope));
+    },
+    move: (set, offset) => {
+      run(() => api.moveGlobal(set.id, offset));
+    },
   };
 }
 
-/** 共通パラメータの選択と操作 */
-export function GlobalBar({ globals }: { globals: Globals }) {
-  const { sets, active } = globals;
+/** 共通タブ: 一覧と、選んだ共通パラメータの値と範囲の編集 */
+export function GlobalPanel({
+  api,
+  globals,
+  statements,
+  generation,
+  gen,
+  renderJson,
+}: {
+  api: Api;
+  globals: Globals;
+  statements: StatementEntry[];
+  generation: number;
+  gen: GenContext;
+  /** 値の JSON 欄（App の JsonPanel を使う） */
+  renderJson: (value: PValue | undefined, onApply: (v: PValue | undefined) => void) => ReactNode;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const { sets } = globals;
+  const editing = sets.find((s) => s.id === editingId) ?? sets[0] ?? null;
+
   return (
-    <div className="global-bar">
-      <label>
-        使う共通パラメータ
-        <select value={active?.id ?? ''} onChange={(e) => globals.select(e.target.value || null)}>
-          <option value="">なし</option>
-          {sets.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
+    <div className="global-panel">
+      <p className="hint">
+        オンの共通パラメータを、範囲に入る statement に重ねます。範囲の狭いほう（statement ＞ ファイル ＞ フォルダ ＞ 全体）が優先で、同じなら下にあるほうが優先です。
+      </p>
+      <table className="global-list">
+        <tbody>
+          {sets.map((s, i) => (
+            <tr key={s.id} className={s.id === editing?.id ? 'selected' : undefined} onClick={() => setEditingId(s.id)}>
+              <td>
+                <input
+                  type="checkbox"
+                  aria-label={`${s.name} を使う`}
+                  checked={s.enabled}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => globals.setEnabled(s, e.target.checked)}
+                />
+              </td>
+              <td className="global-name">{s.name}</td>
+              <td className="hint global-scope" title={s.scope.all ? '全体' : s.scope.items.join('\n')}>
+                {describeScope(s.scope)}
+              </td>
+              <td className="global-move">
+                <button
+                  type="button"
+                  className="icon"
+                  aria-label={`${s.name} を上へ`}
+                  disabled={i === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    globals.move(s, -1);
+                  }}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="icon"
+                  aria-label={`${s.name} を下へ`}
+                  disabled={i === sets.length - 1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    globals.move(s, 1);
+                  }}
+                >
+                  ↓
+                </button>
+              </td>
+            </tr>
           ))}
-        </select>
-      </label>
-      <span className="actions">
-        <button type="button" onClick={() => globals.create(false)}>
+          {sets.length === 0 && (
+            <tr>
+              <td colSpan={4} className="hint">
+                共通パラメータはまだありません。「新規」で作ってください。
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <div className="global-actions">
+        <button type="button" onClick={async () => setEditingId((await globals.create(null)) ?? editingId)}>
           新規
         </button>
-        <button type="button" disabled={!active} onClick={() => globals.create(true)}>
+        <button type="button" disabled={!editing} onClick={async () => editing && setEditingId((await globals.create(editing)) ?? editingId)}>
           複製
         </button>
-        <button type="button" disabled={!active} onClick={globals.rename}>
+        <button type="button" disabled={!editing} onClick={() => editing && globals.rename(editing)}>
           名前変更
         </button>
-        <button type="button" disabled={!active} onClick={globals.remove}>
+        <button type="button" disabled={!editing} onClick={() => editing && globals.remove(editing)}>
           削除
         </button>
-      </span>
+      </div>
       {globals.error && <p className="error-text">{globals.error}</p>}
+
+      {editing && (
+        <div className="global-editor">
+          <h3>
+            「{editing.name}」の値
+            {!editing.enabled && <span className="badge muted">オフ</span>}
+          </h3>
+          <GlobalValues api={api} set={editing} globals={globals} generation={generation} gen={gen} />
+          {renderJson(editing.values, (v) => globals.setValues(editing.id, v))}
+          <h3>「{editing.name}」を適用する範囲</h3>
+          <ScopeEditor scope={editing.scope} statements={statements} onChange={(scope) => globals.setScope(editing, scope)} />
+        </div>
+      )}
     </div>
   );
 }
@@ -157,7 +248,7 @@ function initialValue(n: ParameterName): PValue {
 const MAX_CANDIDATES = 30;
 
 /** 共通パラメータの値の編集。全 statement で使われている項目を候補として出す */
-export function GlobalEditor({ api, globals, generation, gen }: { api: Api; globals: Globals; generation: number; gen: GenContext }) {
+function GlobalValues({ api, set, globals, generation, gen }: { api: Api; set: GlobalSet; globals: Globals; generation: number; gen: GenContext }) {
   const [names, setNames] = useState<ParameterName[]>([]);
 
   useEffect(() => {
@@ -168,12 +259,12 @@ export function GlobalEditor({ api, globals, generation, gen }: { api: Api; glob
     );
   }, [api, generation]);
 
-  const values = globals.values;
+  const values = set.values;
   const candidates = names.filter((n) => getAt(values, n.path.split('.')) === undefined).slice(0, MAX_CANDIDATES);
 
   return (
     <>
-      <ParamTree schema={FREE_SCHEMA} value={values} onChange={globals.setValues} free gen={gen} />
+      <ParamTree schema={FREE_SCHEMA} value={values} onChange={(v) => globals.setValues(set.id, v)} free gen={gen} />
       {candidates.length > 0 && (
         <div className="candidates">
           <p className="hint">よく使われている項目（クリックで追加。数字は使っている statement の数）</p>
@@ -183,7 +274,7 @@ export function GlobalEditor({ api, globals, generation, gen }: { api: Api; glob
               type="button"
               className="candidate"
               title={n.usages.join(', ')}
-              onClick={() => globals.setValues(setAt(values, n.path.split('.'), initialValue(n)))}
+              onClick={() => globals.setValues(set.id, setAt(values, n.path.split('.'), initialValue(n)))}
             >
               {n.path}
               <span className="count">{n.count}</span>
@@ -192,5 +283,85 @@ export function GlobalEditor({ api, globals, generation, gen }: { api: Api; glob
         </div>
       )}
     </>
+  );
+}
+
+/** 範囲の編集: 全体か、ツリーで選んだフォルダ・ファイル・statement */
+function ScopeEditor({ scope, statements, onChange }: { scope: Scope; statements: StatementEntry[]; onChange: (scope: Scope) => void }) {
+  const tree = buildTree(statements);
+  const chosen = new Set(scope.items);
+  const toggle = (item: string) => {
+    const items = chosen.has(item) ? scope.items.filter((x) => x !== item) : [...scope.items, item];
+    onChange({ all: false, items });
+  };
+
+  // covered: 上の階層が選ばれていて、すでに範囲に含まれている
+  const render = (nodes: TreeNode[], covered: boolean) => (
+    <ul>
+      {nodes.map((n) => {
+        const on = chosen.has(n.key);
+        return (
+          <li key={n.key}>
+            <label className={covered ? 'check covered' : 'check'}>
+              <input type="checkbox" checked={on || covered} disabled={covered} onChange={() => toggle(n.key)} />
+              {n.kind === 'dir' ? `${n.label}/` : n.label}
+            </label>
+            {n.kind === 'dir' && render(n.children, covered || on)}
+            {n.kind === 'file' && (
+              <ul>
+                {n.statements.map((s) => (
+                  <li key={s.id}>
+                    <label className={covered || on ? 'check covered stmt' : 'check stmt'}>
+                      <input type="checkbox" checked={chosen.has(s.id) || covered || on} disabled={covered || on} onChange={() => toggle(s.id)} />
+                      {shortId(s.id)}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  // 今の mapper にない範囲（消えたり名前が変わったりした statement やファイル）が残っていれば知らせる
+  const known = new Set<string>();
+  const walk = (nodes: TreeNode[]) =>
+    nodes.forEach((n) => {
+      known.add(n.key);
+      if (n.kind === 'dir') walk(n.children);
+      else n.statements.forEach((s) => known.add(s.id));
+    });
+  walk(tree);
+  const missing = scope.items.filter((i) => !known.has(i) && !statements.some((s) => s.file.startsWith(i)));
+
+  return (
+    <div className="scope-editor">
+      <div className="scope-mode">
+        <label className="check">
+          <input type="radio" checked={scope.all} onChange={() => onChange({ all: true, items: scope.items })} />
+          全体
+        </label>
+        <label className="check">
+          <input type="radio" checked={!scope.all} onChange={() => onChange({ all: false, items: scope.items })} />
+          選んだフォルダ・ファイル・statement
+        </label>
+      </div>
+      {!scope.all && (
+        <>
+          <div className="scope-tree">{render(tree, false)}</div>
+          {scope.items.length === 0 && <p className="hint">まだどこも選んでいないため、この共通パラメータはどの statement にも効きません。</p>}
+          {missing.length > 0 && (
+            <p className="hint">
+              今の mapper にない範囲: {missing.join(', ')}
+              <button type="button" className="link" onClick={() => onChange({ all: false, items: scope.items.filter((i) => !missing.includes(i)) })}>
+                外す
+              </button>
+            </p>
+          )}
+        </>
+      )}
+    </div>
   );
 }
