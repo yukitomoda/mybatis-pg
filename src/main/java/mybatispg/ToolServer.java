@@ -246,9 +246,8 @@ public final class ToolServer {
       case "/api/globals/create":
       case "/api/globals/rename":
       case "/api/globals/delete":
-      case "/api/globals/scope":
-      case "/api/globals/exclude":
-      case "/api/globals/order":
+      case "/api/globals/move":
+      case "/api/globals/statement":
       case "/api/globals/values":
         if (requireMethod(ex, method, "POST")) {
           updateGlobals(ex, path.substring("/api/globals/".length()));
@@ -609,9 +608,8 @@ public final class ToolServer {
    * <li>create: {"name", "copyFrom"?}</li>
    * <li>rename: {"id", "name"}</li>
    * <li>delete: {"id"}</li>
-   * <li>scope: {"id", "places": ["*"・フォルダ・ファイルの相対パス・statement の id, ...]}</li>
-   * <li>exclude: {"id", "statement", "excluded"}（statement で適用しないか）</li>
-   * <li>order: {"place", "ids": [...]}（その場所の適用順序。下ほど優先）</li>
+   * <li>move: {"id", "offset"}（既定の順番。-1 で上へ、1 で下へ）</li>
+   * <li>statement: {"statement", "disabled": [...], "order": [...] または null}（statement ごとの設定）</li>
    * <li>values: {"id", "values": オブジェクト}</li>
    * </ul>
    */
@@ -632,14 +630,12 @@ public final class ToolServer {
         case "delete":
           globals.delete(id);
           break;
-        case "scope":
-          globals.setScope(id, strings(req, "places"));
+        case "move":
+          globals.move(id, req.has("offset") ? req.get("offset").getAsInt() : 0);
           break;
-        case "exclude":
-          globals.setExcluded(id, string(req, "statement"), req.has("excluded") && req.get("excluded").getAsBoolean());
-          break;
-        case "order":
-          globals.setOrder(string(req, "place"), strings(req, "ids"));
+        case "statement":
+          globals.setStatement(string(req, "statement"), strings(req, "disabled"),
+              req.has("order") && !req.get("order").isJsonNull() ? strings(req, "order") : null);
           break;
         default:
           JsonElement values = req.get("values");

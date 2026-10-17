@@ -189,17 +189,16 @@ class ToolServerTest {
     JsonObject created = api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 200);
     String id = created.getAsJsonArray("sets").get(0).getAsJsonObject().get("id").getAsString();
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":{\"tenantId\":1.0}}", 200);
-    api("POST", "/api/globals/scope", "{\"id\":\"" + id + "\",\"places\":[\"*\",\"mappers/\"]}", 200);
-    api("POST", "/api/globals/exclude", "{\"id\":\"" + id + "\",\"statement\":\"sample.UserMapper.search\",\"excluded\":true}", 200);
-    JsonObject ordered = api("POST", "/api/globals/order", "{\"place\":\"*\",\"ids\":[\"" + id + "\"]}", 200);
-    JsonObject set = ordered.getAsJsonArray("sets").get(0).getAsJsonObject();
-    assertEquals("{\"tenantId\":1.0}", set.get("values").toString());
-    assertEquals("[\"*\",\"mappers/\"]", set.get("scope").toString());
-    assertEquals("[\"sample.UserMapper.search\"]", set.get("excludes").toString());
-    assertEquals("{\"*\":[\"" + id + "\"]}", ordered.get("order").toString());
+    JsonObject saved = api("POST", "/api/globals/statement",
+        "{\"statement\":\"sample.UserMapper.search\",\"disabled\":[\"" + id + "\"],\"order\":[\"" + id + "\"]}", 200);
+    assertEquals("{\"tenantId\":1.0}", saved.getAsJsonArray("sets").get(0).getAsJsonObject().get("values").toString());
+    assertEquals("{\"sample.UserMapper.search\":{\"disabled\":[\"" + id + "\"],\"order\":[\"" + id + "\"]}}",
+        saved.get("statements").toString());
+    api("POST", "/api/globals/statement", "{\"statement\":\"sample.UserMapper.search\",\"disabled\":[],\"order\":null}", 200);
+    api("POST", "/api/globals/move", "{\"id\":\"" + id + "\",\"offset\":1}", 200);
 
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":[1]}", 400);
-    api("POST", "/api/globals/scope", "{\"id\":\"" + id + "\",\"places\":\"*\"}", 400);
+    api("POST", "/api/globals/statement", "{\"statement\":\"x\",\"disabled\":\"a\"}", 400);
     api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 400);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 200);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 400);
