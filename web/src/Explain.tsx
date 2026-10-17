@@ -11,7 +11,7 @@ import { toJson } from './params';
 import type { Plan, PlanNode } from './plan';
 import type { Timing } from './plan';
 import { estimateRatio, flatten, parsePlan, relations, timings } from './plan';
-import type { TableInfo } from './api';
+import type { DraftParam, TableInfo } from './api';
 
 /** 見積もりと実績の行数がこの倍率以上ずれていたら印を付ける */
 const MISESTIMATE = 10;
@@ -62,12 +62,15 @@ export function ExplainPanel({
   conn,
   statementId,
   value,
+  draft,
   ready,
   onApiError,
 }: {
   conn: Connections;
   statementId: string;
   value: PValue | undefined;
+  /** 編集中の mapper XML（なければ null） */
+  draft: DraftParam;
   ready: boolean;
   onApiError: (e: unknown) => void;
 }) {
@@ -127,7 +130,7 @@ export function ExplainPanel({
     setRunning(true);
     setError(null);
     try {
-      const r = await conn.api.explain(statementId, value, current.id, options);
+      const r = await conn.api.explain(statementId, value, current.id, options, draft);
       setShown({
         plan: parsePlan(r.plan),
         raw: r.plan,

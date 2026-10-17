@@ -18,6 +18,9 @@ export interface StatementsResponse {
   loadErrors: LoadError[];
 }
 
+/** 保存していない mapper XML の内容（なければ null） */
+export type DraftParam = { file: string; content: string } | null;
+
 export interface ParametersResponse {
   tree: ParamSchema;
   warnings: string[];
@@ -230,7 +233,18 @@ export function createApi(token: string) {
 
   return {
     statements: () => call<StatementsResponse>('api/statements'),
-    parameters: (id: string) => call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
+    parameters: (id: string, draft: DraftParam = null) =>
+      draft
+        ? call<ParametersResponse>('api/parameters', post(JSON.stringify({ id, draft })))
+        : call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
+    /** mapper XML の中身 */
+    file: (path: string) => call<{ file: string; content: string }>(`api/file?path=${encodeURIComponent(path)}`),
+    /** 下書きを読み込んでみる */
+    checkDraft: (file: string, content: string, signal?: AbortSignal) =>
+      call<{ statements: string[]; errors: { source: string; line: number | null; column: number | null; message: string }[] }>('api/draft/check', {
+        ...post(JSON.stringify({ file, content })),
+        signal,
+      }),
     /** すべての statement のパラメータの木（抜き出せなかったものは errors に理由） */
     allParameters: () => call<{ trees: Record<string, ParamSchema>; errors: Record<string, string> }>('api/parameters-all'),
     globals: async () => parseGlobals(await callText('api/globals')),
@@ -252,12 +266,12 @@ export function createApi(token: string) {
     /** mapper XML をエディタで開く（statement の開始行、またはファイルと行） */
     open: (target: OpenTarget) => call<object>('api/open', post(JSON.stringify(target))),
     template: (id: string) => call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
-    render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal) =>
+    render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal, draft: DraftParam = null) =>
       call<RenderResponse>('api/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 数値の精度を保つため、JSON は自前で組み立てる
-        body: `{"statementId":${JSON.stringify(statementId)},"parameters":${toJson(parameters, '')}}`,
+        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"parameters":${toJson(parameters, '')}}`,
         signal,
       }),
     connections: () => call<{ connections: ConnectionProfile[] }>('api/connections'),
@@ -280,11 +294,11 @@ export function createApi(token: string) {
         body: JSON.stringify({ id }),
       }),
     /** 実行する。commit が true でなければロールバックする */
-    execute: (statementId: string, parameters: PValue | undefined, connectionId: string, commit: boolean, maxRows: number) =>
+    execute: (statementId: string, parameters: PValue | undefined, connectionId: string, commit: boolean, maxRows: number, draft: DraftParam = null) =>
       call<ExecuteResponse>('api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
+        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
       }),
     /** EXPLAIN を実行する。plan は FORMAT JSON の結果の文字列 */
     explain: (
@@ -292,6 +306,7 @@ export function createApi(token: string) {
       parameters: PValue | undefined,
       connectionId: string,
       options: { analyze: boolean; buffers: boolean; readOnly: boolean; timeoutSeconds: number; sixthExecution: boolean; repeat: number },
+      draft: DraftParam = null,
     ) =>
       call<{
         sql: string;
@@ -305,7 +320,7 @@ export function createApi(token: string) {
       }>(
         'api/explain',
         post(
-          `{"statementId":${JSON.stringify(statementId)},"connectionId":${JSON.stringify(connectionId)},` +
+          `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},` +
             `"analyze":${options.analyze},"buffers":${options.buffers},"readOnly":${options.readOnly},` +
             `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),

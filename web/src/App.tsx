@@ -7,6 +7,8 @@ import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
+import { draftParam, useDrafts } from './drafts';
+import { FileEditor } from './FileEditor';
 import { GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
 import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './globalModel';
@@ -122,6 +124,10 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
+  const drafts = useDrafts();
+  /** テンプレートのタブを開いたことがあるか（エディタは開くまで読み込まない） */
+  const [templateSeen, setTemplateSeen] = useState(false);
+  if (tab === 'template' && !templateSeen) setTemplateSeen(true);
   /** パラメータ欄のタブ: 個別の値か、共通パラメータか */
   const [paramTab, setParamTab] = useState<'local' | 'global'>('local');
   const panes = usePaneWidths();
@@ -175,6 +181,10 @@ function Workspace({ api }: { api: Api }) {
       .catch(handleError);
   }, [api, generation]);
 
+  const target = statements.find((s) => s.id === selected) ?? null;
+  // 編集中の mapper XML があれば、組み立て・実行・EXPLAIN にその内容を使う
+  const draftP = draftParam(drafts.get(target?.file));
+
   // パラメータの木（XML が変わったら取り直す）
   useEffect(() => {
     if (!selected || generation === 0) {
@@ -183,7 +193,7 @@ function Workspace({ api }: { api: Api }) {
     }
     let active = true;
     api
-      .parameters(selected)
+      .parameters(selected, draftP)
       .then((r) => {
         if (!active) return;
         setSchema(r.tree);
@@ -194,16 +204,19 @@ function Workspace({ api }: { api: Api }) {
         if (!active) return;
         handleError(e);
         setSchema(null);
-        setSchemaError(e instanceof ApiError && e.status === 404 ? 'この statement は見つかりません（削除または改名された可能性があります）' : String(e.message ?? e));
+        const message = e instanceof ApiError && e.status === 404 ? 'この statement は見つかりません（削除または改名された可能性があります）' : String(e.message ?? e);
+        setSchemaError(message);
+        // 前の SQL が今の XML のものに見えないよう、消してエラーを出す
+        setResult(null);
+        setRenderError(message);
       });
     return () => {
       active = false;
     };
-  }, [api, selected, generation]);
+  }, [api, selected, generation, draftP?.content]);
 
   const globals = useGlobals(api, handleError);
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
-  const target = statements.find((s) => s.id === selected) ?? null;
   const applied = useMemo(() => (selected ? applicable(globals.sets, globals.statements[selected]) : []), [globals.sets, globals.statements, selected]);
   const base = useMemo(() => combine(applied), [applied]);
   // レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値）
@@ -237,7 +250,7 @@ function Workspace({ api }: { api: Api }) {
     const abort = new AbortController();
     const timer = setTimeout(() => {
       api
-        .render(selected, sent, abort.signal)
+        .render(selected, sent, abort.signal, draftP)
         .then((r) => {
           setResult(r);
           setRenderError(null);
@@ -253,7 +266,7 @@ function Workspace({ api }: { api: Api }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [api, selected, schema, sent, numberIssues.length, generation]);
+  }, [api, selected, schema, sent, numberIssues.length, generation, draftP?.content]);
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -311,7 +324,7 @@ function Workspace({ api }: { api: Api }) {
       <div className="screen" hidden={screen !== 'query'}>
     <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
-        <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} />
+        <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} drafted={drafts.files} />
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
@@ -386,6 +399,11 @@ function Workspace({ api }: { api: Api }) {
               }}
             >
               {label}
+              {key === 'template' && draftP && (
+                <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
+                  ●
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -432,6 +450,7 @@ function Workspace({ api }: { api: Api }) {
               conn={conn}
               statementId={selected}
               value={sent}
+              draft={draftP}
               ready={numberIssues.length === 0 && !renderError}
               onApiError={handleError}
             />
@@ -448,6 +467,7 @@ function Workspace({ api }: { api: Api }) {
               conn={conn}
               statementId={selected}
               value={sent}
+              draft={draftP}
               ready={numberIssues.length === 0 && !renderError}
               onApiError={handleError}
             />
@@ -456,12 +476,27 @@ function Workspace({ api }: { api: Api }) {
           )}
         </div>
 
-        {tab === 'template' &&
-          (selected ? (
-            <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
+        {/* 編集中の位置や取り消しの履歴が消えないよう、切り替えてもテンプレートのタブは残しておく */}
+        <div hidden={tab !== 'template'}>
+          {selected ? (
+            !templateSeen ? null : target ? (
+              <FileEditor
+                api={api}
+                statementId={selected}
+                file={target.file}
+                drafts={drafts}
+                generation={generation}
+                onApiError={handleError}
+                opener={opener}
+                visible={tab === 'template'}
+              />
+            ) : (
+              <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
+            )
           ) : (
             <p className="hint">左の一覧から statement を選んでください。</p>
-          ))}
+          )}
+        </div>
       </section>
     </div>
       </div>
@@ -535,8 +570,11 @@ function StatementTree({
   selected,
   onSelect,
   opener,
+  drafted,
 }: {
   statements: StatementEntry[];
+  /** 編集中（下書きがある）ファイル */
+  drafted: Set<string>;
   selected: string | null;
   onSelect: (id: string) => void;
   opener: Opener;
@@ -579,6 +617,11 @@ function StatementTree({
               <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
                 <span className="twisty">{open ? '▾' : '▸'}</span>
                 {n.kind === 'dir' ? n.label + '/' : n.label}
+                {n.kind === 'file' && drafted.has(n.key) && (
+                  <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
+                    ●
+                  </span>
+                )}
                 {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
               </button>
               {n.kind === 'file' && opener && (

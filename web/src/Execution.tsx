@@ -1,6 +1,6 @@
 // DB での実行と、接続先の設定
 import { useEffect, useRef, useState } from 'react';
-import type { Api, ConnectionInput, ConnectionProfile, ExecuteResponse, ResultTable } from './api';
+import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, ResultTable } from './api';
 import type { PValue } from './params';
 
 const CONNECTION_KEY = 'mybatis-pg.connection';
@@ -87,12 +87,15 @@ export function ExecutePanel({
   conn,
   statementId,
   value,
+  draft,
   ready,
   onApiError,
 }: {
   conn: Connections;
   statementId: string;
   value: PValue | undefined;
+  /** 編集中の mapper XML（なければ null） */
+  draft: DraftParam;
   /** 入力に誤りがなく、SQL を組み立てられる状態 */
   ready: boolean;
   onApiError: (e: unknown) => void;
@@ -109,7 +112,7 @@ export function ExecutePanel({
     setRunning(true);
     setError(null);
     try {
-      setResult(await conn.api.execute(statementId, value, current.id, commit, MAX_ROWS));
+      setResult(await conn.api.execute(statementId, value, current.id, commit, MAX_ROWS, draft));
     } catch (e) {
       onApiError(e);
       setResult(null);

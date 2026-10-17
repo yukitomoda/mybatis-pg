@@ -1842,3 +1842,27 @@ button.bulk-open {
   align-items: center;
   gap: 0.6rem;
 }
+
+/* ---- mapper XML の編集 ---- */
+
+.file-editor .sql-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.file-editor .xml-editor {
+  height: calc(100vh - 11rem);
+  min-height: 16rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.draft-mark {
+  color: var(--warn);
+  font-size: 10px;
+  margin-left: 0.3rem;
+}
