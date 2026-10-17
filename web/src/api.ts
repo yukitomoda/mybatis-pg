@@ -97,8 +97,19 @@ export interface ConnectionProfile {
   user: string;
   /** JDBC URL に付ける接続パラメータ */
   params: string;
-  /** パスワードがサーバのメモリにある（ファイルには保存しない） */
+  /** パスワードがサーバのメモリにある（使える） */
   hasPassword: boolean;
+  /** パスワードを暗号化して保存している */
+  passwordSaved: boolean;
+}
+
+/** パスワードの保存（マスターパスワードで暗号化）の状態 */
+export interface VaultStatus {
+  /** マスターパスワードを設定済み */
+  exists: boolean;
+  /** 開いている（保存したパスワードを使える） */
+  unlocked: boolean;
+  minLength: number;
 }
 
 /** 接続先の保存。id がなければ追加。password は省略で今のまま、空文字で消す */
@@ -111,6 +122,8 @@ export interface ConnectionInput {
   user: string;
   params: string;
   password?: string;
+  /** true でパスワードを暗号化して保存、false で保存しているものを消す。なければ変えない */
+  remember?: boolean;
 }
 
 export interface ResultTable {
@@ -296,6 +309,12 @@ export function createApi(token: string) {
         signal,
       }),
     connections: () => call<{ connections: ConnectionProfile[] }>('api/connections'),
+    vault: () => call<VaultStatus>('api/vault'),
+    vaultSetup: (password: string) => call<VaultStatus>('api/vault/setup', post(JSON.stringify({ password }))),
+    vaultUnlock: (password: string) => call<VaultStatus>('api/vault/unlock', post(JSON.stringify({ password }))),
+    vaultLock: () => call<VaultStatus>('api/vault/lock', post('{}')),
+    vaultChange: (current: string, password: string) => call<VaultStatus>('api/vault/change', post(JSON.stringify({ current, password }))),
+    vaultReset: () => call<VaultStatus>('api/vault/reset', post('{}')),
     saveConnection: (input: ConnectionInput) =>
       call<ConnectionProfile>('api/connections/save', {
         method: 'POST',

@@ -1,6 +1,6 @@
 // DB での実行と、接続先の設定
 import { useEffect, useRef, useState } from 'react';
-import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, ResultTable } from './api';
+import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, ResultTable, VaultStatus } from './api';
 import type { PValue } from './params';
 
 const CONNECTION_KEY = 'mybatis-pg.connection';
@@ -31,12 +31,22 @@ export function message(e: unknown): string {
 export function useConnections(api: Api, onApiError: (e: unknown) => void, openSettings: () => void) {
   const [connections, setConnections] = useState<ConnectionProfile[]>([]);
   const [selected, setSelected] = useState<string | null>(loadSelected);
+  const [vault, setVault] = useState<VaultStatus | null>(null);
 
-  const reload = () =>
-    api
+  const reload = () => {
+    api.vault().then(setVault, onApiError);
+    return api
       .connections()
       .then((r) => setConnections(r.connections))
       .catch(onApiError);
+  };
+
+  /** マスターパスワードの操作をして、状態と接続先を取り直す。失敗したら理由を投げる */
+  const vaultAction = async (f: () => Promise<VaultStatus>) => {
+    const v = await f();
+    setVault(v);
+    await reload();
+  };
 
   useEffect(() => {
     reload();
@@ -54,14 +64,17 @@ export function useConnections(api: Api, onApiError: (e: unknown) => void, openS
     select,
     reload,
     openSettings,
+    vault,
+    vaultAction,
   };
 }
 
 export type Connections = ReturnType<typeof useConnections>;
 
-/** 接続先の選択と「接続先の設定」ボタン（設定のダイアログを含む） */
+/** 接続先の選択と「接続先の設定」ボタン。保存したパスワードを使う接続先で、まだ開いていなければ、その場で開ける */
 export function ConnectionPicker({ conn }: { conn: Connections }) {
   const { connections, current } = conn;
+  const needsUnlock = !!current && current.passwordSaved && !current.hasPassword && conn.vault?.exists && !conn.vault.unlocked;
   return (
     <>
       <select aria-label="接続先" value={current?.id ?? ''} onChange={(e) => conn.select(e.target.value)} disabled={connections.length === 0}>
@@ -75,7 +88,145 @@ export function ConnectionPicker({ conn }: { conn: Connections }) {
       <button type="button" onClick={conn.openSettings}>
         接続先の設定
       </button>
+      {needsUnlock && <UnlockForm conn={conn} />}
     </>
+  );
+}
+
+/** マスターパスワードを入れて開く */
+function UnlockForm({ conn }: { conn: Connections }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="unlock-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError(null);
+        try {
+          await conn.vaultAction(() => conn.api.vaultUnlock(password));
+          setPassword('');
+        } catch (err) {
+          setError(message(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        type="password"
+        aria-label="マスターパスワード"
+        placeholder="マスターパスワード"
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <button type="submit" disabled={busy || password === ''}>
+        開く
+      </button>
+      {error && <span className="error-text">{error}</span>}
+    </form>
+  );
+}
+
+/** 接続先の画面の上: マスターパスワードの設定・開く・閉じる・変更 */
+function VaultPanel({ conn }: { conn: Connections }) {
+  const { vault, api } = conn;
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [current, setCurrent] = useState('');
+  const [changing, setChanging] = useState(false);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!vault) return null;
+  const run = async (f: () => Promise<VaultStatus>, done: string) => {
+    setStatus(null);
+    try {
+      await conn.vaultAction(f);
+      setPassword('');
+      setConfirm('');
+      setCurrent('');
+      setChanging(false);
+      setStatus({ ok: true, text: done });
+    } catch (e) {
+      setStatus({ ok: false, text: message(e) });
+    }
+  };
+  const mismatch = confirm !== '' && password !== confirm;
+  const newPassword = (
+    <>
+      <input
+        type="password"
+        aria-label="新しいマスターパスワード"
+        placeholder={`新しいマスターパスワード（${vault.minLength} 文字以上）`}
+        autoComplete="new-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <input type="password" aria-label="確認のため、もう一度" placeholder="確認のため、もう一度" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      {mismatch && <span className="error-text">一致しません</span>}
+    </>
+  );
+  return (
+    <section className="vault-panel">
+      <h3>パスワードの保存</h3>
+      {!vault.exists ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(() => api.vaultSetup(password), 'マスターパスワードを設定しました');
+          }}
+        >
+          <p className="hint">マスターパスワードを設定すると、接続先のパスワードを暗号化して保存できます。起動するたびに、マスターパスワードを 1 回入れて開きます。</p>
+          {newPassword}
+          <button type="submit" disabled={password.length < vault.minLength || password !== confirm}>
+            設定
+          </button>
+        </form>
+      ) : !vault.unlocked ? (
+        <div className="vault-row">
+          <UnlockForm conn={conn} />
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              if (window.confirm('マスターパスワードと、保存しているパスワードをすべて消します。よろしいですか？（接続先の設定は残ります）'))
+                run(() => api.vaultReset(), '保存していたパスワードを消しました');
+            }}
+          >
+            マスターパスワードを忘れた
+          </button>
+        </div>
+      ) : changing ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(() => api.vaultChange(current, password), 'マスターパスワードを変えました');
+          }}
+        >
+          <input type="password" aria-label="今のマスターパスワード" placeholder="今のマスターパスワード" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          {newPassword}
+          <button type="submit" disabled={current === '' || password.length < vault.minLength || password !== confirm}>
+            変更
+          </button>
+          <button type="button" className="link" onClick={() => setChanging(false)}>
+            やめる
+          </button>
+        </form>
+      ) : (
+        <div className="vault-row">
+          <span className="ok-text">開いています（保存したパスワードを使えます）</span>
+          <button type="button" onClick={() => run(() => api.vaultLock(), '閉じました')}>
+            閉じる
+          </button>
+          <button type="button" className="link" onClick={() => setChanging(true)}>
+            マスターパスワードを変更
+          </button>
+        </div>
+      )}
+      {status && <p className={status.ok ? 'ok-text' : 'error-text'}>{status.text}</p>}
+    </section>
   );
 }
 
@@ -219,6 +370,8 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
     setForm(toInput(conn.current));
   }, [conn.current]);
   const [password, setPassword] = useState('');
+  /** パスワードを暗号化して保存する（開いているときだけ選べる） */
+  const [remember, setRemember] = useState(true);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -227,6 +380,7 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
   const edit = (p: ConnectionProfile | null) => {
     setForm(p ? toInput(p) : { ...EMPTY });
     setPassword('');
+    setRemember(p ? p.passwordSaved || !p.hasPassword : true);
     setStatus(null);
   };
 
@@ -235,7 +389,8 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
   /** 保存する。パスワード欄が空なら今のパスワードのまま */
   const save = async (): Promise<ConnectionProfile | null> => {
     try {
-      const p = await api.saveConnection(password ? { ...form, password } : form);
+      const unlocked = !!conn.vault?.unlocked;
+      const p = await api.saveConnection({ ...form, ...(password ? { password } : {}), ...(unlocked ? { remember } : {}) });
       setForm(toInput(p));
       conn.select(p.id);
       setPassword('');
@@ -300,12 +455,18 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
         <h2>接続先</h2>
         <span className="hint">PostgreSQL</span>
       </header>
+      <VaultPanel conn={conn} />
       <div className="connections-body">
         <ul className="connection-list">
           {connections.map((c) => (
             <li key={c.id}>
               <button type="button" className={c.id === form.id ? 'selected' : undefined} onClick={() => edit(c)}>
                 {c.name}
+                {c.passwordSaved && (
+                  <span className="badge muted saved-mark" title="パスワードを暗号化して保存しています">
+                    保存済み
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -351,16 +512,20 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
               type="password"
               value={password}
               autoComplete="new-password"
-              placeholder={saved?.hasPassword ? '入力済み（変える場合だけ入力）' : '未入力'}
+              placeholder={saved?.hasPassword ? '入力済み（変える場合だけ入力）' : saved?.passwordSaved ? '保存済み（マスターパスワードで開くと使えます）' : '未入力'}
               onChange={(e) => setPassword(e.target.value)}
             />
+          </label>
+          <label className="check" title={conn.vault?.unlocked ? undefined : '上でマスターパスワードを設定するか、開くと選べます'}>
+            <input type="checkbox" checked={conn.vault?.unlocked ? remember : !!saved?.passwordSaved} disabled={!conn.vault?.unlocked} onChange={(e) => setRemember(e.target.checked)} />
+            パスワードを保存する（暗号化）
           </label>
           <label>
             接続パラメータ
             <input type="text" value={form.params} placeholder="例: sslmode=require&stringtype=unspecified" onChange={(e) => set('params', e.target.value)} />
           </label>
           <p className="hint">
-            パスワードはファイルに保存しません。ツールを再起動したら入力し直してください。
+            保存しないパスワードは、ツールを再起動すると消えます。
             {saved?.hasPassword && (
               <button type="button" className="link" disabled={busy} onClick={clearPassword}>
                 パスワードを消す

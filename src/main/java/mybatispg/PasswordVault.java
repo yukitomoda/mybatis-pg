@@ -268,7 +268,7 @@ public final class PasswordVault {
         // Windows など POSIX の権限がない環境では設定しない
       }
       try (Writer out = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-        new GsonBuilder().setPrettyPrinting().create().toJson(data, out);
+        new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(data, out);
       }
       try {
         Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

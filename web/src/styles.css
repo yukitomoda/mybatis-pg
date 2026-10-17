@@ -1948,3 +1948,55 @@ button.bulk-open {
 .file-editor .playground-name {
   font-weight: 600;
 }
+
+/* ---- パスワードの保存 ---- */
+
+.vault-panel {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.vault-panel h3 {
+  margin: 0 0 0.4rem;
+  font-size: 14px;
+}
+
+.vault-panel form,
+.vault-panel .vault-row,
+.unlock-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-panel form .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.vault-panel p {
+  margin: 0.4rem 0 0;
+}
+
+.unlock-form {
+  display: inline-flex;
+}
+
+.saved-mark {
+  margin-left: 0.4rem;
+}
+
+.connection-form label.check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.connection-form label.check input {
+  width: auto;
+}
