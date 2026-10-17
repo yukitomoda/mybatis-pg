@@ -246,8 +246,9 @@ public final class ToolServer {
       case "/api/globals/create":
       case "/api/globals/rename":
       case "/api/globals/delete":
-      case "/api/globals/rule":
-      case "/api/globals/move":
+      case "/api/globals/scope":
+      case "/api/globals/exclude":
+      case "/api/globals/order":
       case "/api/globals/values":
         if (requireMethod(ex, method, "POST")) {
           updateGlobals(ex, path.substring("/api/globals/".length()));
@@ -608,8 +609,9 @@ public final class ToolServer {
    * <li>create: {"name", "copyFrom"?}</li>
    * <li>rename: {"id", "name"}</li>
    * <li>delete: {"id"}</li>
-   * <li>rule: {"id", "place", "state"}（place は "*"・フォルダ・ファイル・statement の id、state は "on"・"off"・null）</li>
-   * <li>move: {"id", "offset"}（-1 で上へ、1 で下へ）</li>
+   * <li>scope: {"id", "places": ["*"・フォルダ・ファイルの相対パス・statement の id, ...]}</li>
+   * <li>exclude: {"id", "statement", "excluded"}（statement で適用しないか）</li>
+   * <li>order: {"place", "ids": [...]}（その場所の適用順序。下ほど優先）</li>
    * <li>values: {"id", "values": オブジェクト}</li>
    * </ul>
    */
@@ -630,11 +632,14 @@ public final class ToolServer {
         case "delete":
           globals.delete(id);
           break;
-        case "rule":
-          globals.setRule(id, string(req, "place"), string(req, "state"));
+        case "scope":
+          globals.setScope(id, strings(req, "places"));
           break;
-        case "move":
-          globals.move(id, req.has("offset") ? req.get("offset").getAsInt() : 0);
+        case "exclude":
+          globals.setExcluded(id, string(req, "statement"), req.has("excluded") && req.get("excluded").getAsBoolean());
+          break;
+        case "order":
+          globals.setOrder(string(req, "place"), strings(req, "ids"));
           break;
         default:
           JsonElement values = req.get("values");
@@ -955,6 +960,19 @@ public final class ToolServer {
       sendJson(ex, 400, error("JSON を解析できません: " + e.getMessage()));
       return null;
     }
+  }
+
+  /** 文字列の配列の項目。なければ例外 */
+  private static List<String> strings(JsonObject obj, String key) {
+    JsonElement e = obj.get(key);
+    if (e == null || !e.isJsonArray()) {
+      throw new IllegalArgumentException(key + " は文字列の配列で指定してください");
+    }
+    List<String> out = new ArrayList<>();
+    for (JsonElement item : e.getAsJsonArray()) {
+      out.add(item.isJsonPrimitive() ? item.getAsString() : null);
+    }
+    return out;
   }
 
   /** 文字列の項目。なければ（null も含む）null */

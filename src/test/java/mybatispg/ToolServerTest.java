@@ -189,15 +189,17 @@ class ToolServerTest {
     JsonObject created = api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 200);
     String id = created.getAsJsonArray("sets").get(0).getAsJsonObject().get("id").getAsString();
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":{\"tenantId\":1.0}}", 200);
-    api("POST", "/api/globals/rule", "{\"id\":\"" + id + "\",\"place\":\"*\",\"state\":\"off\"}", 200);
-    JsonObject ruled = api("POST", "/api/globals/rule", "{\"id\":\"" + id + "\",\"place\":\"mappers/\",\"state\":\"on\"}", 200);
-    JsonObject set = ruled.getAsJsonArray("sets").get(0).getAsJsonObject();
+    api("POST", "/api/globals/scope", "{\"id\":\"" + id + "\",\"places\":[\"*\",\"mappers/\"]}", 200);
+    api("POST", "/api/globals/exclude", "{\"id\":\"" + id + "\",\"statement\":\"sample.UserMapper.search\",\"excluded\":true}", 200);
+    JsonObject ordered = api("POST", "/api/globals/order", "{\"place\":\"*\",\"ids\":[\"" + id + "\"]}", 200);
+    JsonObject set = ordered.getAsJsonArray("sets").get(0).getAsJsonObject();
     assertEquals("{\"tenantId\":1.0}", set.get("values").toString());
-    assertEquals("{\"*\":\"off\",\"mappers/\":\"on\"}", set.get("rules").toString());
-    api("POST", "/api/globals/rule", "{\"id\":\"" + id + "\",\"place\":\"mappers/\",\"state\":null}", 200);
+    assertEquals("[\"*\",\"mappers/\"]", set.get("scope").toString());
+    assertEquals("[\"sample.UserMapper.search\"]", set.get("excludes").toString());
+    assertEquals("{\"*\":[\"" + id + "\"]}", ordered.get("order").toString());
 
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":[1]}", 400);
-    api("POST", "/api/globals/rule", "{\"id\":\"" + id + "\",\"place\":\"*\",\"state\":\"yes\"}", 400);
+    api("POST", "/api/globals/scope", "{\"id\":\"" + id + "\",\"places\":\"*\"}", 400);
     api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 400);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 200);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 400);

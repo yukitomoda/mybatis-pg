@@ -9,7 +9,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -23,17 +29,26 @@ import com.google.gson.JsonParser;
  *
  * <p>ファイルにはプロジェクトごとに保存する。他のプロジェクトの内容はそのまま残す。
  * <pre>
- * {"projects": {"/path/to/project": {"sets": [
- *   {"id": "...", "name": "...", "values": {...}, "rules": {"*": "on", "shop/order/": "off", "shop.order.OrderMapper.recent": "on"}}
- * ]}}}
+ * {"projects": {"/path/to/project": {
+ *   "sets": [{"id": "...", "name": "...", "values": {...}, "scope": ["*", "shop/order/"], "excludes": ["shop.order.OrderMapper.recent"]}],
+ *   "order": {"*": ["id1", "id2"], "shop/order/": ["id3"]}
+ * }}}
  * </pre>
- * rules は場所ごとの「適用する（on）」「適用しない（off）」。場所は "*"（全体）、フォルダ（末尾が /）・ファイルの相対パス、
- * statement の id。決めていない場所は外側に従う（判定は画面で行う）。
- * 以前の形（"active" で 1 つを選ぶ形、"enabled" と "scope" を持つ形）は、読み込んだときに rules に直す。
- * <pre>
+ * <ul>
+ * <li>scope: 対象とする場所。"*"（全体）、フォルダ（末尾が /）・ファイルの相対パス、statement の id</li>
+ * <li>excludes: スコープに入っていても適用しない statement の id</li>
+ * <li>order: 場所ごとの適用順序（同じ場所をスコープにした共通パラメータどうしの順。下ほど優先）</li>
+ * </ul>
+ * 以前の形（"active" で 1 つを選ぶ形、"enabled" と範囲を持つ形、場所ごとの "rules" を持つ形）は、読み込んだときに直す。
  * 値は JSON のまま持ち、数値は書かれた文字のまま保つ。
  */
 public final class GlobalStore {
+
+  /** 全体を表す場所 */
+  public static final String ROOT = "*";
+
+  /** 場所の名前。改行などの制御文字は受け付けない */
+  private static final Pattern PLACE = Pattern.compile("\\*|[^\\s\\u0000-\\u001f][^\\u0000-\\u001f]{0,500}");
 
   /** null ならファイルに保存しない */
   private final Path file;
@@ -68,34 +83,35 @@ public final class GlobalStore {
     return new GlobalStore(null, "", new JsonObject());
   }
 
-  /** このプロジェクトの内容: {"sets": [...]}（並び順は優先順位に使う） */
+  /** このプロジェクトの内容: {"sets": [...], "order": {...}} */
   public synchronized JsonObject snapshot() {
+    JsonObject p = project();
     JsonObject copy = new JsonObject();
-    copy.add("sets", project().get("sets").deepCopy());
+    copy.add("sets", p.get("sets").deepCopy());
+    copy.add("order", p.get("order").deepCopy());
     return copy;
   }
 
   /**
-   * 作る。
+   * 作る。新しいものはスコープなし（どこにも適用しない）。
    *
-   * 作る。新しいものは、どこにも適用しない（適用する場所は後から決める）。
-   *
-   * @param copyFrom null でなければ、その共通パラメータの値と適用する場所を引き継ぐ
+   * @param copyFrom null でなければ、その共通パラメータの値・スコープ・適用しない statement を引き継ぐ
    */
   public synchronized JsonObject create(String name, String copyFrom) throws IOException {
     String trimmed = validName(name, null);
-    JsonObject values = new JsonObject();
-    JsonObject rules = new JsonObject();
-    if (copyFrom != null) {
-      JsonObject from = find(copyFrom);
-      values = from.getAsJsonObject("values").deepCopy();
-      rules = from.getAsJsonObject("rules").deepCopy();
-    }
     JsonObject set = new JsonObject();
     set.addProperty("id", UUID.randomUUID().toString());
     set.addProperty("name", trimmed);
-    set.add("values", values);
-    set.add("rules", rules);
+    if (copyFrom != null) {
+      JsonObject from = find(copyFrom);
+      set.add("values", from.getAsJsonObject("values").deepCopy());
+      set.add("scope", from.getAsJsonArray("scope").deepCopy());
+      set.add("excludes", from.getAsJsonArray("excludes").deepCopy());
+    } else {
+      set.add("values", new JsonObject());
+      set.add("scope", new JsonArray());
+      set.add("excludes", new JsonArray());
+    }
     sets().add(set);
     write();
     return set.deepCopy();
@@ -109,70 +125,64 @@ public final class GlobalStore {
 
   public synchronized void delete(String id) throws IOException {
     sets().remove(find(id));
-    write();
-  }
-
-  /** 場所の名前。SQL などには使わないが、変な値は受け付けない */
-  private static final java.util.regex.Pattern PLACE = java.util.regex.Pattern.compile("\\*|[^\\s\\u0000-\\u001f][^\\u0000-\\u001f]{0,500}");
-
-  /**
-   * 場所での「適用する・しない」を決める。
-   *
-   * @param place "*"（全体）、フォルダ（末尾が /）・ファイルの相対パス、statement の id
-   * @param state "on"（適用する）、"off"（適用しない）、null（決めない＝外側に従う）
-   */
-  public synchronized void setRule(String id, String place, String state) throws IOException {
-    JsonObject set = find(id);
-    if (place == null || !PLACE.matcher(place).matches()) {
-      throw new IllegalArgumentException("場所が正しくありません: " + place);
-    }
-    JsonObject rules = set.getAsJsonObject("rules");
-    if (state == null) {
-      rules.remove(place);
-    } else if ("on".equals(state) || "off".equals(state)) {
-      rules.addProperty(place, state);
-    } else {
-      throw new IllegalArgumentException("state は on・off・null のどれかにしてください: " + state);
+    for (Map.Entry<String, JsonElement> e : order().entrySet()) {
+      remove(e.getValue().getAsJsonArray(), id);
     }
     write();
-  }
-
-  /** 並び順を変える（同じ範囲の狭さなら、下にあるほうが優先） */
-  public synchronized void move(String id, int offset) throws IOException {
-    JsonArray sets = sets();
-    JsonObject set = find(id);
-    int from = indexOf(sets, set);
-    int to = Math.max(0, Math.min(sets.size() - 1, from + offset));
-    if (from == to) {
-      return;
-    }
-    sets.remove(from);
-    JsonArray reordered = new JsonArray();
-    for (int i = 0; i < sets.size(); i++) {
-      if (i == to) {
-        reordered.add(set);
-      }
-      reordered.add(sets.get(i));
-    }
-    if (to >= sets.size()) {
-      reordered.add(set);
-    }
-    project().add("sets", reordered);
-    write();
-  }
-
-  private static int indexOf(JsonArray sets, JsonObject set) {
-    for (int i = 0; i < sets.size(); i++) {
-      if (sets.get(i) == set) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   public synchronized void saveValues(String id, JsonObject values) throws IOException {
     find(id).add("values", values.deepCopy());
     write();
+  }
+
+  /** スコープを変える */
+  public synchronized void setScope(String id, List<String> places) throws IOException {
+    JsonObject set = find(id);
+    Set<String> unique = new LinkedHashSet<>();
+    for (String p : places) {
+      unique.add(validPlace(p));
+    }
+    JsonArray scope = new JsonArray();
+    unique.forEach(scope::add);
+    set.add("scope", scope);
+    write();
+  }
+
+  /** statement で適用しない（excluded が true）か、スコープどおり適用するかを決める */
+  public synchronized void setExcluded(String id, String statementId, boolean excluded) throws IOException {
+    JsonArray excludes = find(id).getAsJsonArray("excludes");
+    remove(excludes, validPlace(statementId));
+    if (excluded) {
+      excludes.add(statementId);
+    }
+    write();
+  }
+
+  /** 場所の適用順序を決める（下ほど優先）。ids にない共通パラメータの扱いは画面で決める */
+  public synchronized void setOrder(String place, List<String> ids) throws IOException {
+    JsonArray list = new JsonArray();
+    for (String id : new LinkedHashSet<>(ids)) {
+      find(id);
+      list.add(id);
+    }
+    order().add(validPlace(place), list);
+    write();
+  }
+
+  private static String validPlace(String place) {
+    if (place == null || !PLACE.matcher(place).matches()) {
+      throw new IllegalArgumentException("場所が正しくありません: " + place);
+    }
+    return place;
+  }
+
+  private static void remove(JsonArray array, String value) {
+    for (int i = array.size() - 1; i >= 0; i--) {
+      if (array.get(i).getAsString().equals(value)) {
+        array.remove(i);
+      }
+    }
   }
 
   private JsonObject project() {
@@ -189,39 +199,73 @@ public final class GlobalStore {
     if (!p.has("sets") || !p.get("sets").isJsonArray()) {
       p.add("sets", new JsonArray());
     }
-    // 以前の形を引き継ぐ
-    //   1. "active" で 1 つを選ぶ形: 選んでいたものを全体で適用し、ほかは全体で適用しない
-    //   2. "enabled" と "scope" を持つ形: オンで範囲が全体なら全体で適用、範囲を絞っていたらその場所で適用、オフなら全体で適用しない
+    if (!p.has("order") || !p.get("order").isJsonObject()) {
+      p.add("order", new JsonObject());
+    }
+    migrate(p);
+    return p;
+  }
+
+  /**
+   * 以前の形を引き継ぐ。
+   * <ol>
+   * <li>"active" で 1 つを選ぶ形: 選んでいたもののスコープを全体にする</li>
+   * <li>"enabled" と "scope"（{all, items}）の形: オンのものの範囲をスコープにする（オフのものはスコープなし）</li>
+   * <li>場所ごとの "rules" の形: 「適用する」の場所をスコープにし、statement での「適用しない」を excludes にする</li>
+   * </ol>
+   */
+  private static void migrate(JsonObject p) {
     JsonElement active = p.remove("active");
     String activeId = active == null || active.isJsonNull() ? null : active.getAsString();
     for (JsonElement e : p.getAsJsonArray("sets")) {
       JsonObject set = e.getAsJsonObject();
-      if (set.has("rules") && set.get("rules").isJsonObject()) {
+      if (set.has("scope") && set.get("scope").isJsonArray()) {
+        if (!set.has("excludes")) {
+          set.add("excludes", new JsonArray());
+        }
         continue;
       }
-      JsonObject rules = new JsonObject();
-      JsonElement enabledElement = set.remove("enabled");
-      JsonElement scopeElement = set.remove("scope");
-      boolean enabled = enabledElement != null ? enabledElement.getAsBoolean()
-          : active == null || set.get("id").getAsString().equals(activeId);
-      JsonObject scope = scopeElement != null && scopeElement.isJsonObject() ? scopeElement.getAsJsonObject() : null;
-      boolean all = scope == null || !scope.has("all") || scope.get("all").getAsBoolean();
-      if (!enabled) {
-        rules.addProperty("*", "off");
-      } else if (all) {
-        rules.addProperty("*", "on");
-      } else if (scope.has("items") && scope.get("items").isJsonArray()) {
-        for (JsonElement item : scope.getAsJsonArray("items")) {
-          rules.addProperty(item.getAsString(), "on");
+      List<String> scope = new ArrayList<>();
+      JsonArray excludes = new JsonArray();
+      JsonElement rules = set.remove("rules");
+      JsonElement enabled = set.remove("enabled");
+      JsonElement oldScope = set.remove("scope");
+      if (rules != null && rules.isJsonObject()) {
+        for (Map.Entry<String, JsonElement> r : rules.getAsJsonObject().entrySet()) {
+          String place = r.getKey();
+          if ("on".equals(r.getValue().getAsString())) {
+            scope.add(place);
+          } else if (!ROOT.equals(place) && !place.endsWith("/") && !place.endsWith(".xml")) {
+            // statement での「適用しない」（フォルダ・ファイルでの「適用しない」は表せないので捨てる）
+            excludes.add(place);
+          }
+        }
+      } else {
+        boolean on = enabled != null ? enabled.getAsBoolean() : active == null || set.get("id").getAsString().equals(activeId);
+        if (on) {
+          JsonObject s = oldScope != null && oldScope.isJsonObject() ? oldScope.getAsJsonObject() : null;
+          if (s == null || !s.has("all") || s.get("all").getAsBoolean()) {
+            scope.add(ROOT);
+          } else if (s.has("items") && s.get("items").isJsonArray()) {
+            for (JsonElement item : s.getAsJsonArray("items")) {
+              scope.add(item.getAsString());
+            }
+          }
         }
       }
-      set.add("rules", rules);
+      JsonArray array = new JsonArray();
+      scope.forEach(array::add);
+      set.add("scope", array);
+      set.add("excludes", excludes);
     }
-    return p;
   }
 
   private JsonArray sets() {
     return project().getAsJsonArray("sets");
+  }
+
+  private JsonObject order() {
+    return project().getAsJsonObject("order");
   }
 
   private JsonObject find(String id) {
