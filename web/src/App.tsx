@@ -136,6 +136,22 @@ function Workspace({ api }: { api: Api }) {
   /** テンプレートのタブを開いたことがあるか（エディタは開くまで読み込まない） */
   const [templateSeen, setTemplateSeen] = useState(false);
   if (tab === 'template' && !templateSeen) setTemplateSeen(true);
+  /** statement の一覧（左のペイン）を開いているか（ブラウザに覚えておく） */
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const toggleSidebar = (open: boolean) => {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, open ? 'open' : 'closed');
+    } catch {
+      // 覚えられない環境では、開いている間だけ
+    }
+  };
   /** パラメータ欄のタブ: 個別の値か、共通パラメータか */
   const [paramTab, setParamTab] = useState<'local' | 'global'>('local');
   /** 個別の値を共通パラメータにコピーする欄を開いている */
@@ -429,7 +445,14 @@ function Workspace({ api }: { api: Api }) {
 
       {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
       <div className="screen" hidden={screen !== 'query'}>
-    <div className="layout" ref={panes.layout} style={panes.style}>
+    <div className={sidebarOpen ? 'layout' : 'layout sidebar-closed'} ref={panes.layout} style={panes.style}>
+      {!sidebarOpen ? (
+        <aside className="sidebar closed">
+          <button type="button" className="icon sidebar-toggle" title="一覧を開く" aria-label="statement の一覧を開く" onClick={() => toggleSidebar(true)}>
+            »
+          </button>
+        </aside>
+      ) : (
       <aside className="sidebar">
         <DraftList
           drafts={drafts}
@@ -444,10 +467,12 @@ function Workspace({ api }: { api: Api }) {
           onSelect={select}
           onEdit={editFile}
           drafted={drafts.files}
+          onCollapse={() => toggleSidebar(false)}
         />
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
-      <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
+      )}
+      {sidebarOpen && <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />}
 
       <main className="params">
         <header className="panel-header">
@@ -728,8 +753,11 @@ function StatementTree({
   onSelect,
   onEdit,
   drafted,
+  onCollapse,
 }: {
   statements: StatementEntry[];
+  /** 一覧を閉じる */
+  onCollapse: () => void;
   playgrounds: PlaygroundEntry[];
   onCreatePlayground: () => void;
   /** ファイルをエディタで開く */
@@ -833,7 +861,12 @@ function StatementTree({
 
   return (
     <div className="statements">
-      <input type="search" placeholder="statement・ファイルを絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="statement-filter">
+        <input type="search" placeholder="statement・ファイルを絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button type="button" className="icon sidebar-toggle" title="一覧を閉じる" aria-label="statement の一覧を閉じる" onClick={onCollapse}>
+          «
+        </button>
+      </div>
       <nav className="tree-list">
         <ul>
           <li>
@@ -859,6 +892,8 @@ function StatementTree({
     </div>
   );
 }
+
+const SIDEBAR_KEY = 'mybatis-pg.sidebar';
 
 /** statement が見つからないことを表す印（説明は表示するときに決める） */
 const NOT_FOUND = '\u0000not-found';

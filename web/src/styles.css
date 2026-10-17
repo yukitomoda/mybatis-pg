@@ -204,9 +204,15 @@ body.resizing {
 
 /* ---- statement 一覧 ---- */
 
-.statements input {
-  width: 100%;
+.statement-filter {
+  display: flex;
+  gap: 0.3rem;
   margin-bottom: 0.5rem;
+}
+
+.statement-filter input {
+  flex: 1;
+  min-width: 0;
 }
 
 .tree-list ul {
@@ -2166,4 +2172,19 @@ button.bulk-open {
   display: flex;
   align-items: center;
   gap: 0.8rem;
+}
+
+/* ---- statement の一覧（左のペイン）を閉じたとき ---- */
+
+.layout.sidebar-closed {
+  grid-template-columns: 2rem var(--params-width, minmax(340px, 1fr)) 6px minmax(320px, 1.2fr);
+}
+
+.sidebar.closed {
+  padding: 0.4rem 0.2rem;
+  overflow: hidden;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
 }
