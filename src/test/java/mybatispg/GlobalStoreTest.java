@@ -40,15 +40,17 @@ class GlobalStoreTest {
     String id = a.create("テナントA", null).get("id").getAsString();
     String other = a.create("B", null).get("id").getAsString();
     a.saveValues(id, json("{\"tenantId\":100,\"rate\":1.50}"));
-    a.setStatement("shop.order.OrderMapper.recent", Arrays.asList(id), Arrays.asList(other, id));
+    a.setDefault(id, true);
+    a.setStatement("shop.order.OrderMapper.recent", Arrays.asList(other), Arrays.asList(id), Arrays.asList(other));
 
     GlobalStore b = GlobalStore.load(file, "/project/b");
     assertEquals("{\"sets\":[],\"statements\":{}}", b.snapshot().toString());
     b.create("B", null);
 
     JsonObject reloaded = GlobalStore.load(file, "/project/a").snapshot();
+    assertEquals("true", reloaded.getAsJsonArray("sets").get(0).getAsJsonObject().get("default").toString());
     assertEquals("{\"tenantId\":100,\"rate\":1.50}", reloaded.getAsJsonArray("sets").get(0).getAsJsonObject().get("values").toString());
-    assertEquals("{\"shop.order.OrderMapper.recent\":{\"disabled\":[\"" + id + "\"],\"order\":[\"" + other + "\",\"" + id + "\"]}}",
+    assertEquals("{\"shop.order.OrderMapper.recent\":{\"added\":[\"" + other + "\"],\"removed\":[\"" + id + "\"],\"order\":[\"" + other + "\"]}}",
         reloaded.get("statements").toString());
     assertTrue(new String(Files.readAllBytes(file), StandardCharsets.UTF_8).contains("/project/b"));
   }
@@ -57,26 +59,38 @@ class GlobalStoreTest {
   void statementの設定は何もなければ消す_削除するとstatementの設定からも消す() throws Exception {
     GlobalStore s = GlobalStore.inMemory();
     String a = s.create("A", null).get("id").getAsString();
+    s.setDefault(a, true);
     String b = s.create("B", a).get("id").getAsString();
-    s.setStatement("x.y", Arrays.asList(a, b), Arrays.asList(b, a));
-    s.delete(b);
-    assertEquals("{\"x.y\":{\"disabled\":[\"" + a + "\"],\"order\":[\"" + a + "\"]}}", s.snapshot().get("statements").toString());
-    s.setStatement("x.y", Collections.<String>emptyList(), null);
+    assertEquals("true", s.snapshot().getAsJsonArray("sets").get(1).getAsJsonObject().get("default").toString());
+    String c = s.create("C", null).get("id").getAsString();
+    assertEquals("false", s.snapshot().getAsJsonArray("sets").get(2).getAsJsonObject().get("default").toString());
+    s.setStatement("x.y", Arrays.asList(c), Arrays.asList(b), Arrays.asList(c, a));
+    s.delete(c);
+    assertEquals("{\"x.y\":{\"added\":[],\"removed\":[\"" + b + "\"],\"order\":[\"" + a + "\"]}}", s.snapshot().get("statements").toString());
+    s.setStatement("x.y", Collections.<String>emptyList(), Collections.<String>emptyList(), null);
     assertEquals("{}", s.snapshot().get("statements").toString());
-    assertThrows(IllegalArgumentException.class, () -> s.setStatement("x.y", Arrays.asList("no-such"), null));
-    assertThrows(IllegalArgumentException.class, () -> s.setStatement(" ", Collections.<String>emptyList(), null));
+    assertThrows(IllegalArgumentException.class, () -> s.setStatement("x.y", Arrays.asList("no-such"), Collections.<String>emptyList(), null));
+    assertThrows(IllegalArgumentException.class, () -> s.setStatement(" ", Collections.<String>emptyList(), Collections.<String>emptyList(), null));
   }
 
   @Test
   void 既定の順番を変える() throws Exception {
     GlobalStore s = GlobalStore.inMemory();
     String a = s.create("A", null).get("id").getAsString();
-    s.create("B", null);
+    String b = s.create("B", null).get("id").getAsString();
     String c = s.create("C", null).get("id").getAsString();
-    s.move(c, -1);
-    assertEquals("[A, C, B]", names(s));
-    s.move(a, 5);
-    assertEquals("[C, B, A]", names(s));
+    s.reorder(Arrays.asList(c, a, b));
+    assertEquals("[C, A, B]", names(s));
+    assertThrows(IllegalArgumentException.class, () -> s.reorder(Arrays.asList(c, a)));
+    assertThrows(IllegalArgumentException.class, () -> s.reorder(Arrays.asList(c, a, a)));
+  }
+
+  @Test
+  void 無効にしていた形は外したものにする() throws Exception {
+    JsonObject p = migrate("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}}],"
+        + "\"statements\":{\"x.y\":{\"disabled\":[\"a\"],\"order\":[\"a\"]}}}");
+    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"default\":true}],"
+        + "\"statements\":{\"x.y\":{\"order\":[\"a\"],\"removed\":[\"a\"],\"added\":[]}}}", p.toString());
   }
 
   private JsonObject migrate(String project) throws Exception {
@@ -86,24 +100,25 @@ class GlobalStoreTest {
   }
 
   @Test
-  void スコープの形は適用しないものをstatementの無効にする() throws Exception {
+  void スコープの形は適用しないものをstatementで外したものにする() throws Exception {
     JsonObject p = migrate("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"scope\":[\"shop/order/\"],\"excludes\":[\"x.y\"]}],"
         + "\"order\":{\"*\":[\"a\"]}}");
-    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}}],\"statements\":{\"x.y\":{\"disabled\":[\"a\"]}}}", p.toString());
+    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"default\":true}],\"statements\":{\"x.y\":{\"added\":[],\"removed\":[\"a\"]}}}", p.toString());
   }
 
   @Test
-  void 場所ごとの適用の形はstatementでの適用しないを無効にする() throws Exception {
+  void 場所ごとの適用の形はstatementでの適用しないを外したものにする() throws Exception {
     JsonObject p = migrate("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},"
         + "\"rules\":{\"*\":\"on\",\"shop/x/\":\"off\",\"shop.x.M.find\":\"off\"}}]}");
-    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}}],\"statements\":{\"shop.x.M.find\":{\"disabled\":[\"a\"]}}}", p.toString());
+    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"default\":true}],\"statements\":{\"shop.x.M.find\":{\"added\":[],\"removed\":[\"a\"]}}}", p.toString());
   }
 
   @Test
-  void 一つを選ぶ形と範囲とオンオフの形はすべてグローバルにする() throws Exception {
+  void 一つを選ぶ形と範囲とオンオフの形は既定で入れる() throws Exception {
     JsonObject p = migrate("{\"active\":\"a\",\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}},"
         + "{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"enabled\":false,\"scope\":{\"all\":true,\"items\":[]}}]}");
-    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}},{\"id\":\"b\",\"name\":\"B\",\"values\":{}}],\"statements\":{}}", p.toString());
+    assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"default\":true},"
+        + "{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"default\":true}],\"statements\":{}}", p.toString());
   }
 
   @Test

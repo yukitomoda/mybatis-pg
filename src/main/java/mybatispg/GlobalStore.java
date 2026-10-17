@@ -29,15 +29,15 @@ import com.google.gson.JsonParser;
  * <p>ファイルにはプロジェクトごとに保存する。他のプロジェクトの内容はそのまま残す。
  * <pre>
  * {"projects": {"/path/to/project": {
- *   "sets": [{"id": "...", "name": "...", "values": {...}}],
- *   "statements": {"shop.order.OrderMapper.recent": {"disabled": ["id1"], "order": ["id2", "id1"]}}
+ *   "sets": [{"id": "...", "name": "...", "default": true, "values": {...}}],
+ *   "statements": {"shop.order.OrderMapper.recent": {"added": ["id2"], "removed": ["id1"], "order": ["id2", "id3"]}}
  * }}}
  * </pre>
  * <ul>
- * <li>sets: 共通パラメータ。すべて、すべての statement に適用する。並び順が既定の順番（下ほど優先）</li>
- * <li>statements: statement ごとの設定。disabled はその statement で無効にしたもの、order はその statement での順番</li>
+ * <li>sets: 共通パラメータ。default が true のものは、すべての statement に既定で入れる。並び順が既定の順番（下ほど優先）</li>
+ * <li>statements: statement ごとの設定。added は追加したもの、removed は既定で入るのに外したもの、order はその statement での順番</li>
  * </ul>
- * 以前の形（スコープや適用する場所を持つ形など）は、読み込んだときに直す。statement で「適用しない」にしていたものは無効にする。
+ * 以前の形は、読み込んだときに直す。スコープなどは捨てて既定で入れるものとし、statement で無効・適用しないにしていたものは外したものにする。
  * 値は JSON のまま持ち、数値は書かれた文字のまま保つ。
  */
 public final class GlobalStore {
@@ -93,13 +93,14 @@ public final class GlobalStore {
   /**
    * 作る。
    *
-   * @param copyFrom null でなければ、その共通パラメータの値を引き継ぐ
+   * @param copyFrom null でなければ、その共通パラメータの値と既定で入れるかを引き継ぐ。null なら既定では入れない
    */
   public synchronized JsonObject create(String name, String copyFrom) throws IOException {
     String trimmed = validName(name, null);
     JsonObject set = new JsonObject();
     set.addProperty("id", UUID.randomUUID().toString());
     set.addProperty("name", trimmed);
+    set.addProperty("default", copyFrom != null && find(copyFrom).get("default").getAsBoolean());
     set.add("values", copyFrom != null ? find(copyFrom).getAsJsonObject("values").deepCopy() : new JsonObject());
     sets().add(set);
     write();
@@ -115,7 +116,7 @@ public final class GlobalStore {
   public synchronized void delete(String id) throws IOException {
     sets().remove(find(id));
     for (Map.Entry<String, JsonElement> e : statements().entrySet()) {
-      for (String key : new String[] {"disabled", "order"}) {
+      for (String key : new String[] {"added", "removed", "order"}) {
         JsonElement list = e.getValue().getAsJsonObject().get(key);
         if (list != null && list.isJsonArray()) {
           remove(list.getAsJsonArray(), id);
@@ -130,30 +131,21 @@ public final class GlobalStore {
     write();
   }
 
-  /** 既定の順番を変える（下ほど優先） */
-  public synchronized void move(String id, int offset) throws IOException {
+  /** すべての statement に既定で入れるか */
+  public synchronized void setDefault(String id, boolean on) throws IOException {
+    find(id).addProperty("default", on);
+    write();
+  }
+
+  /** 既定の順番を変える（下ほど優先）。ids はすべての共通パラメータの id を並べたもの */
+  public synchronized void reorder(List<String> ids) throws IOException {
     JsonArray sets = sets();
-    JsonObject set = find(id);
-    int from = -1;
-    for (int i = 0; i < sets.size(); i++) {
-      if (sets.get(i) == set) {
-        from = i;
-      }
+    if (ids.size() != sets.size() || new LinkedHashSet<>(ids).size() != ids.size()) {
+      throw new IllegalArgumentException("すべての共通パラメータを 1 回ずつ並べてください");
     }
-    int to = Math.max(0, Math.min(sets.size() - 1, from + offset));
-    if (from == to) {
-      return;
-    }
-    sets.remove(from);
     JsonArray reordered = new JsonArray();
-    for (int i = 0; i < sets.size(); i++) {
-      if (i == to) {
-        reordered.add(set);
-      }
-      reordered.add(sets.get(i));
-    }
-    if (to >= sets.size()) {
-      reordered.add(set);
+    for (String id : ids) {
+      reordered.add(find(id));
     }
     project().add("sets", reordered);
     write();
@@ -162,32 +154,35 @@ public final class GlobalStore {
   /**
    * statement ごとの設定を決める。
    *
-   * @param disabled その statement で無効にする共通パラメータの id
+   * @param added 追加する共通パラメータの id
+   * @param removed 既定で入るのに外す共通パラメータの id
    * @param order その statement での順番（null なら既定の順番に従う）
    */
-  public synchronized void setStatement(String statementId, List<String> disabled, List<String> order) throws IOException {
+  public synchronized void setStatement(String statementId, List<String> added, List<String> removed, List<String> order)
+      throws IOException {
     validStatementId(statementId);
     JsonObject settings = new JsonObject();
-    JsonArray d = new JsonArray();
-    for (String id : new LinkedHashSet<>(disabled)) {
-      find(id);
-      d.add(id);
-    }
-    settings.add("disabled", d);
+    settings.add("added", ids(added));
+    settings.add("removed", ids(removed));
     if (order != null) {
-      JsonArray o = new JsonArray();
-      for (String id : new LinkedHashSet<>(order)) {
-        find(id);
-        o.add(id);
-      }
-      settings.add("order", o);
+      settings.add("order", ids(order));
     }
-    if (d.size() == 0 && order == null) {
+    if (added.isEmpty() && removed.isEmpty() && order == null) {
       statements().remove(statementId);
     } else {
       statements().add(statementId, settings);
     }
     write();
+  }
+
+  /** 重なりを除き、あるものか確かめる */
+  private JsonArray ids(List<String> list) {
+    JsonArray out = new JsonArray();
+    for (String id : new LinkedHashSet<>(list)) {
+      find(id);
+      out.add(id);
+    }
+    return out;
   }
 
   private static void validStatementId(String id) {
@@ -226,13 +221,23 @@ public final class GlobalStore {
   }
 
   /**
-   * 以前の形を引き継ぐ。共通パラメータはすべてグローバルにし、スコープや適用する場所の設定は捨てる。
-   * statement で「適用しない」にしていたもの（excludes、または rules の statement での off）は、その statement で無効にする。
+   * 以前の形を引き継ぐ。スコープや適用する場所の設定は捨て、既定で入れるものとする。
+   * statement で無効・適用しないにしていたもの（disabled、excludes、rules の statement での off）は、その statement で外したものにする。
    */
   private static void migrate(JsonObject p) {
     p.remove("active");
     p.remove("order");
     JsonObject statements = p.getAsJsonObject("statements");
+    for (Map.Entry<String, JsonElement> e : statements.entrySet()) {
+      JsonObject settings = e.getValue().getAsJsonObject();
+      JsonElement disabled = settings.remove("disabled");
+      if (!settings.has("removed")) {
+        settings.add("removed", disabled != null && disabled.isJsonArray() ? disabled : new JsonArray());
+      }
+      if (!settings.has("added")) {
+        settings.add("added", new JsonArray());
+      }
+    }
     for (JsonElement e : p.getAsJsonArray("sets")) {
       JsonObject set = e.getAsJsonObject();
       String id = set.get("id").getAsString();
@@ -252,14 +257,18 @@ public final class GlobalStore {
       }
       set.remove("scope");
       set.remove("enabled");
+      if (!set.has("default")) {
+        set.addProperty("default", true);
+      }
       for (String statementId : off) {
         JsonObject settings = statements.getAsJsonObject(statementId);
         if (settings == null) {
           settings = new JsonObject();
-          settings.add("disabled", new JsonArray());
+          settings.add("added", new JsonArray());
+          settings.add("removed", new JsonArray());
           statements.add(statementId, settings);
         }
-        settings.getAsJsonArray("disabled").add(id);
+        settings.getAsJsonArray("removed").add(id);
       }
     }
   }

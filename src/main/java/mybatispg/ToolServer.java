@@ -246,7 +246,8 @@ public final class ToolServer {
       case "/api/globals/create":
       case "/api/globals/rename":
       case "/api/globals/delete":
-      case "/api/globals/move":
+      case "/api/globals/default":
+      case "/api/globals/reorder":
       case "/api/globals/statement":
       case "/api/globals/values":
         if (requireMethod(ex, method, "POST")) {
@@ -608,8 +609,9 @@ public final class ToolServer {
    * <li>create: {"name", "copyFrom"?}</li>
    * <li>rename: {"id", "name"}</li>
    * <li>delete: {"id"}</li>
-   * <li>move: {"id", "offset"}（既定の順番。-1 で上へ、1 で下へ）</li>
-   * <li>statement: {"statement", "disabled": [...], "order": [...] または null}（statement ごとの設定）</li>
+   * <li>default: {"id", "on"}（すべての statement に既定で入れるか）</li>
+   * <li>reorder: {"ids": [...]}（既定の順番。すべての id を並べる）</li>
+   * <li>statement: {"statement", "added": [...], "removed": [...], "order": [...] または null}（statement ごとの設定）</li>
    * <li>values: {"id", "values": オブジェクト}</li>
    * </ul>
    */
@@ -630,11 +632,14 @@ public final class ToolServer {
         case "delete":
           globals.delete(id);
           break;
-        case "move":
-          globals.move(id, req.has("offset") ? req.get("offset").getAsInt() : 0);
+        case "default":
+          globals.setDefault(id, req.has("on") && req.get("on").getAsBoolean());
+          break;
+        case "reorder":
+          globals.reorder(strings(req, "ids"));
           break;
         case "statement":
-          globals.setStatement(string(req, "statement"), strings(req, "disabled"),
+          globals.setStatement(string(req, "statement"), strings(req, "added"), strings(req, "removed"),
               req.has("order") && !req.get("order").isJsonNull() ? strings(req, "order") : null);
           break;
         default:

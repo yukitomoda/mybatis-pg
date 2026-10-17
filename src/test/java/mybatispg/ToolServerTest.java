@@ -190,15 +190,17 @@ class ToolServerTest {
     String id = created.getAsJsonArray("sets").get(0).getAsJsonObject().get("id").getAsString();
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":{\"tenantId\":1.0}}", 200);
     JsonObject saved = api("POST", "/api/globals/statement",
-        "{\"statement\":\"sample.UserMapper.search\",\"disabled\":[\"" + id + "\"],\"order\":[\"" + id + "\"]}", 200);
+        "{\"statement\":\"sample.UserMapper.search\",\"added\":[\"" + id + "\"],\"removed\":[],\"order\":[\"" + id + "\"]}", 200);
     assertEquals("{\"tenantId\":1.0}", saved.getAsJsonArray("sets").get(0).getAsJsonObject().get("values").toString());
-    assertEquals("{\"sample.UserMapper.search\":{\"disabled\":[\"" + id + "\"],\"order\":[\"" + id + "\"]}}",
+    assertEquals("{\"sample.UserMapper.search\":{\"added\":[\"" + id + "\"],\"removed\":[],\"order\":[\"" + id + "\"]}}",
         saved.get("statements").toString());
-    api("POST", "/api/globals/statement", "{\"statement\":\"sample.UserMapper.search\",\"disabled\":[],\"order\":null}", 200);
-    api("POST", "/api/globals/move", "{\"id\":\"" + id + "\",\"offset\":1}", 200);
+    api("POST", "/api/globals/statement", "{\"statement\":\"sample.UserMapper.search\",\"added\":[],\"removed\":[],\"order\":null}", 200);
+    assertEquals("true", api("POST", "/api/globals/default", "{\"id\":\"" + id + "\",\"on\":true}", 200)
+        .getAsJsonArray("sets").get(0).getAsJsonObject().get("default").toString());
+    api("POST", "/api/globals/reorder", "{\"ids\":[\"" + id + "\"]}", 200);
 
     api("POST", "/api/globals/values", "{\"id\":\"" + id + "\",\"values\":[1]}", 400);
-    api("POST", "/api/globals/statement", "{\"statement\":\"x\",\"disabled\":\"a\"}", 400);
+    api("POST", "/api/globals/statement", "{\"statement\":\"x\",\"added\":\"a\"}", 400);
     api("POST", "/api/globals/create", "{\"name\":\"テナントA\"}", 400);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 200);
     api("POST", "/api/globals/delete", "{\"id\":\"" + id + "\"}", 400);
