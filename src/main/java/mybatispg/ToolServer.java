@@ -246,8 +246,7 @@ public final class ToolServer {
       case "/api/globals/create":
       case "/api/globals/rename":
       case "/api/globals/delete":
-      case "/api/globals/enable":
-      case "/api/globals/scope":
+      case "/api/globals/rule":
       case "/api/globals/move":
       case "/api/globals/values":
         if (requireMethod(ex, method, "POST")) {
@@ -609,8 +608,7 @@ public final class ToolServer {
    * <li>create: {"name", "copyFrom"?}</li>
    * <li>rename: {"id", "name"}</li>
    * <li>delete: {"id"}</li>
-   * <li>enable: {"id", "enabled"}</li>
-   * <li>scope: {"id", "scope": {"all": 真偽値, "items": [フォルダ・ファイルの相対パスか statement の id]}}</li>
+   * <li>rule: {"id", "place", "state"}（place は "*"・フォルダ・ファイル・statement の id、state は "on"・"off"・null）</li>
    * <li>move: {"id", "offset"}（-1 で上へ、1 で下へ）</li>
    * <li>values: {"id", "values": オブジェクト}</li>
    * </ul>
@@ -632,27 +630,9 @@ public final class ToolServer {
         case "delete":
           globals.delete(id);
           break;
-        case "enable":
-          globals.setEnabled(id, req.has("enabled") && req.get("enabled").getAsBoolean());
+        case "rule":
+          globals.setRule(id, string(req, "place"), string(req, "state"));
           break;
-        case "scope": {
-          JsonElement scope = req.get("scope");
-          if (scope == null || !scope.isJsonObject()) {
-            sendJson(ex, 400, error("scope は {\"all\": 真偽値, \"items\": [...]} で指定してください"));
-            return;
-          }
-          JsonObject so = scope.getAsJsonObject();
-          List<String> items = new ArrayList<>();
-          if (so.has("items") && so.get("items").isJsonArray()) {
-            for (JsonElement e : so.getAsJsonArray("items")) {
-              if (e.isJsonPrimitive()) {
-                items.add(e.getAsString());
-              }
-            }
-          }
-          globals.setScope(id, so.has("all") && so.get("all").getAsBoolean(), items);
-          break;
-        }
         case "move":
           globals.move(id, req.has("offset") ? req.get("offset").getAsInt() : 0);
           break;

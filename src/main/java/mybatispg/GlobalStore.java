@@ -24,13 +24,13 @@ import com.google.gson.JsonParser;
  * <p>ファイルにはプロジェクトごとに保存する。他のプロジェクトの内容はそのまま残す。
  * <pre>
  * {"projects": {"/path/to/project": {"sets": [
- *   {"id": "...", "name": "...", "values": {...}, "enabled": true, "scope": {"all": false, "items": ["shop/order/", ...]}}
+ *   {"id": "...", "name": "...", "values": {...}, "rules": {"*": "on", "shop/order/": "off", "shop.order.OrderMapper.recent": "on"}}
  * ]}}}
  * </pre>
- * 範囲（scope）の items は、フォルダ（末尾が /）・ファイルの相対パスか、statement の id。
- * 以前の形（"active" で 1 つを選ぶ）は、読み込んだときに、選んでいたものをオン・範囲を全体として引き継ぐ。
+ * rules は場所ごとの「適用する（on）」「適用しない（off）」。場所は "*"（全体）、フォルダ（末尾が /）・ファイルの相対パス、
+ * statement の id。決めていない場所は外側に従う（判定は画面で行う）。
+ * 以前の形（"active" で 1 つを選ぶ形、"enabled" と "scope" を持つ形）は、読み込んだときに rules に直す。
  * <pre>
- * </pre>
  * 値は JSON のまま持ち、数値は書かれた文字のまま保つ。
  */
 public final class GlobalStore {
@@ -78,25 +78,24 @@ public final class GlobalStore {
   /**
    * 作る。
    *
-   * 作る。新しいものはオンで、範囲は全体。
+   * 作る。新しいものは、どこにも適用しない（適用する場所は後から決める）。
    *
-   * @param copyFrom null でなければ、その共通パラメータの値と範囲を引き継ぐ
+   * @param copyFrom null でなければ、その共通パラメータの値と適用する場所を引き継ぐ
    */
   public synchronized JsonObject create(String name, String copyFrom) throws IOException {
     String trimmed = validName(name, null);
     JsonObject values = new JsonObject();
-    JsonObject scope = allScope();
+    JsonObject rules = new JsonObject();
     if (copyFrom != null) {
       JsonObject from = find(copyFrom);
       values = from.getAsJsonObject("values").deepCopy();
-      scope = from.getAsJsonObject("scope").deepCopy();
+      rules = from.getAsJsonObject("rules").deepCopy();
     }
     JsonObject set = new JsonObject();
     set.addProperty("id", UUID.randomUUID().toString());
     set.addProperty("name", trimmed);
     set.add("values", values);
-    set.addProperty("enabled", true);
-    set.add("scope", scope);
+    set.add("rules", rules);
     sets().add(set);
     write();
     return set.deepCopy();
@@ -113,28 +112,28 @@ public final class GlobalStore {
     write();
   }
 
-  public synchronized void setEnabled(String id, boolean enabled) throws IOException {
-    find(id).addProperty("enabled", enabled);
-    write();
-  }
+  /** 場所の名前。SQL などには使わないが、変な値は受け付けない */
+  private static final java.util.regex.Pattern PLACE = java.util.regex.Pattern.compile("\\*|[^\\s\\u0000-\\u001f][^\\u0000-\\u001f]{0,500}");
 
   /**
-   * 範囲を変える。
+   * 場所での「適用する・しない」を決める。
    *
-   * @param items all が false のときに効く、フォルダ（末尾が /）・ファイルの相対パスか statement の id
+   * @param place "*"（全体）、フォルダ（末尾が /）・ファイルの相対パス、statement の id
+   * @param state "on"（適用する）、"off"（適用しない）、null（決めない＝外側に従う）
    */
-  public synchronized void setScope(String id, boolean all, java.util.List<String> items) throws IOException {
+  public synchronized void setRule(String id, String place, String state) throws IOException {
     JsonObject set = find(id);
-    JsonObject scope = new JsonObject();
-    scope.addProperty("all", all);
-    JsonArray list = new JsonArray();
-    for (String item : items) {
-      if (item != null && !item.trim().isEmpty()) {
-        list.add(item.trim());
-      }
+    if (place == null || !PLACE.matcher(place).matches()) {
+      throw new IllegalArgumentException("場所が正しくありません: " + place);
     }
-    scope.add("items", list);
-    set.add("scope", scope);
+    JsonObject rules = set.getAsJsonObject("rules");
+    if (state == null) {
+      rules.remove(place);
+    } else if ("on".equals(state) || "off".equals(state)) {
+      rules.addProperty(place, state);
+    } else {
+      throw new IllegalArgumentException("state は on・off・null のどれかにしてください: " + state);
+    }
     write();
   }
 
@@ -171,13 +170,6 @@ public final class GlobalStore {
     return -1;
   }
 
-  private static JsonObject allScope() {
-    JsonObject scope = new JsonObject();
-    scope.addProperty("all", true);
-    scope.add("items", new JsonArray());
-    return scope;
-  }
-
   public synchronized void saveValues(String id, JsonObject values) throws IOException {
     find(id).add("values", values.deepCopy());
     write();
@@ -197,17 +189,33 @@ public final class GlobalStore {
     if (!p.has("sets") || !p.get("sets").isJsonArray()) {
       p.add("sets", new JsonArray());
     }
-    // 以前の形（"active" で 1 つを選ぶ）を引き継ぐ: 選んでいたものをオンにし、範囲は全体にする
+    // 以前の形を引き継ぐ
+    //   1. "active" で 1 つを選ぶ形: 選んでいたものを全体で適用し、ほかは全体で適用しない
+    //   2. "enabled" と "scope" を持つ形: オンで範囲が全体なら全体で適用、範囲を絞っていたらその場所で適用、オフなら全体で適用しない
     JsonElement active = p.remove("active");
     String activeId = active == null || active.isJsonNull() ? null : active.getAsString();
     for (JsonElement e : p.getAsJsonArray("sets")) {
       JsonObject set = e.getAsJsonObject();
-      if (!set.has("enabled")) {
-        set.addProperty("enabled", active == null || set.get("id").getAsString().equals(activeId));
+      if (set.has("rules") && set.get("rules").isJsonObject()) {
+        continue;
       }
-      if (!set.has("scope") || !set.get("scope").isJsonObject()) {
-        set.add("scope", allScope());
+      JsonObject rules = new JsonObject();
+      JsonElement enabledElement = set.remove("enabled");
+      JsonElement scopeElement = set.remove("scope");
+      boolean enabled = enabledElement != null ? enabledElement.getAsBoolean()
+          : active == null || set.get("id").getAsString().equals(activeId);
+      JsonObject scope = scopeElement != null && scopeElement.isJsonObject() ? scopeElement.getAsJsonObject() : null;
+      boolean all = scope == null || !scope.has("all") || scope.get("all").getAsBoolean();
+      if (!enabled) {
+        rules.addProperty("*", "off");
+      } else if (all) {
+        rules.addProperty("*", "on");
+      } else if (scope.has("items") && scope.get("items").isJsonArray()) {
+        for (JsonElement item : scope.getAsJsonArray("items")) {
+          rules.addProperty(item.getAsString(), "on");
+        }
       }
+      set.add("rules", rules);
     }
     return p;
   }
