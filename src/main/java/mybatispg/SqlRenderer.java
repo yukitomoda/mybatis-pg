@@ -3,7 +3,6 @@ package mybatispg;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.PreparedStatement;
@@ -92,7 +91,8 @@ public class SqlRenderer {
         fragments.put(key, e.getValue());
       }
     }
-    draft.loadFile(file, new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)));
+    // XML 宣言の文字コードでバイト列にする（パーサーは宣言に従って読むため）
+    draft.loadFile(file, new ByteArrayInputStream(MapperText.encode(content)));
     draft.resolveIncompleteStatements();
     return draft;
   }

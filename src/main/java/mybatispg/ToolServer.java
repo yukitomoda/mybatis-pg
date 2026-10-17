@@ -232,6 +232,11 @@ public final class ToolServer {
           discardDrafts(ex);
         }
         break;
+      case "/api/file/save":
+        if (requireMethod(ex, method, "POST")) {
+          saveFile(ex);
+        }
+        break;
       case "/api/draft/check":
         if (requireMethod(ex, method, "POST")) {
           checkDraft(ex);
@@ -855,12 +860,12 @@ public final class ToolServer {
       String current = null;
       if (file != null) {
         try {
-          current = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+          current = MapperText.read(file);
         } catch (IOException e) {
           // 読めなければ、変わったかどうかは分からないものとする
         }
       }
-      if (d.content.equals(current)) {
+      if (current != null && sameText(d.content, current)) {
         draftStore.delete(d.file);
         continue;
       }
@@ -870,7 +875,7 @@ public final class ToolServer {
       m.put("content", d.content);
       m.put("updatedAt", d.updatedAt);
       m.put("loaded", file != null);
-      m.put("changed", current != null && !current.equals(d.base));
+      m.put("changed", current != null && !sameText(current, d.base));
       out.add(m);
     }
     Map<String, Object> body = new LinkedHashMap<>();
@@ -916,6 +921,47 @@ public final class ToolServer {
     sendJson(ex, 200, new LinkedHashMap<String, Object>());
   }
 
+  /**
+   * 編集した内容をファイルに保存する: {"file", "base", "content", "force"?}。保存したら、そのファイルの下書きを消す。
+   * 編集を始めた後にファイルが変わっていたら（今の内容が base と違えば）、force がない限り保存せず 409 を返す。
+   */
+  private void saveFile(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String shown = string(req, "file");
+    Path file = mapperFile(shown);
+    String base = string(req, "base");
+    String content = string(req, "content");
+    if (file == null || base == null || content == null) {
+      sendJson(ex, 400, error("保存するファイルが、読み込んでいる mapper XML ではありません"));
+      return;
+    }
+    boolean force = req.has("force") && req.get("force").getAsBoolean();
+    try {
+      // エディタは改行を LF にそろえるので、改行の違いだけなら変わっていないものとする
+      String current = MapperText.read(file);
+      if (!force && !sameText(current, base)) {
+        Map<String, Object> body = error("編集を始めた後に、ファイルが変更されています");
+        body.put("conflict", true);
+        sendJson(ex, 409, body);
+        return;
+      }
+      MapperText.write(file, content);
+    } catch (IOException e) {
+      sendJson(ex, 422, error("ファイルに保存できません: " + Errors.describe(e)));
+      return;
+    }
+    draftStore.delete(shown);
+    sendJson(ex, 200, new LinkedHashMap<String, Object>());
+  }
+
+  /** 改行の違い（CRLF と LF）を除いて同じか。エディタは改行を LF にそろえるため */
+  private static boolean sameText(String a, String b) {
+    return a.replace("\r\n", "\n").equals(b.replace("\r\n", "\n"));
+  }
+
   /** mapper XML の中身: {"file", "content"}。読み込んでいる mapper XML だけを返す */
   private void file(HttpExchange ex) throws IOException {
     Path file = mapperFile(query(ex).get("path"));
@@ -925,7 +971,7 @@ public final class ToolServer {
     }
     String content;
     try {
-      content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+      content = MapperText.read(file);
     } catch (IOException e) {
       sendJson(ex, 422, error("ファイルを読み込めません: " + Errors.describe(e)));
       return;

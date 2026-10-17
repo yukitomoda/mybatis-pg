@@ -91,9 +91,9 @@ public final class DraftStore {
     return out;
   }
 
-  /** 保存する。元の内容と同じなら消す */
+  /** 保存する。元の内容と同じなら消す（エディタは改行を LF にそろえるので、改行の違いは除いて比べる） */
   public synchronized void save(String file, String base, String content) throws IOException {
-    if (content.equals(base)) {
+    if (content.replace("\r\n", "\n").equals(base.replace("\r\n", "\n"))) {
       delete(file);
       return;
     }

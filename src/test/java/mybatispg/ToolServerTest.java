@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 class ToolServerTest {
 
@@ -216,6 +217,58 @@ class ToolServerTest {
   }
 
   @Test
+  void ファイルに保存する(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+    Path mapper = dir.resolve("SaveMapper.xml");
+    String original = "<?xml version=\"1.0\" encoding=\"Windows-31J\"?>\r\n"
+        + "<!DOCTYPE mapper PUBLIC \"-//mybatis.org//DTD Mapper 3.0//EN\" \"http://mybatis.org/dtd/mybatis-3-mapper.dtd\">\r\n"
+        + "<mapper namespace=\"save.M\">\r\n  <select id=\"find\">SELECT 1 /* 元 */</select>\r\n</mapper>\r\n";
+    java.nio.charset.Charset sjis = java.nio.charset.Charset.forName("Windows-31J");
+    java.nio.file.Files.write(mapper, original.getBytes(sjis));
+    ToolServer s = ToolServer.start(MapperWorkspace.ofPaths(Arrays.asList(dir)), ConnectionStore.inMemory(), GlobalStore.inMemory(), 0, TOKEN);
+    try {
+      String saveHost = "127.0.0.1:" + s.getPort();
+      java.util.function.BiFunction<String, String, Response> post = (path, body) -> {
+        try {
+          return request(s.getPort(), "POST", path, headers("Host", saveHost, "X-Auth-Token", TOKEN, "Content-Type", "application/json"), body);
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      };
+      com.google.gson.Gson gson = new com.google.gson.Gson();
+      // 画面には文字として渡す（文字化けしない）。エディタは改行を LF にそろえる
+      Response file = request(s.getPort(), "GET", "/api/file?path=SaveMapper.xml", headers("Host", saveHost, "X-Auth-Token", TOKEN), null);
+      String base = JsonParser.parseString(file.body).getAsJsonObject().get("content").getAsString();
+      assertEquals(original, base);
+      String edited = base.replace("\r\n", "\n").replace("元", "変更");
+      post.apply("/api/drafts/save", "{\"file\":\"SaveMapper.xml\",\"base\":" + gson.toJson(base) + ",\"content\":" + gson.toJson(edited) + "}");
+
+      // 下書きの組み立ても、宣言の文字コードで読む
+      Response rendered = post.apply("/api/render", "{\"statementId\":\"save.M.find\",\"parameters\":{},\"draft\":{\"file\":\"SaveMapper.xml\",\"content\":" + gson.toJson(edited) + "}}");
+      assertTrue(rendered.body.contains("/* 変更 */"), rendered.body);
+
+      // 保存すると、宣言の文字コードと元の改行で書き、下書きを消す
+      assertEquals(200, post.apply("/api/file/save", "{\"file\":\"SaveMapper.xml\",\"base\":" + gson.toJson(base) + ",\"content\":" + gson.toJson(edited) + "}").status);
+      assertEquals(original.replace("元", "変更"), new String(java.nio.file.Files.readAllBytes(mapper), sjis));
+      Response drafts = request(s.getPort(), "GET", "/api/drafts", headers("Host", saveHost, "X-Auth-Token", TOKEN), null);
+      assertEquals(0, JsonParser.parseString(drafts.body).getAsJsonObject().getAsJsonArray("drafts").size());
+
+      // 編集を始めた後にファイルが変わっていたら、force がなければ保存しない
+      Response conflict = post.apply("/api/file/save", "{\"file\":\"SaveMapper.xml\",\"base\":" + gson.toJson(base) + ",\"content\":\"x\"}");
+      assertEquals(409, conflict.status);
+      assertTrue(conflict.body.contains("\"conflict\":true"), conflict.body);
+      assertEquals(original.replace("元", "変更"), new String(java.nio.file.Files.readAllBytes(mapper), sjis));
+      String forced = edited.replace("変更", "上書き");
+      assertEquals(200, post.apply("/api/file/save", "{\"file\":\"SaveMapper.xml\",\"base\":" + gson.toJson(base) + ",\"content\":" + gson.toJson(forced) + ",\"force\":true}").status);
+      assertEquals(original.replace("元", "上書き"), new String(java.nio.file.Files.readAllBytes(mapper), sjis));
+
+      // 読み込んでいない mapper XML 以外には書かない
+      assertEquals(400, post.apply("/api/file/save", "{\"file\":\"../x.xml\",\"base\":\"\",\"content\":\"x\"}").status);
+    } finally {
+      s.stop();
+    }
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);
@@ -362,6 +415,10 @@ class ToolServerTest {
   }
 
   private static Response request(String method, String path, Map<String, String> headers, String body) throws Exception {
+    return request(server.getPort(), method, path, headers, body);
+  }
+
+  private static Response request(int port, String method, String path, Map<String, String> headers, String body) throws Exception {
     byte[] payload = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
     StringBuilder req = new StringBuilder(method + " " + path + " HTTP/1.1\r\n");
     for (Map.Entry<String, String> e : headers.entrySet()) {
@@ -369,7 +426,7 @@ class ToolServerTest {
     }
     req.append("Content-Length: ").append(payload.length).append("\r\nConnection: close\r\n\r\n");
 
-    try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.getPort())) {
+    try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
       OutputStream out = socket.getOutputStream();
       out.write(req.toString().getBytes(StandardCharsets.UTF_8));
       out.write(payload);
