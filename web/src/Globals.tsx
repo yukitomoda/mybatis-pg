@@ -7,7 +7,6 @@ import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt } from './params';
 import type { GlobalSet, Scope } from './scope';
-import { describeScope } from './scope';
 import type { StatementEntry, TreeNode } from './tree';
 import { buildTree, shortId } from './tree';
 
@@ -141,67 +140,12 @@ export function GlobalPanel({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const { sets } = globals;
-  const editing = sets.find((s) => s.id === editingId) ?? sets[0] ?? null;
+  // 一覧で選ぶまでは、何も編集しない（意図しない共通パラメータを変えないように）
+  const editing = sets.find((s) => s.id === editingId) ?? null;
 
   return (
     <div className="global-panel">
-      <p className="hint">
-        オンの共通パラメータを、範囲に入る statement に重ねます。範囲の狭いほう（statement ＞ ファイル ＞ フォルダ ＞ 全体）が優先で、同じなら下にあるほうが優先です。
-      </p>
-      <table className="global-list">
-        <tbody>
-          {sets.map((s, i) => (
-            <tr key={s.id} className={s.id === editing?.id ? 'selected' : undefined} onClick={() => setEditingId(s.id)}>
-              <td>
-                <input
-                  type="checkbox"
-                  aria-label={`${s.name} を使う`}
-                  checked={s.enabled}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => globals.setEnabled(s, e.target.checked)}
-                />
-              </td>
-              <td className="global-name">{s.name}</td>
-              <td className="hint global-scope" title={s.scope.all ? '全体' : s.scope.items.join('\n')}>
-                {describeScope(s.scope)}
-              </td>
-              <td className="global-move">
-                <button
-                  type="button"
-                  className="icon"
-                  aria-label={`${s.name} を上へ`}
-                  disabled={i === 0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    globals.move(s, -1);
-                  }}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="icon"
-                  aria-label={`${s.name} を下へ`}
-                  disabled={i === sets.length - 1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    globals.move(s, 1);
-                  }}
-                >
-                  ↓
-                </button>
-              </td>
-            </tr>
-          ))}
-          {sets.length === 0 && (
-            <tr>
-              <td colSpan={4} className="hint">
-                共通パラメータはまだありません。「新規」で作ってください。
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <ScopedList sets={sets} statements={statements} editingId={editing?.id ?? null} onEdit={setEditingId} globals={globals} />
       <div className="global-actions">
         <button type="button" onClick={async () => setEditingId((await globals.create(null)) ?? editingId)}>
           新規
@@ -218,6 +162,7 @@ export function GlobalPanel({
       </div>
       {globals.error && <p className="error-text">{globals.error}</p>}
 
+      {!editing && sets.length > 0 && <p className="hint">値や範囲を編集するには、一覧から共通パラメータを選んでください。</p>}
       {editing && (
         <div className="global-editor">
           <h3>
@@ -232,6 +177,178 @@ export function GlobalPanel({
       )}
     </div>
   );
+}
+
+/** 範囲のツリーの節（全体・フォルダ・ファイル・statement）と、そこに置く共通パラメータ */
+interface ScopeNode {
+  key: string;
+  label: string;
+  kind: 'all' | 'dir' | 'file' | 'statement' | 'missing' | 'none';
+  sets: GlobalSet[];
+  children: ScopeNode[];
+}
+
+/**
+ * 共通パラメータを、範囲の位置に置いたツリーにする。全体を一番外に置き、狭い範囲ほど内側にする。
+ * 範囲を複数持つものは、それぞれの位置に置く。共通パラメータのない階層は、子が 1 つならまとめて 1 行にする。
+ */
+export function scopeTree(sets: GlobalSet[], statements: StatementEntry[]): ScopeNode[] {
+  interface Raw {
+    key: string;
+    label: string;
+    kind: ScopeNode['kind'];
+    sets: GlobalSet[];
+    children: Map<string, Raw>;
+  }
+  const root: Raw = { key: '*', label: '全体', kind: 'all', sets: sets.filter((s) => s.scope.all), children: new Map() };
+  const missing: Raw[] = [];
+  const child = (parent: Raw, key: string, label: string, kind: ScopeNode['kind']) => {
+    let c = parent.children.get(key);
+    if (!c) {
+      c = { key, label, kind, sets: [], children: new Map() };
+      parent.children.set(key, c);
+    }
+    return c;
+  };
+  /** ファイルのパス（または末尾が / のフォルダ）までの節を作る */
+  const pathNode = (path: string): Raw => {
+    const parts = path.split('/');
+    const isDir = path.endsWith('/');
+    let node = root;
+    let prefix = '';
+    const dirs = isDir ? parts.slice(0, -1) : parts.slice(0, -1);
+    for (const d of dirs) {
+      prefix += d + '/';
+      node = child(node, prefix, d, 'dir');
+    }
+    return isDir ? node : child(node, path, parts[parts.length - 1], 'file');
+  };
+  const items = [...new Set(sets.flatMap((s) => (s.scope.all ? [] : s.scope.items)))];
+  for (const item of items) {
+    const owners = sets.filter((s) => !s.scope.all && s.scope.items.includes(item));
+    const st = statements.find((x) => x.id === item);
+    let node: Raw | null = null;
+    if (st) node = child(pathNode(st.file), st.id, shortId(st.id), 'statement');
+    else if (statements.some((x) => x.file === item)) node = pathNode(item);
+    else if (item.endsWith('/') && statements.some((x) => x.file.startsWith(item))) node = pathNode(item);
+    if (node) node.sets.push(...owners);
+    else missing.push({ key: item, label: item, kind: 'missing', sets: owners, children: new Map() });
+  }
+
+  const ORDER: Record<string, number> = { dir: 0, file: 1, statement: 2 };
+  const finish = (r: Raw): ScopeNode => {
+    const kids = [...r.children.values()].sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.label.localeCompare(b.label)).map(finish);
+    // 共通パラメータのないフォルダで子が 1 つなら、子とまとめる（shop/ と order/ → shop/order/）
+    if (r.kind === 'dir' && r.sets.length === 0 && kids.length === 1) {
+      const only = kids[0];
+      return { ...only, label: `${r.label}/${only.label}` };
+    }
+    return { key: r.key, label: r.kind === 'dir' ? `${r.label}/` : r.label, kind: r.kind, sets: r.sets, children: kids };
+  };
+  const top = finish(root);
+  const out: ScopeNode[] = [top, ...missing.map(finish)];
+  const nowhere = sets.filter((s) => !s.scope.all && s.scope.items.length === 0);
+  if (nowhere.length > 0) out.push({ key: '-', label: '適用する範囲なし', kind: 'none', sets: nowhere, children: [] });
+  return out;
+}
+
+const SCOPE_ICONS: Record<ScopeNode['kind'], string> = { all: '◎', dir: '▤', file: '▢', statement: '·', missing: '?', none: '–' };
+
+/** 共通パラメータの一覧: 範囲のツリーの中に置く（内側・下にあるほど優先） */
+function ScopedList({
+  sets,
+  statements,
+  editingId,
+  onEdit,
+  globals,
+}: {
+  sets: GlobalSet[];
+  statements: StatementEntry[];
+  editingId: string | null;
+  onEdit: (id: string) => void;
+  globals: Globals;
+}) {
+  const tree = scopeTree(sets, statements);
+  const render = (nodes: ScopeNode[]) => (
+    <ul>
+      {nodes.map((n) => (
+        <li key={n.key} className={`scope-node ${n.kind}`}>
+          <div className="scope-label" title={n.kind === 'missing' ? '今の mapper にない範囲' : n.key === '*' ? 'すべての statement' : n.key}>
+            <span className="scope-icon">{SCOPE_ICONS[n.kind]}</span>
+            {n.label}
+          </div>
+          {n.sets.length > 0 && (
+            <ol className="scope-sets">
+              {n.sets.map((s) => {
+                // 同じ位置で順番を入れ替えられる（下ほど優先）
+                const siblings = n.sets;
+                const i = siblings.indexOf(s);
+                const others = s.scope.all ? 0 : s.scope.items.length - 1;
+                return (
+                  <li
+                    key={s.id}
+                    className={`${s.id === editingId ? 'selected' : ''}${s.enabled ? '' : ' off'}`}
+                    onClick={() => onEdit(s.id)}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`${s.name} を使う`}
+                      checked={s.enabled}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => globals.setEnabled(s, e.target.checked)}
+                    />
+                    <span className="global-name">{s.name}</span>
+                    {others > 0 && <span className="badge muted" title={s.scope.items.join('\n')}>ほか {others} か所</span>}
+                    {siblings.length > 1 && (
+                      <span className="global-move">
+                        <button
+                          type="button"
+                          className="icon"
+                          aria-label={`${s.name} を上へ`}
+                          disabled={i === 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveWithin(globals, sets, siblings, s, -1);
+                          }}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="icon"
+                          aria-label={`${s.name} を下へ`}
+                          disabled={i === siblings.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveWithin(globals, sets, siblings, s, 1);
+                          }}
+                        >
+                          ↓
+                        </button>
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {n.children.length > 0 && render(n.children)}
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="scoped-list">
+      {sets.length === 0 ? <p className="hint">共通パラメータはまだありません。「新規」で作ってください。</p> : render(tree)}
+    </div>
+  );
+}
+
+/** 同じ位置に並ぶもの（siblings）の中で、隣と入れ替える。全体の並びでは、その隣の位置まで動かす */
+function moveWithin(globals: Globals, all: GlobalSet[], siblings: GlobalSet[], set: GlobalSet, direction: number) {
+  const neighbor = siblings[siblings.indexOf(set) + direction];
+  if (!neighbor) return;
+  globals.move(set, all.indexOf(neighbor) - all.indexOf(set));
 }
 
 /** 候補の項目を足すときの初期値 */

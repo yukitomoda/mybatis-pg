@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fromJson, toJson } from './params';
 import type { GlobalSet } from './scope';
-import { applicable, combine, describeScope, originAt, specificity } from './scope';
+import { applicable, combine, originAt, specificity } from './scope';
 
 const set = (name: string, values: string, scope: Partial<GlobalSet['scope']> = {}, enabled = true): GlobalSet => ({
   id: name,
@@ -50,15 +50,5 @@ describe('applicable と combine', () => {
     expect(originAt(sets, ['limit'])).toBe('注文の検索');
     expect(originAt(sets, ['tenantId'])).toBe('基本');
     expect(originAt(sets, ['nothing'])).toBeNull();
-  });
-});
-
-describe('describeScope', () => {
-  it('範囲を短く表す', () => {
-    expect(describeScope({ all: true, items: [] })).toBe('全体');
-    expect(describeScope({ all: false, items: [] })).toBe('（どこにも効かない）');
-    expect(describeScope({ all: false, items: ['src/main/resources/mapper/shop/order/'] })).toBe('order/');
-    expect(describeScope({ all: false, items: ['src/main/resources/mapper/shop/order/OrderMapper.xml', 'x'] })).toBe('OrderMapper.xml ほか 1');
-    expect(describeScope({ all: false, items: ['shop.order.OrderMapper.search'] })).toBe('OrderMapper.search');
   });
 });

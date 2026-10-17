@@ -66,12 +66,3 @@ export function originAt(sets: GlobalSet[], path: Path): string | null {
   }
   return null;
 }
-
-/** 範囲を短い文で表す */
-export function describeScope(scope: Scope): string {
-  if (scope.all) return '全体';
-  if (scope.items.length === 0) return '（どこにも効かない）';
-  const first = scope.items[0].replace(/^.*\/(?=[^/]+\/$)/, '').replace(/^.*\/(?=[^/]+$)/, '');
-  const short = scope.items[0].endsWith('/') ? first : first.replace(/^(?:[\w$]+\.)+(?=[\w$]+\.[\w$!]+$)/, '');
-  return scope.items.length === 1 ? short : `${short} ほか ${scope.items.length - 1}`;
-}
