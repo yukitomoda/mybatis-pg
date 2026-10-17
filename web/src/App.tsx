@@ -7,7 +7,8 @@ import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
-import { GlobalPanel, useGlobals } from './Globals';
+import { AppliedGlobals, GlobalsScreen, useGlobals } from './Globals';
+import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './scope';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
@@ -55,9 +56,36 @@ function saveTab(tab: Tab) {
   }
 }
 
-function initialStatement(): string | null {
+// ---- 画面の切り替えと URL ----
+
+type Screen = 'query' | 'globals' | 'bulk' | 'connections';
+
+const SCREENS: [Screen, string][] = [
+  ['query', 'クエリ'],
+  ['globals', '共通パラメータ'],
+  ['bulk', '一括チェック'],
+  ['connections', '接続先'],
+];
+
+/**
+ * URL の # の後ろを読む。#/query/statement の id、#/globals、#/bulk、#/connections。
+ * 以前の形（#statement の id）はクエリ画面として読む。
+ */
+function parseHash(): { screen: Screen; statement: string | null } {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  return hash || null;
+  if (!hash) return { screen: 'query', statement: null };
+  if (!hash.startsWith('/')) return { screen: 'query', statement: hash };
+  const [, screen, ...rest] = hash.split('/');
+  const known = SCREENS.some(([s]) => s === screen);
+  return { screen: known ? (screen as Screen) : 'query', statement: screen === 'query' && rest.length ? rest.join('/') : null };
+}
+
+function hashOf(screen: Screen, statement: string | null): string {
+  return screen === 'query' ? `#/query/${statement ? encodeURIComponent(statement) : ''}` : `#/${screen}`;
+}
+
+function initialStatement(): string | null {
+  return parseHash().statement;
 }
 
 // ---- 画面 ----
@@ -95,9 +123,10 @@ function Workspace({ api }: { api: Api }) {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
   const panes = usePaneWidths();
-  const [bulk, setBulk] = useState(false);
+  const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
+  /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
+  const [globalFocus, setGlobalFocus] = useState<string | null>(null);
   /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
-  const [editing, setEditing] = useState<'local' | 'global'>('local');
 
   const handleError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
@@ -106,7 +135,7 @@ function Workspace({ api }: { api: Api }) {
   };
 
   const opener = useOpener(api, handleError);
-  const conn = useConnections(api, handleError);
+  const conn = useConnections(api, handleError, () => go('connections'));
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -171,7 +200,6 @@ function Workspace({ api }: { api: Api }) {
   }, [api, selected, generation]);
 
   const globals = useGlobals(api, handleError);
-  const editingGlobal = editing === 'global';
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
   const target = statements.find((s) => s.id === selected) ?? null;
   const applied = useMemo(() => applicable(globals.sets, target), [globals.sets, target]);
@@ -225,13 +253,32 @@ function Workspace({ api }: { api: Api }) {
     };
   }, [api, selected, schema, sent, numberIssues.length, generation]);
 
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const select = (id: string) => {
     setSelected(id);
     setValue(loadParams(id));
     setResult(null);
     setRenderError(null);
-    window.history.replaceState(null, '', '#' + encodeURIComponent(id));
+    window.history.replaceState(null, '', hashOf('query', id));
   };
+
+  /** 画面を切り替える（ブラウザの履歴に残す） */
+  const go = (next: Screen) => {
+    setScreen(next);
+    window.history.pushState(null, '', hashOf(next, selected));
+  };
+
+  // ブラウザの戻る・進むで、画面と statement を合わせる
+  useEffect(() => {
+    const onPop = () => {
+      const h = parseHash();
+      setScreen(h.screen);
+      if (h.statement && h.statement !== selectedRef.current) select(h.statement);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const changeValue = (v: PValue | undefined) => {
     setValue(v);
@@ -248,26 +295,21 @@ function Workspace({ api }: { api: Api }) {
   }
 
   return (
+    <div className="app">
+      <nav className="topbar">
+        <span className="brand">mybatis-pg</span>
+        {SCREENS.map(([key, label]) => (
+          <button key={key} type="button" className={screen === key ? 'nav selected' : 'nav'} aria-current={screen === key ? 'page' : undefined} onClick={() => go(key)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
+      <div className="screen" hidden={screen !== 'query'}>
     <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
-        <button type="button" className="bulk-open" onClick={() => setBulk(true)} title="保存してある値で、statement をまとめて EXPLAIN する">
-          一括チェック
-        </button>
         <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} />
-        {bulk && (
-          <BulkCheck
-            api={api}
-            conn={conn}
-            statements={statements}
-            globalSets={globals.sets}
-            onOpen={(id) => {
-              select(id);
-              setTab('explain');
-              saveTab('explain');
-            }}
-            onClose={() => setBulk(false)}
-          />
-        )}
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
@@ -277,69 +319,33 @@ function Workspace({ api }: { api: Api }) {
           <h2>パラメータ</h2>
           {selected && <code className="statement-id">{selected}</code>}
         </header>
-        <div className="tabs mode" role="tablist">
-          <button type="button" role="tab" aria-selected={!editingGlobal} className={!editingGlobal ? 'tab selected' : 'tab'} onClick={() => setEditing('local')}>
-            個別{selected && <span className="hint">（{selected.slice(selected.lastIndexOf('.') + 1)}）</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={editingGlobal}
-            className={editingGlobal ? 'tab selected' : 'tab'}
-            onClick={() => setEditing('global')}
-          >
-            共通<span className="hint">（{globals.sets.filter((s) => s.enabled).length} 件オン）</span>
-          </button>
-        </div>
-
-        {editingGlobal ? (
+        {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+        {schemaError && <p className="error-text">{schemaError}</p>}
+        {selected && schema && (
           <>
-            <GlobalPanel
-              api={api}
-              globals={globals}
-              statements={statements}
-              target={target}
-              generation={generation}
-              gen={gen}
-              renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
-            />
-          </>
-        ) : (
-          <>
-            {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
-            {schemaError && <p className="error-text">{schemaError}</p>}
-            {selected && schema && (
-              <>
-                <p className="applied-globals">
-                  {applied.length === 0 ? (
-                    <span className="hint">この statement に効いている共通パラメータはありません</span>
-                  ) : (
-                    <>
-                      <span className="hint">効いている共通パラメータ（右ほど優先）:</span>
-                      {applied.map((s, i) => (
-                        <span key={s.id}>
-                          {i > 0 && <span className="hint"> ＜ </span>}
-                          <span className="badge global">{s.name}</span>
-                        </span>
-                      ))}
-                    </>
-                  )}
-                </p>
-                <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
-                {warnings.length > 0 && (
-                  <ul className="notes warn">
-                    {warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                )}
-                <JsonPanel value={value} onApply={changeValue} />
-                <details className="json-panel">
-                  <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
-                  <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
-                </details>
-              </>
+            {target && (
+              <AppliedGlobals
+                globals={globals}
+                target={target}
+                onSettings={(id) => {
+                  setGlobalFocus(id);
+                  go('globals');
+                }}
+              />
             )}
+            <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
+            {warnings.length > 0 && (
+              <ul className="notes warn">
+                {warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
+            <JsonPanel value={value} onApply={changeValue} />
+            <details className="json-panel">
+              <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
+              <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
+            </details>
           </>
         )}
       </main>
@@ -444,6 +450,40 @@ function Workspace({ api }: { api: Api }) {
             <p className="hint">左の一覧から statement を選んでください。</p>
           ))}
       </section>
+    </div>
+      </div>
+
+      <div className="screen" hidden={screen !== 'globals'}>
+        <GlobalsScreen
+          api={api}
+          globals={globals}
+          statements={statements}
+          generation={generation}
+          gen={gen}
+          renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
+          focusId={globalFocus}
+        />
+      </div>
+
+      <div className="screen scroll" hidden={screen !== 'bulk'}>
+        <BulkCheck
+          api={api}
+          conn={conn}
+          statements={statements}
+          globalSets={globals.sets}
+          onOpen={(id) => {
+            select(id);
+            setTab('explain');
+            saveTab('explain');
+            setScreen('query');
+            window.history.pushState(null, '', hashOf('query', id));
+          }}
+        />
+      </div>
+
+      <div className="screen scroll" hidden={screen !== 'connections'}>
+        <ConnectionsScreen conn={conn} />
+      </div>
     </div>
   );
 }

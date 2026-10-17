@@ -575,19 +575,6 @@ button.run.danger {
 
 /* ---- 接続先の設定 ---- */
 
-dialog.connections {
-  width: min(44rem, calc(100vw - 2rem));
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--text);
-}
-
-dialog.connections::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-
 .connections-body {
   display: grid;
   grid-template-columns: 11rem 1fr;
@@ -1431,30 +1418,7 @@ button.bulk-open {
   margin-bottom: 0.5rem;
 }
 
-dialog.bulk {
-  width: min(90rem, calc(100vw - 2rem));
-  height: min(52rem, calc(100vh - 2rem));
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--text);
-}
-
-dialog.bulk[open] {
-  display: flex;
-  flex-direction: column;
-}
-
-dialog.bulk::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-
-dialog.bulk .spacer {
-  flex: 1;
-}
-
-dialog.bulk input[type='search'] {
+.bulk input[type='search'] {
   min-width: 14rem;
 }
 
@@ -1671,4 +1635,329 @@ dialog.bulk input[type='search'] {
   gap: 0.3rem 1rem;
   margin-bottom: 0.3rem;
   font-size: 13px;
+}
+
+/* ---- 画面の切り替え ---- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.topbar .brand {
+  align-self: center;
+  margin-right: 1rem;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+.topbar .nav {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0.45rem 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.topbar .nav.selected {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.screen {
+  flex: 1;
+  min-height: 0;
+}
+
+.screen[hidden] {
+  display: none;
+}
+
+.screen.scroll {
+  overflow: auto;
+}
+
+.page {
+  max-width: 90rem;
+  padding: 1rem;
+}
+
+.bulk.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.connections.page {
+  max-width: 50rem;
+}
+
+/* ---- 共通パラメータの画面 ---- */
+
+.globals-screen {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(24rem, 1.2fr) minmax(24rem, 1fr);
+  height: 100%;
+}
+
+.globals-screen > * {
+  overflow: auto;
+  min-width: 0;
+  padding: 0.75rem;
+}
+
+.globals-list {
+  border-right: 1px solid var(--border);
+}
+
+.globals-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.globals-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.globals-list li {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.globals-list li.selected {
+  background: var(--accent-bg);
+}
+
+.globals-list .global-item {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.3rem 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.globals-list .global-move {
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.globals-list li:hover .global-move,
+.globals-list li.selected .global-move {
+  visibility: visible;
+}
+
+.globals-values {
+  border-right: 1px solid var(--border);
+}
+
+.globals-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.globals-head .actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.globals-screen h3 {
+  margin: 0.8rem 0 0.4rem;
+}
+
+.globals-places h3 {
+  margin-top: 0;
+}
+
+.place-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.place-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  min-height: 1.9rem;
+}
+
+.place-row:hover {
+  background: var(--code-bg);
+}
+
+.place-row .twisty {
+  flex: none;
+  width: 1rem;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.place-label {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.place-row.all .place-label {
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.place-row.has-rule .place-label {
+  font-weight: 700;
+}
+
+.place-result {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.place-result.on {
+  color: var(--ok);
+}
+
+.rule-switch {
+  margin-left: auto;
+  display: inline-flex;
+  flex: none;
+}
+
+.rule-switch button {
+  font-size: 12px;
+  padding: 0.05rem 0.5rem;
+  border-radius: 0;
+  color: var(--muted);
+}
+
+.rule-switch button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.rule-switch button:last-child {
+  border-radius: 0 4px 4px 0;
+  margin-left: -1px;
+}
+
+.rule-switch button.selected.on {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+
+.rule-switch button.selected.off {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+/* 設定のない場所のボタンは、行にマウスを乗せたときだけはっきり見せる */
+.place-row:not(.has-rule) .rule-switch {
+  opacity: 0.35;
+}
+
+.place-row:hover .rule-switch {
+  opacity: 1;
+}
+
+.place-missing {
+  margin-top: 0.6rem;
+}
+
+/* ---- クエリ画面: この statement に関わる共通パラメータ ---- */
+
+.applied-globals {
+  margin-bottom: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.applied-globals header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.applied-globals h3 {
+  margin: 0 0 0.2rem;
+}
+
+.applied-globals table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.applied-globals td {
+  padding: 0.1rem 0.4rem 0.1rem 0;
+  vertical-align: baseline;
+}
+
+.applied-globals td:first-child {
+  width: 1.4rem;
+}
+
+.applied-globals .global-name .link {
+  padding: 0;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.applied-globals tr.off .global-name .link {
+  color: var(--muted);
+}
+
+.applied-globals .decided {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.applied-globals .decided.here {
+  color: var(--accent);
+}
+
+.applied-globals .values {
+  font-family: var(--mono);
+  font-size: 12px;
+  max-width: 1px;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

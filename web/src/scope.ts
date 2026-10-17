@@ -1,54 +1,84 @@
-// 共通パラメータの適用範囲: statement ごとに、効く共通パラメータを選んで優先順に重ねる
+// 共通パラメータを適用する場所: 場所ごとの「適用する・しない」から、statement に効く共通パラメータを決める
 import type { Path, PValue } from './params';
 import { getAt, mergeValues } from './params';
 
-export interface Scope {
-  /** 全体に効く */
-  all: boolean;
-  /** all が false のときに効く範囲。フォルダ（末尾が /）・ファイルの相対パスか、statement の id */
-  items: string[];
-}
+/** 適用する（on）・しない（off） */
+export type RuleState = 'on' | 'off';
+
+/** 全体を表す場所 */
+export const ROOT = '*';
 
 export interface GlobalSet {
   id: string;
   name: string;
   values: PValue;
-  enabled: boolean;
-  scope: Scope;
+  /** 場所ごとの適用する・しない。場所は ROOT、フォルダ（末尾が /）・ファイルの相対パス、statement の id */
+  rules: Record<string, RuleState>;
 }
 
-/** 範囲を比べる statement（id と、定義したファイルのパス） */
+/** 判定する statement（id と、定義したファイルのパス） */
 export interface Target {
   id: string;
   file: string;
 }
 
-/**
- * 範囲がどれだけ狭く statement に当たるか。当たらなければ null。
- * statement ＞ ファイル ＞ フォルダ（深いほうが狭い） ＞ 全体。
- */
-export function specificity(scope: Scope, target: Target): number | null {
-  if (scope.all) return 0;
-  let best: number | null = null;
-  for (const item of scope.items) {
-    let s: number | null = null;
-    if (item === target.id) s = 3000;
-    else if (item === target.file) s = 2000;
-    else if (item.endsWith('/') && target.file.startsWith(item)) s = 1000 + item.split('/').length;
-    if (s !== null && (best === null || s > best)) best = s;
-  }
-  return best;
+export type PlaceKind = 'all' | 'dir' | 'file' | 'statement';
+
+export interface Place {
+  key: string;
+  kind: PlaceKind;
+  /** 近さ。大きいほど statement に近い */
+  rank: number;
 }
 
-/** statement に効く共通パラメータ（オンで、範囲に当たるもの）を、優先順位の低い順に返す */
-export function applicable(sets: GlobalSet[], target: Target | null): GlobalSet[] {
+/** statement から見た場所を、近い順に返す（statement、ファイル、深いフォルダから浅いフォルダ、全体） */
+export function placesOf(target: Target): Place[] {
+  const out: Place[] = [
+    { key: target.id, kind: 'statement', rank: 3000 },
+    { key: target.file, kind: 'file', rank: 2000 },
+  ];
+  const parts = target.file.split('/').slice(0, -1);
+  for (let i = parts.length; i >= 1; i--) {
+    out.push({ key: parts.slice(0, i).join('/') + '/', kind: 'dir', rank: 1000 + i });
+  }
+  out.push({ key: ROOT, kind: 'all', rank: 0 });
+  return out;
+}
+
+export interface Decision {
+  state: RuleState;
+  /** 決めている場所（statement から見て一番近い、設定のある場所） */
+  place: Place;
+}
+
+/** statement での適用する・しない。どこにも設定がなければ null（適用しない） */
+export function decide(set: GlobalSet, target: Target): Decision | null {
+  for (const place of placesOf(target)) {
+    const state = set.rules[place.key];
+    if (state) return { state, place };
+  }
+  return null;
+}
+
+/** statement に関わる共通パラメータ（どこかの場所に設定があるもの）と、その判定 */
+export function related(sets: GlobalSet[], target: Target | null): { set: GlobalSet; decision: Decision }[] {
   if (!target) return [];
-  return sets
-    .map((set, index) => ({ set, index, s: set.enabled ? specificity(set.scope, target) : null }))
-    .filter((x): x is { set: GlobalSet; index: number; s: number } => x.s !== null)
-    // 範囲が同じ狭さなら、一覧で下にあるほうを優先（後に重ねる）
-    .sort((a, b) => a.s - b.s || a.index - b.index)
-    .map((x) => x.set);
+  return sets.flatMap((set) => {
+    const decision = decide(set, target);
+    return decision ? [{ set, decision }] : [];
+  });
+}
+
+/**
+ * statement に適用される共通パラメータを、優先順位の低い順に返す。
+ * 「適用する」を決めた場所が近いほうが優先。同じなら、一覧で下にあるほうが優先。
+ */
+export function applicable(sets: GlobalSet[], target: Target | null): GlobalSet[] {
+  return related(sets, target)
+    .map((r) => ({ ...r, index: sets.indexOf(r.set) }))
+    .filter((r) => r.decision.state === 'on')
+    .sort((a, b) => a.decision.place.rank - b.decision.place.rank || a.index - b.index)
+    .map((r) => r.set);
 }
 
 /** 共通パラメータを優先順位の低い順に重ねる */
@@ -59,10 +89,16 @@ export function combine(sets: GlobalSet[]): PValue | undefined {
 /** path の値を決めている共通パラメータ（最も優先順位の高いもの）の名前 */
 export function originAt(sets: GlobalSet[], path: Path): string | null {
   for (let i = sets.length - 1; i >= 0; i--) {
-    if (getAt(sets[i].values, path) !== undefined) {
-      // 途中に値のないオブジェクトがある場合などは、上の階層で決まっていることもあるが、名前の表示には十分
-      return sets[i].name;
-    }
+    if (getAt(sets[i].values, path) !== undefined) return sets[i].name;
   }
   return null;
+}
+
+/** 場所を短く表す（全体、order/、OrderMapper.xml、recent） */
+export function placeLabel(place: Place): string {
+  if (place.kind === 'all') return '全体';
+  if (place.kind === 'statement') return place.key.slice(place.key.lastIndexOf('.') + 1);
+  const trimmed = place.kind === 'dir' ? place.key.slice(0, -1) : place.key;
+  const name = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  return place.kind === 'dir' ? `${name}/` : name;
 }

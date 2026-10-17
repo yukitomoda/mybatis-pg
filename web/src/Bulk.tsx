@@ -1,5 +1,5 @@
 // 全 statement の一括チェック: 保存してある値でまとめて EXPLAIN し、重そうなものを一覧にする
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Api } from './api';
 import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
@@ -36,7 +36,6 @@ export function BulkCheck({
   statements,
   globalSets,
   onOpen,
-  onClose,
 }: {
   api: Api;
   conn: Connections;
@@ -45,9 +44,7 @@ export function BulkCheck({
   globalSets: GlobalSet[];
   /** statement を開いて EXPLAIN タブを出す */
   onOpen: (id: string) => void;
-  onClose: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [analyze, setAnalyze] = useState(false);
   const [filter, setFilter] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
@@ -55,10 +52,6 @@ export function BulkCheck({
   const [progress, setProgress] = useState(0);
   const [sort, setSort] = useState<SortKey>('cost');
   const cancelled = useRef(false);
-
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
 
   const targets = statements.filter((s) => s.id.toLowerCase().includes(filter.trim().toLowerCase()) || s.file.toLowerCase().includes(filter.trim().toLowerCase()));
 
@@ -140,7 +133,7 @@ export function BulkCheck({
   );
 
   return (
-    <dialog ref={dialog} className="bulk" onClose={onClose}>
+    <div className="bulk page">
       <header className="panel-header">
         <h2>一括チェック</h2>
         <span className="hint">保存してある個別の値・共通パラメータで、statement をまとめて EXPLAIN します</span>
@@ -161,10 +154,6 @@ export function BulkCheck({
             {targets.length} 件をチェック
           </button>
         )}
-        <span className="spacer" />
-        <button type="button" onClick={() => dialog.current?.close()}>
-          閉じる
-        </button>
       </div>
       <p className="hint">
         計画のみ（既定）では SQL を実行しません。値が保存されていない statement は、未設定の項目を NULL として扱うため、実際とは違う計画になることがあります。行をクリックすると、その statement の EXPLAIN タブを開きます。
@@ -190,7 +179,6 @@ export function BulkCheck({
                   className={r.status === 'error' ? 'error' : undefined}
                   onClick={() => {
                     onOpen(r.id);
-                    dialog.current?.close();
                   }}
                 >
                   <td className="bulk-id" title={r.id}>
@@ -223,6 +211,6 @@ export function BulkCheck({
           </table>
         </div>
       )}
-    </dialog>
+    </div>
   );
 }

@@ -27,10 +27,10 @@ export function message(e: unknown): string {
 }
 
 /** 接続先の一覧と、選んでいる接続先（実行タブと EXPLAIN タブで共有する） */
-export function useConnections(api: Api, onApiError: (e: unknown) => void) {
+/** @param openSettings 接続先の画面を開く */
+export function useConnections(api: Api, onApiError: (e: unknown) => void, openSettings: () => void) {
   const [connections, setConnections] = useState<ConnectionProfile[]>([]);
   const [selected, setSelected] = useState<string | null>(loadSelected);
-  const [editing, setEditing] = useState(false);
 
   const reload = () =>
     api
@@ -53,8 +53,7 @@ export function useConnections(api: Api, onApiError: (e: unknown) => void) {
     current: connections.find((c) => c.id === selected) ?? connections[0] ?? null,
     select,
     reload,
-    editing,
-    setEditing,
+    openSettings,
   };
 }
 
@@ -73,21 +72,9 @@ export function ConnectionPicker({ conn }: { conn: Connections }) {
           </option>
         ))}
       </select>
-      <button type="button" onClick={() => conn.setEditing(true)}>
+      <button type="button" onClick={conn.openSettings}>
         接続先の設定
       </button>
-      {conn.editing && (
-        <ConnectionDialog
-          api={conn.api}
-          connections={connections}
-          initialId={current?.id ?? null}
-          onChanged={conn.reload}
-          onClose={(id) => {
-            conn.setEditing(false);
-            if (id) conn.select(id);
-          }}
-        />
-      )}
     </>
   );
 }
@@ -216,32 +203,21 @@ function toInput(p: ConnectionProfile): ConnectionInput {
   return { id: p.id, name: p.name, host: p.host, port: p.port, database: p.database, user: p.user, params: p.params };
 }
 
-function ConnectionDialog({
-  api,
-  connections,
-  initialId,
-  onChanged,
-  onClose,
-}: {
-  api: Api;
-  connections: ConnectionProfile[];
-  initialId: string | null;
-  onChanged: () => void;
-  /** 閉じたときに選ばれていた接続先 */
-  onClose: (selectedId: string | null) => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [form, setForm] = useState<ConnectionInput>(() => {
-    const p = connections.find((c) => c.id === initialId);
-    return p ? toInput(p) : { ...EMPTY };
-  });
+/** 接続先の画面: 一覧と、選んだ接続先の編集 */
+export function ConnectionsScreen({ conn }: { conn: Connections }) {
+  const { api, connections } = conn;
+  const onChanged = conn.reload;
+  const [form, setForm] = useState<ConnectionInput>({ ...EMPTY });
+  // 一覧が届いたら、使っている接続先を開いておく
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !conn.current) return;
+    opened.current = true;
+    setForm(toInput(conn.current));
+  }, [conn.current]);
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
 
   const saved = connections.find((c) => c.id === form.id) ?? null;
 
@@ -258,6 +234,7 @@ function ConnectionDialog({
     try {
       const p = await api.saveConnection(password ? { ...form, password } : form);
       setForm(toInput(p));
+      conn.select(p.id);
       setPassword('');
       onChanged();
       return p;
@@ -315,9 +292,9 @@ function ConnectionDialog({
   });
 
   return (
-    <dialog ref={dialog} className="connections" onClose={() => onClose(form.id ?? null)}>
+    <div className="connections page">
       <header className="panel-header">
-        <h2>接続先の設定</h2>
+        <h2>接続先</h2>
         <span className="hint">PostgreSQL</span>
       </header>
       <div className="connections-body">
@@ -401,12 +378,9 @@ function ConnectionDialog({
             <button type="submit" disabled={busy}>
               保存して接続テスト
             </button>
-            <button type="button" onClick={() => dialog.current?.close()}>
-              閉じる
-            </button>
           </div>
         </form>
       </div>
-    </dialog>
+    </div>
   );
 }

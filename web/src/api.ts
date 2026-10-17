@@ -2,7 +2,7 @@
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
-import type { GlobalSet, Scope } from './scope';
+import type { GlobalSet, RuleState } from './scope';
 import type { StatementEntry } from './tree';
 
 export interface LoadError {
@@ -150,18 +150,16 @@ function parseGlobals(text: string): GlobalsResponse {
     sets:
       sets && sets.t === 'list'
         ? sets.items.map((s) => {
-            const enabled = getAt(s, ['enabled']);
-            const all = getAt(s, ['scope', 'all']);
-            const items = getAt(s, ['scope', 'items']);
+            const rules: Record<string, RuleState> = {};
+            const r = getAt(s, ['rules']);
+            if (r && r.t === 'object') {
+              for (const [place, v] of r.fields) if (v.t === 'string' && (v.v === 'on' || v.v === 'off')) rules[place] = v.v;
+            }
             return {
               id: str(getAt(s, ['id'])) ?? '',
               name: str(getAt(s, ['name'])) ?? '',
               values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
-              enabled: enabled?.t === 'boolean' ? enabled.v : true,
-              scope: {
-                all: all?.t === 'boolean' ? all.v : true,
-                items: items?.t === 'list' ? items.items.map((i) => str(i) ?? '').filter(Boolean) : [],
-              },
+              rules,
             };
           })
         : [],
@@ -229,8 +227,8 @@ export function createApi(token: string) {
       globalsCall('create', JSON.stringify({ name, copyFrom })),
     renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
     deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
-    enableGlobal: (id: string, enabled: boolean) => globalsCall('enable', JSON.stringify({ id, enabled })),
-    scopeGlobal: (id: string, scope: Scope) => globalsCall('scope', JSON.stringify({ id, scope })),
+    /** 場所での適用する（on）・しない（off）を決める。null なら決めない（外側に従う） */
+    ruleGlobal: (id: string, place: string, state: RuleState | null) => globalsCall('rule', JSON.stringify({ id, place, state })),
     moveGlobal: (id: string, offset: number) => globalsCall('move', JSON.stringify({ id, offset })),
     saveGlobalValues: (id: string, values: PValue) =>
       globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
