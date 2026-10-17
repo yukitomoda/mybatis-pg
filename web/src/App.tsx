@@ -296,6 +296,14 @@ function Workspace({ api }: { api: Api }) {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  /** ファイルを「テンプレート」タブのエディタで開く（今の statement がそのファイルのものなら、そのまま） */
+  const editFile = (file: string) => {
+    const s = statements.find((x) => x.file === file);
+    if (s && target?.file !== file) select(s.id);
+    setTab('template');
+    saveTab('template');
+  };
+
   const changeValue = (v: PValue | undefined) => {
     setValue(v);
     if (selected) saveParams(selected, v);
@@ -327,16 +335,10 @@ function Workspace({ api }: { api: Api }) {
       <aside className="sidebar">
         <DraftList
           drafts={drafts}
-          onOpen={(file) => {
-            // 今の statement がそのファイルのものなら、そのまま
-            const s = statements.find((x) => x.file === file);
-            if (s && target?.file !== file) select(s.id);
-            setTab('template');
-            saveTab('template');
-          }}
+          onOpen={editFile}
           hasStatements={(file) => statements.some((x) => x.file === file)}
         />
-        <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} drafted={drafts.files} />
+        <StatementTree statements={statements} selected={selected} onSelect={select} onEdit={editFile} drafted={drafts.files} />
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
@@ -581,15 +583,16 @@ function StatementTree({
   statements,
   selected,
   onSelect,
-  opener,
+  onEdit,
   drafted,
 }: {
   statements: StatementEntry[];
+  /** ファイルをエディタで開く */
+  onEdit: (file: string) => void;
   /** 編集中（下書きがある）ファイル */
   drafted: Set<string>;
   selected: string | null;
   onSelect: (id: string) => void;
-  opener: Opener;
 }) {
   const [filter, setFilter] = useState('');
   const [toggled, setToggled] = useState(loadToggled);
@@ -636,9 +639,9 @@ function StatementTree({
                 )}
                 {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
               </button>
-              {n.kind === 'file' && opener && (
-                <button type="button" className="icon open-file" title={opener.label} aria-label={`${n.label} を${opener.label}`} onClick={() => opener.open({ file: n.key })}>
-                  ↗
+              {n.kind === 'file' && (
+                <button type="button" className="icon open-file" title="編集する" aria-label={`${n.label} を編集する`} onClick={() => onEdit(n.key)}>
+                  ✎
                 </button>
               )}
             </div>
