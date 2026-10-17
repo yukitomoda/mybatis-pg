@@ -1816,3 +1816,12 @@ button.bulk-open {
   border-color: var(--warn);
   font-weight: 600;
 }
+
+.pick-line.not-ready .node {
+  color: var(--muted);
+}
+
+.pick-line button.badge {
+  cursor: pointer;
+  font-family: inherit;
+}

@@ -231,6 +231,8 @@ export function createApi(token: string) {
   return {
     statements: () => call<StatementsResponse>('api/statements'),
     parameters: (id: string) => call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
+    /** すべての statement のパラメータの木（抜き出せなかったものは errors に理由） */
+    allParameters: () => call<{ trees: Record<string, ParamSchema>; errors: Record<string, string> }>('api/parameters-all'),
     globals: async () => parseGlobals(await callText('api/globals')),
     createGlobal: (name: string, copyFrom: string | null) =>
       globalsCall('create', JSON.stringify({ name, copyFrom })),

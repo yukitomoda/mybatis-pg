@@ -1,16 +1,15 @@
 // 全 statement の一括チェック: 保存してある値でまとめて EXPLAIN し、重そうなものを一覧にする
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api } from './api';
 import { BulkPicker, loadSelection, saveSelection } from './BulkPicker';
 import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
-import { resolveTemplates } from './gen';
-import { loadParams } from './paramStore';
-import { effectiveValue, missingParams } from './params';
-import { flatten, parsePlan } from './plan';
 import type { GlobalSet, StatementsSettings } from './globalModel';
-import { applicable, combine } from './globalModel';
+import type { ParamSchema } from './params';
+import { flatten, parsePlan } from './plan';
+import type { Readiness } from './readiness';
+import { isReady, readiness } from './readiness';
 import type { StatementEntry } from './tree';
 
 interface Row {
@@ -27,8 +26,6 @@ interface Row {
   seqScans: string[];
   findings: { high: number; medium: number };
   error: string | null;
-  /** 値がない（NULL として扱われる）項目 */
-  missing: string[];
 }
 
 type SortKey = 'cost' | 'time' | 'findings' | 'id';
@@ -39,7 +36,10 @@ export function BulkCheck({
   statements,
   globalSets,
   globalStatements,
+  active,
+  generation,
   onOpen,
+  onOpenParams,
 }: {
   api: Api;
   conn: Connections;
@@ -48,8 +48,14 @@ export function BulkCheck({
   globalSets: GlobalSet[];
   /** statement ごとの共通パラメータの設定 */
   globalStatements: StatementsSettings;
+  /** この画面を表示している（表示するたびに、保存してある値を読み直す） */
+  active: boolean;
+  /** mapper XML の読み込みの世代（変わったらパラメータの木を取り直す） */
+  generation: number;
   /** statement を開いて EXPLAIN タブを出す */
   onOpen: (id: string) => void;
+  /** statement を開いて値を設定する */
+  onOpenParams: (id: string) => void;
 }) {
   const [analyze, setAnalyze] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(loadSelection);
@@ -59,7 +65,39 @@ export function BulkCheck({
   const [sort, setSort] = useState<SortKey>('cost');
   const cancelled = useRef(false);
 
-  const targets = statements.filter((s) => selection.has(s.id));
+  const [schemas, setSchemas] = useState<{ generation: number; trees: Record<string, ParamSchema>; errors: Record<string, string> } | null>(null);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
+  // 個別の値はクエリ画面で変わるので、表示するたびに読み直す
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    setShown((n) => n + 1);
+    if (schemas && schemas.generation === generation) return;
+    api.allParameters().then(
+      (r) => {
+        setSchemas({ generation, ...r });
+        setSchemaError(null);
+      },
+      (e) => setSchemaError(message(e)),
+    );
+  }, [active, generation]);
+
+  /** statement ごとの足りないもの。パラメータの木を取るまでは null */
+  const status = useMemo(() => {
+    if (!schemas) return null;
+    const out = new Map<string, Readiness>();
+    for (const s of statements) {
+      const tree = schemas.trees[s.id];
+      const error = schemas.errors[s.id];
+      if (tree) out.set(s.id, readiness(s.id, tree, globalSets, globalStatements));
+      else out.set(s.id, { value: undefined, missing: [], issues: [error ?? 'パラメータを調べられません'] });
+    }
+    return out;
+  }, [schemas, statements, globalSets, globalStatements, shown]);
+
+  // 足りないものがある statement は、選んであっても実行しない
+  const targets = statements.filter((s) => selection.has(s.id) && isReady(status?.get(s.id)));
+  const skipped = status ? statements.filter((s) => selection.has(s.id) && !isReady(status.get(s.id))).length : 0;
   const select = (ids: Set<string>) => {
     setSelection(ids);
     saveSelection(ids);
@@ -88,16 +126,12 @@ export function BulkCheck({
         seqScans: [],
         findings: { high: 0, medium: 0 },
         error: null,
-        missing: [],
       };
       try {
-        // 画面で開いたときと同じく、個別の値・共通パラメータ・既定の値・式から値を作る
-        const schema = (await api.parameters(s.id)).tree;
-        const effective = effectiveValue(schema, combine(applicable(globalSets, globalStatements[s.id])), loadParams(s.id));
-        row.missing = missingParams(schema, effective);
-        const resolved = resolveTemplates(effective, new Map());
-        if (resolved.issues.length > 0) throw new Error(`式の誤り: ${resolved.issues.map((x) => `${x.path}: ${x.message}`).join('、')}`);
-        const r = await api.explain(s.id, resolved.value, current.id, {
+        // 実行の直前にも確かめ、足りないものがあれば SQL を発行しない
+        const ready = status?.get(s.id);
+        if (!ready || !isReady(ready)) throw new Error('値が足りないため実行しませんでした');
+        const r = await api.explain(s.id, ready.value, current.id, {
           analyze: analyze && !planOnly,
           buffers: analyze && !planOnly,
           readOnly: true,
@@ -127,8 +161,6 @@ export function BulkCheck({
     }
     setRunning(false);
   };
-
-  const missingCount = rows.filter((r) => r.missing.length > 0).length;
 
   const sorted = useMemo(() => {
     const list = [...rows];
@@ -165,7 +197,7 @@ export function BulkCheck({
         <span className="hint">保存してある個別の値・共通パラメータで、statement をまとめて EXPLAIN します</span>
       </header>
       <div className="bulk-body">
-        <BulkPicker statements={statements} selected={selection} onChange={select} disabled={running} />
+        <BulkPicker statements={statements} status={status} selected={selection} onChange={select} onOpen={onOpenParams} disabled={running} />
         <div className="bulk-main">
           <div className="execute-bar">
             <ConnectionPicker conn={conn} />
@@ -184,11 +216,8 @@ export function BulkCheck({
             )}
           </div>
           <p className="hint">計画のみ（既定）では SQL を実行しません。行をクリックすると、その statement の EXPLAIN タブを開きます。</p>
-          {missingCount > 0 && (
-            <p className="notes warn">
-              {missingCount} 件の statement に未設定の項目があります。未設定の項目は NULL として扱うため、実際とは違う計画になることがあります。
-            </p>
-          )}
+          {schemaError && <p className="error-text">{schemaError}</p>}
+          {skipped > 0 && <p className="notes warn">選んだうち {skipped} 件は、値が足りないため実行しません。</p>}
           {rows.length > 0 && (
             <div className="grid-scroll bulk-scroll">
               <table className="bulk-table">
@@ -213,11 +242,6 @@ export function BulkCheck({
                       }}
                     >
                       <td className="bulk-id" title={r.id}>
-                        {r.missing.length > 0 && (
-                          <span className="badge warn" title={`未設定（NULL として扱われます）: ${r.missing.join(', ')}`}>
-                            未設定 {r.missing.length}
-                          </span>
-                        )}
                         {r.id}
                       </td>
                       <td>

@@ -484,10 +484,18 @@ function Workspace({ api }: { api: Api }) {
           statements={statements}
           globalSets={globals.sets}
           globalStatements={globals.statements}
+          active={screen === 'bulk'}
+          generation={generation}
           onOpen={(id) => {
             select(id);
             setTab('explain');
             saveTab('explain');
+            setScreen('query');
+            window.history.pushState(null, '', hashOf('query', id));
+          }}
+          onOpenParams={(id) => {
+            select(id);
+            setParamTab('local');
             setScreen('query');
             window.history.pushState(null, '', hashOf('query', id));
           }}
