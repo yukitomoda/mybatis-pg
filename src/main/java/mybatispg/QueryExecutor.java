@@ -352,6 +352,68 @@ public final class QueryExecutor {
     }
   }
 
+  /** 部分の SQL を実行した結果 */
+  public static final class PartResult {
+    public ResultTable table;
+    /** 全体の件数（数えられなければ null） */
+    public Long total;
+    public long elapsedMillis;
+  }
+
+  /**
+   * SQL の一部（サブクエリ・CTE など、値を埋め込んだもの）を、読み取り専用のトランザクションで実行し、必ずロールバックする。
+   * SQL は SELECT * FROM (...) で包む（1 つの問い合わせだけを実行し、; で区切った別の文は構文エラーになる）。
+   * あわせて全体の件数を数える。
+   */
+  public static PartResult queryPart(String sql, ConnectionFactory connections, int maxRows, int timeoutSeconds)
+      throws ExecutionException {
+    Connection c;
+    try {
+      c = connections.open();
+    } catch (SQLException | RuntimeException e) {
+      throw new ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+    try {
+      c.setAutoCommit(false);
+      try (java.sql.Statement s = c.createStatement()) {
+        s.execute("SET TRANSACTION READ ONLY");
+      }
+      PartResult result = new PartResult();
+      long start = System.nanoTime();
+      // 改行で包む（末尾の -- コメントで閉じ括弧が消えないように）
+      String wrapped = "SELECT * FROM (\n" + sql + "\n) AS part";
+      try (java.sql.Statement s = c.createStatement()) {
+        s.setQueryTimeout(timeoutSeconds);
+        s.setMaxRows(maxRows + 1);
+        try (ResultSet rs = s.executeQuery(wrapped)) {
+          result.table = read(rs, maxRows);
+        }
+      }
+      result.elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+      if (result.table.truncated) {
+        try (java.sql.Statement s = c.createStatement()) {
+          s.setQueryTimeout(timeoutSeconds);
+          try (ResultSet rs = s.executeQuery("SELECT count(*) FROM (\n" + sql + "\n) AS part")) {
+            result.total = rs.next() ? rs.getLong(1) : null;
+          }
+        }
+      } else {
+        result.total = (long) result.table.rows.size();
+      }
+      c.rollback();
+      return result;
+    } catch (SQLException | RuntimeException e) {
+      String rollback = rollback(c);
+      throw new ExecutionException(Errors.describe(e) + "\n" + rollback, e);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない
+      }
+    }
+  }
+
   private static ResultTable read(ResultSet rs, int maxRows) throws SQLException {
     ResultTable table = new ResultTable();
     ResultSetMetaData meta = rs.getMetaData();

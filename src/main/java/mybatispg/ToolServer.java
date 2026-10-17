@@ -351,6 +351,11 @@ public final class ToolServer {
           openInEditor(ex);
         }
         break;
+      case "/api/part":
+        if (requireMethod(ex, method, "POST")) {
+          runPart(ex);
+        }
+        break;
       case "/api/explain":
         if (requireMethod(ex, method, "POST")) {
           explain(ex);
@@ -1252,6 +1257,44 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("statements", renderer.statementIds());
     body.put("errors", renderer.getLoadErrors());
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * SQL の一部（サブクエリ・CTE など）を読み取り専用で実行する: {"connectionId", "sql", "maxRows"?, "timeoutSeconds"?}。
+   * 応答: {"columns", "columnTypes", "rows", "truncated", "total", "elapsedMillis"}。
+   */
+  private void runPart(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    String sql = string(req, "sql");
+    if (sql == null || sql.trim().isEmpty()) {
+      sendJson(ex, 400, error("sql がありません"));
+      return;
+    }
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    int maxRows = req.has("maxRows") ? Math.max(1, Math.min(10000, req.get("maxRows").getAsInt())) : 200;
+    int timeout = req.has("timeoutSeconds") ? Math.max(1, Math.min(600, req.get("timeoutSeconds").getAsInt())) : 30;
+    QueryExecutor.PartResult r;
+    try {
+      r = QueryExecutor.queryPart(sql, () -> connections.open(connectionId), maxRows, timeout);
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("columns", r.table.columns);
+    body.put("columnTypes", r.table.columnTypes);
+    body.put("rows", r.table.rows);
+    body.put("truncated", r.table.truncated);
+    body.put("total", r.total);
+    body.put("elapsedMillis", r.elapsedMillis);
     sendJson(ex, 200, body);
   }
 

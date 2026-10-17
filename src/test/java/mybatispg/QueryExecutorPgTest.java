@@ -111,4 +111,30 @@ class QueryExecutorPgTest {
     o.sixthExecution = true;
     assertThrows(IllegalStateException.class, () -> explain("find", params(), o));
   }
+
+  private static QueryExecutor.PartResult part(String sql, int maxRows) throws Exception {
+    return QueryExecutor.queryPart(sql, () -> DriverManager.getConnection(URL), maxRows, 30);
+  }
+
+  @Test
+  void 部分のSQLを実行し_上限を超えたら全体の件数を数える() throws Exception {
+    QueryExecutor.PartResult r = part("SELECT id, name FROM items WHERE id <= 5 -- 末尾のコメント", 10);
+    assertEquals(5, r.table.rows.size());
+    assertEquals(Long.valueOf(5), r.total);
+    assertEquals(java.util.Arrays.asList("id", "name"), r.table.columns);
+
+    QueryExecutor.PartResult many = part("WITH big AS (SELECT * FROM items) SELECT * FROM big", 3);
+    assertEquals(3, many.table.rows.size());
+    assertTrue(many.table.truncated);
+    assertEquals(Long.valueOf(1000), many.total);
+  }
+
+  @Test
+  void 部分のSQLでは書き換えられない() throws Exception {
+    // データを書き換える CTE は、読み取り専用のトランザクションで断られる
+    assertThrows(QueryExecutor.ExecutionException.class, () -> part("WITH d AS (DELETE FROM items RETURNING id) SELECT * FROM d", 10));
+    // ; で区切った別の文は、包んだ括弧の中で構文エラーになる
+    assertThrows(QueryExecutor.ExecutionException.class, () -> part("SELECT 1; DELETE FROM items", 10));
+    assertEquals(1000, count());
+  }
 }
