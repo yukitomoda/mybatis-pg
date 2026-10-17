@@ -1,4 +1,5 @@
-// テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない
+// テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない。
+// プレイグラウンド（このアプリだけで使う mapper XML）は下書きを使わず、編集したら自動で保存する
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, OpenTarget } from './api';
 import { ApiError } from './api';
@@ -21,6 +22,7 @@ export function FileEditor({
   onApiError,
   opener,
   visible,
+  playground,
 }: {
   api: Api;
   statementId: string;
@@ -32,13 +34,15 @@ export function FileEditor({
   opener: { label: string; open: (target: OpenTarget) => void } | null;
   /** タブが表示されている */
   visible: boolean;
+  /** プレイグラウンドなら、その名前と操作 */
+  playground?: { name: string; onSaved: () => void; onRename: () => void; onDelete: () => void };
 }) {
   /** 保存されているファイルの内容（どのファイルのものかも持ち、別のファイルの内容を取り違えないようにする） */
   const [loaded, setLoaded] = useState<{ file: string; content: string } | null>(null);
   const saved = loaded?.file === file ? loaded.content : null;
   const setSaved = (content: string) => setLoaded({ file, content });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const draft = drafts.get(file);
+  const draft = playground ? undefined : drafts.get(file);
   /** 編集中の文字（どのファイルのものかも持つ） */
   const [editing, setEditing] = useState<{ file: string; text: string } | null>(null);
   const text = editing?.file === file ? editing.text : null;
@@ -84,11 +88,30 @@ export function FileEditor({
     pending.current?.();
     pending.current = null;
   };
+  /** プレイグラウンドの保存を順番に送る（後の内容が先の内容で上書きされないように） */
+  const autosaving = useRef<Promise<unknown>>(Promise.resolve());
   const change = (next: string) => {
     setText(next);
     window.clearTimeout(timer.current);
     pending.current = () => {
-      if (saved !== null) drafts.set(file, draft?.base ?? saved, next);
+      if (saved === null) return;
+      if (!playground) {
+        drafts.set(file, draft?.base ?? saved, next);
+        return;
+      }
+      autosaving.current = autosaving.current
+        .then(() => api.saveFile(file, '', next, true))
+        .then(
+          () => {
+            setSaved(next);
+            setSaveMessage((m) => (m?.ok ? m : null));
+            playground.onSaved();
+          },
+          (e) => {
+            onApiError(e);
+            setSaveMessage({ ok: false, text: '保存できません: ' + (e instanceof Error ? e.message : String(e)) });
+          },
+        );
     };
     timer.current = window.setTimeout(flush, DRAFT_DELAY);
   };
@@ -99,6 +122,11 @@ export function FileEditor({
   const [saveMessage, setSaveMessage] = useState<{ ok: boolean; text: string } | null>(null);
   /** 編集した内容をファイルに保存する */
   const save = async () => {
+    // プレイグラウンドは自動で保存する。Ctrl+S ではすぐに保存する
+    if (playground) {
+      flush();
+      return;
+    }
     const current = text ?? draft?.content;
     if (saving || saved === null || current === undefined || current === null || (!draft && text === null)) return;
     if (errors.length > 0 && !window.confirm('XML にエラーがあります。このままファイルに保存しますか？')) return;
@@ -137,18 +165,19 @@ export function FileEditor({
     if (text !== null) setSaveMessage((m) => (m?.ok ? null : m));
   }, [text]);
 
-  // 下書きを読み込んでみて、エラーを出す
+  // 下書き（プレイグラウンドは保存した内容）を読み込んでみて、エラーを出す
+  const checking = playground ? saved : draft?.content;
   useEffect(() => {
-    if (!draft) {
+    if (checking === null || checking === undefined) {
       setErrors([]);
       setMissing(false);
       return;
     }
     const abort = new AbortController();
-    api.checkDraft(file, draft.content, abort.signal).then(
+    api.checkDraft(file, checking, abort.signal).then(
       (r) => {
         setErrors(r.errors.map((e) => ({ line: e.line, message: e.message })));
-        setMissing(!r.statements.includes(statementId));
+        setMissing(statementId !== '' && !r.statements.includes(statementId));
       },
       (e) => {
         if (abort.signal.aborted) return;
@@ -156,7 +185,7 @@ export function FileEditor({
       },
     );
     return () => abort.abort();
-  }, [api, file, draft?.content, statementId]);
+  }, [api, file, checking, statementId]);
 
   // statement を選んだら、その行へ移る（編集のたびには移らない）
   const focusLine = useMemo(() => (content === null ? null : statementLine(content, statementId)), [statementId, content === null]);
@@ -178,34 +207,52 @@ export function FileEditor({
   return (
     <div className="file-editor">
       <div className="sql-title">
-        <code className="template-file" title={file}>
-          {file}
-        </code>
+        {playground ? (
+          <span className="template-file playground-name">プレイグラウンド: {playground.name}</span>
+        ) : (
+          <code className="template-file" title={file}>
+            {file}
+          </code>
+        )}
         {draft && (
           <span className="badge warn" title="ファイルには保存していません">
             編集中
           </span>
         )}
         <span className="actions">
+          {playground && (
+            <>
+              <button type="button" onClick={playground.onRename}>
+                名前変更
+              </button>
+              <button type="button" onClick={playground.onDelete}>
+                削除
+              </button>
+            </>
+          )}
           {/* 編集の有無で行の高さが変わらないよう、ボタンは常に出す */}
-          <button type="button" className="run" disabled={!draft || saving} title="Ctrl+S" onClick={save}>
-            ファイルに保存
-          </button>
-          <button
-            type="button"
-            disabled={!draft}
-            onClick={() => {
-              if (!window.confirm(`${file} の編集を取り消して、保存されている内容に戻しますか？`)) return;
-              window.clearTimeout(timer.current);
-              pending.current = null;
-              setText(null);
-              drafts.discard([file]);
-            }}
-          >
-            編集を取り消す
-          </button>
+          {!playground && (
+            <button type="button" className="run" disabled={!draft || saving} title="Ctrl+S" onClick={save}>
+              ファイルに保存
+            </button>
+          )}
+          {!playground && (
+            <button
+              type="button"
+              disabled={!draft}
+              onClick={() => {
+                if (!window.confirm(`${file} の編集を取り消して、保存されている内容に戻しますか？`)) return;
+                window.clearTimeout(timer.current);
+                pending.current = null;
+                setText(null);
+                drafts.discard([file]);
+              }}
+            >
+              編集を取り消す
+            </button>
+          )}
           {opener && (
-            <button type="button" onClick={() => opener.open({ statementId })}>
+            <button type="button" onClick={() => opener.open(playground ? { file } : { statementId })}>
               {opener.label}
             </button>
           )}
@@ -233,7 +280,9 @@ export function FileEditor({
             {errors.length > 1 && `（ほか ${errors.length - 1} 件）`}
           </button>
         ) : missing ? (
-          <span className="warn-text">編集中の XML に、この statement（{statementId}）がありません</span>
+          <span className="warn-text">
+            {playground ? 'この XML に' : '編集中の XML に'}、この statement（{statementId}）がありません
+          </span>
         ) : null}
       </div>
     </div>

@@ -12,9 +12,19 @@ export interface LoadError {
   message: string;
 }
 
+/** プレイグラウンド（このアプリだけで使う mapper XML） */
+export interface PlaygroundEntry {
+  /** 画面のパス（playground:名前） */
+  file: string;
+  name: string;
+  /** 読み込みのエラー */
+  errors: LoadError[];
+}
+
 export interface StatementsResponse {
   generation: number;
   statements: StatementEntry[];
+  playgrounds: PlaygroundEntry[];
   loadErrors: LoadError[];
 }
 
@@ -242,6 +252,9 @@ export function createApi(token: string) {
     /** 編集した内容をファイルに保存する。編集を始めた後にファイルが変わっていたら、force がなければ 409 */
     saveFile: (file: string, base: string, content: string, force: boolean) =>
       call<object>('api/file/save', post(JSON.stringify({ file, base, content, force }))),
+    createPlayground: (name: string) => call<object>('api/playground/create', post(JSON.stringify({ name }))),
+    renamePlayground: (name: string, newName: string) => call<object>('api/playground/rename', post(JSON.stringify({ name, newName }))),
+    deletePlayground: (name: string) => call<object>('api/playground/delete', post(JSON.stringify({ name }))),
     /** 保存してある下書き（更新の新しい順） */
     drafts: () =>
       call<{ drafts: { file: string; base: string; content: string; updatedAt: number; loaded: boolean; changed: boolean }[] }>('api/drafts'),

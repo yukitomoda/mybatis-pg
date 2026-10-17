@@ -1944,3 +1944,7 @@ button.bulk-open {
   font-size: 11px;
   margin-left: 0.3rem;
 }
+
+.file-editor .playground-name {
+  font-weight: 600;
+}

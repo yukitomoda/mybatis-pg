@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Api, LoadError, OpenTarget, RenderResponse, TemplateResponse } from './api';
+import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
@@ -118,6 +118,11 @@ function Workspace({ api }: { api: Api }) {
   const [statements, setStatements] = useState<StatementEntry[]>([]);
   const [loadErrors, setLoadErrors] = useState<LoadError[]>([]);
   const [selected, setSelected] = useState<string | null>(initialStatement);
+  const [playgrounds, setPlaygrounds] = useState<PlaygroundEntry[]>([]);
+  /** プレイグラウンドを作ったり保存したりするたびに増やして、statement 一覧を取り直す */
+  const [playgroundVersion, setPlaygroundVersion] = useState(0);
+  /** statement を選ばずにエディタで開いているファイル（statement がないプレイグラウンドなど） */
+  const [looseFile, setLooseFile] = useState<string | null>(null);
   const [schema, setSchema] = useState<ParamSchema | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -177,15 +182,18 @@ function Workspace({ api }: { api: Api }) {
       .statements()
       .then((r) => {
         setStatements(r.statements);
+        setPlaygrounds(r.playgrounds);
         setLoadErrors(r.loadErrors);
       })
       .catch(handleError);
-    // 下書きを保存するたびにも取り直す（下書きで足した・消した statement を反映する）
-  }, [api, generation, drafts.version]);
+    // 下書きやプレイグラウンドを保存するたびにも取り直す（足した・消した statement を反映する）
+  }, [api, generation, drafts.version, playgroundVersion]);
 
   const target = statements.find((s) => s.id === selected) ?? null;
   // 編集中の mapper XML があれば、組み立て・実行・EXPLAIN にその内容を使う
   const draftP = draftParam(drafts.get(target?.file));
+  // プレイグラウンドは自動で保存するので、保存するたびに組み立て直す
+  const playgroundKey = target?.playground ? playgroundVersion : 0;
 
   // パラメータの木（XML が変わったら取り直す）
   useEffect(() => {
@@ -215,7 +223,7 @@ function Workspace({ api }: { api: Api }) {
     return () => {
       active = false;
     };
-  }, [api, selected, generation, draftP?.content]);
+  }, [api, selected, generation, draftP?.content, playgroundKey]);
 
   const globals = useGlobals(api, handleError);
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
@@ -268,12 +276,13 @@ function Workspace({ api }: { api: Api }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [api, selected, schema, sent, numberIssues.length, generation, draftP?.content]);
+  }, [api, selected, schema, sent, numberIssues.length, generation, draftP?.content, playgroundKey]);
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const select = (id: string) => {
     setSelected(id);
+    setLooseFile(null);
     setValue(loadParams(id));
     setResult(null);
     setRenderError(null);
@@ -300,9 +309,68 @@ function Workspace({ api }: { api: Api }) {
   /** ファイルを「テンプレート」タブのエディタで開く（今の statement がそのファイルのものなら、そのまま） */
   const editFile = (file: string) => {
     const s = statements.find((x) => x.file === file);
-    if (s && target?.file !== file) select(s.id);
+    if (!s) setLooseFile(file);
+    else if (target?.file !== file) select(s.id);
+    else setLooseFile(null);
     setTab('template');
     saveTab('template');
+  };
+
+  // ---- プレイグラウンド ----
+  const reloadPlaygrounds = () => setPlaygroundVersion((v) => v + 1);
+  const createPlayground = async () => {
+    const name = window.prompt('新しいプレイグラウンドの名前:');
+    if (!name) return;
+    try {
+      await api.createPlayground(name);
+      const r = await api.statements();
+      setStatements(r.statements);
+      setPlaygrounds(r.playgrounds);
+      const file = `playground:${name.trim()}`;
+      const s = r.statements.find((x) => x.file === file);
+      if (s) select(s.id);
+      else setLooseFile(file);
+      setTab('template');
+      saveTab('template');
+    } catch (e) {
+      handleError(e);
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const playgroundOf = (file: string) => {
+    const p = playgrounds.find((x) => x.file === file);
+    if (!p) return undefined;
+    return {
+      name: p.name,
+      onSaved: reloadPlaygrounds,
+      onRename: async () => {
+        const newName = window.prompt('新しい名前:', p.name);
+        if (!newName || newName === p.name) return;
+        try {
+          await api.renamePlayground(p.name, newName);
+          if (looseFile === p.file) setLooseFile(`playground:${newName.trim()}`);
+          reloadPlaygrounds();
+        } catch (e) {
+          handleError(e);
+          window.alert(e instanceof Error ? e.message : String(e));
+        }
+      },
+      onDelete: async () => {
+        if (!window.confirm(`プレイグラウンド「${p.name}」を削除しますか？`)) return;
+        try {
+          await api.deletePlayground(p.name);
+          if (target?.file === p.file) {
+            setSelected(null);
+            window.history.replaceState(null, '', hashOf('query', null));
+          }
+          setLooseFile(null);
+          reloadPlaygrounds();
+        } catch (e) {
+          handleError(e);
+          window.alert(e instanceof Error ? e.message : String(e));
+        }
+      },
+    };
   };
 
   const changeValue = (v: PValue | undefined) => {
@@ -339,7 +407,15 @@ function Workspace({ api }: { api: Api }) {
           onOpen={editFile}
           hasStatements={(file) => statements.some((x) => x.file === file)}
         />
-        <StatementTree statements={statements} selected={selected} onSelect={select} onEdit={editFile} drafted={drafts.files} />
+        <StatementTree
+          statements={statements}
+          playgrounds={playgrounds}
+          onCreatePlayground={createPlayground}
+          selected={selected}
+          onSelect={select}
+          onEdit={editFile}
+          drafted={drafts.files}
+        />
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
       <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
@@ -493,7 +569,20 @@ function Workspace({ api }: { api: Api }) {
 
         {/* 編集中の位置や取り消しの履歴が消えないよう、切り替えてもテンプレートのタブは残しておく */}
         <div hidden={tab !== 'template'}>
-          {selected ? (
+          {templateSeen && looseFile ? (
+            <FileEditor
+              key={looseFile}
+              api={api}
+              statementId=""
+              file={looseFile}
+              drafts={drafts}
+              generation={generation}
+              onApiError={handleError}
+              opener={opener}
+              visible={tab === 'template'}
+              playground={playgroundOf(looseFile)}
+            />
+          ) : selected ? (
             !templateSeen ? null : target ? (
               <FileEditor
                 api={api}
@@ -504,6 +593,7 @@ function Workspace({ api }: { api: Api }) {
                 onApiError={handleError}
                 opener={opener}
                 visible={tab === 'template'}
+                playground={playgroundOf(target.file)}
               />
             ) : (
               <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
@@ -583,12 +673,16 @@ function saveToggled(keys: Set<string>) {
 
 function StatementTree({
   statements,
+  playgrounds,
+  onCreatePlayground,
   selected,
   onSelect,
   onEdit,
   drafted,
 }: {
   statements: StatementEntry[];
+  playgrounds: PlaygroundEntry[];
+  onCreatePlayground: () => void;
   /** ファイルをエディタで開く */
   onEdit: (file: string) => void;
   /** 編集中（下書きがある）ファイル */
@@ -599,7 +693,17 @@ function StatementTree({
   const [filter, setFilter] = useState('');
   const [toggled, setToggled] = useState(loadToggled);
   const filtering = filter.trim() !== '';
-  const tree = useMemo(() => buildTree(filterEntries(statements, filter)), [statements, filter]);
+  const project = useMemo(() => statements.filter((s) => !s.playground), [statements]);
+  const tree = useMemo(() => buildTree(filterEntries(project, filter)), [project, filter]);
+  // プレイグラウンドは、ファイルの代わりに名前で並べる（絞り込んでいるときは、当たるものだけ）
+  const playgroundNodes = useMemo<TreeNode[]>(() => {
+    const matched = new Set(filterEntries(statements.filter((s) => s.playground), filter).map((s) => s.id));
+    return playgrounds
+      .map((p): TreeNode => ({ kind: 'file', key: p.file, label: p.name, statements: statements.filter((s) => s.file === p.file && (!filtering || matched.has(s.id))) }))
+      .filter((n) => !filtering || n.kind !== 'file' || n.statements.length > 0 || n.label.toLowerCase().includes(filter.trim().toLowerCase()));
+  }, [statements, playgrounds, filter, filtering]);
+  const brokenPlaygrounds = new Set(playgrounds.filter((p) => p.errors.length > 0).map((p) => p.file));
+  const playgroundsOpen = filtering || !toggled.has(PLAYGROUND_KEY);
 
   const isOpen = (n: TreeNode) => filtering || (n.kind === 'dir' ? !toggled.has(n.key) : toggled.has(n.key));
   const update = (f: (next: Set<string>) => void) =>
@@ -613,16 +717,19 @@ function StatementTree({
 
   // 選ばれている statement が見えるよう、そこまでの項目を開く（URL から開いたときなど）
   const loaded = statements.length > 0;
+  // プレイグラウンドの名前を変えたときなど、ファイルが変わったときも開く
+  const selectedFile = statements.find((x) => x.id === selected)?.file;
   useEffect(() => {
     if (!selected || !loaded) return;
-    const keys = pathTo(buildTree(statements), selected);
+    const s = statements.find((x) => x.id === selected);
+    const keys = s?.playground ? [s.file] : pathTo(buildTree(statements.filter((x) => !x.playground)), selected);
     update((next) => {
       for (const k of keys) {
         if (k.endsWith('/')) next.delete(k);
         else next.add(k);
       }
     });
-  }, [selected, loaded]);
+  }, [selected, loaded, selectedFile]);
 
   const render = (nodes: TreeNode[]) => (
     <ul>
@@ -634,6 +741,11 @@ function StatementTree({
               <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
                 <span className="twisty">{open ? '▾' : '▸'}</span>
                 {n.kind === 'dir' ? n.label + '/' : n.label}
+                {n.kind === 'file' && brokenPlaygrounds.has(n.key) && (
+                  <span className="warn-mark" title="XML を読み込めません" aria-label="読み込めません">
+                    ⚠
+                  </span>
+                )}
                 {n.kind === 'file' && drafted.has(n.key) && (
                   <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
                     ●
@@ -673,10 +785,34 @@ function StatementTree({
   return (
     <div className="statements">
       <input type="search" placeholder="statement・ファイルを絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : <nav className="tree-list">{render(tree)}</nav>}
+      <nav className="tree-list">
+        <ul>
+          <li>
+            <div className="node-line">
+              <button
+                type="button"
+                className="node dir"
+                aria-expanded={playgroundsOpen}
+                onClick={() => update((next) => (next.has(PLAYGROUND_KEY) ? next.delete(PLAYGROUND_KEY) : next.add(PLAYGROUND_KEY)))}
+              >
+                <span className="twisty">{playgroundsOpen ? '▾' : '▸'}</span>
+                プレイグラウンド
+              </button>
+              <button type="button" className="icon open-file" title="新しいプレイグラウンド" aria-label="新しいプレイグラウンド" onClick={onCreatePlayground}>
+                ＋
+              </button>
+            </div>
+            {playgroundsOpen && playgroundNodes.length > 0 && render(playgroundNodes)}
+          </li>
+        </ul>
+        {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : render(tree)}
+      </nav>
     </div>
   );
 }
+
+/** statement 一覧で、プレイグラウンドの欄を閉じたかを覚えておく key（ディレクトリと同じく、既定は開く） */
+const PLAYGROUND_KEY = 'playground/';
 
 /** 編集中（下書きがある）ファイルの一覧。いらなくなった下書きを片付ける */
 function DraftList({ drafts, onOpen, hasStatements }: { drafts: Drafts; onOpen: (file: string) => void; hasStatements: (file: string) => boolean }) {

@@ -8,6 +8,8 @@ export interface StatementEntry {
   type?: string;
   /** 下書きで足した（保存されているファイルにない） */
   added?: boolean;
+  /** プレイグラウンド（このアプリだけで使う mapper XML）の statement */
+  playground?: boolean;
 }
 
 export type TreeNode =
