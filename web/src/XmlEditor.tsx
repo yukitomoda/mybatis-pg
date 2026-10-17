@@ -93,7 +93,7 @@ export function XmlEditor({
   /** 表示する行（1 始まり）。key が変わったときだけ移る（同じ key のまま表示し直しても、スクロールの位置を保つ） */
   focus: { key: string; line: number } | null;
   label: string;
-  /** Ctrl+S（Mac は ⌘S） */
+  /** Ctrl+S（Mac は ⌘S）。ブラウザの「ページを保存」は出さない */
   onSave: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);

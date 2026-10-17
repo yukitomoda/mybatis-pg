@@ -127,11 +127,6 @@ export function FileEditor({
   const [saveMessage, setSaveMessage] = useState<{ ok: boolean; text: string } | null>(null);
   /** 編集した内容をファイルに保存する */
   const save = async () => {
-    // プレイグラウンドは自動で保存する。Ctrl+S ではすぐに保存する
-    if (playground) {
-      flush();
-      return;
-    }
     if (cannotSave) return;
     const current = text ?? draft?.content;
     if (saving || saved === null || current === undefined || current === null || (!draft && text === null)) return;
@@ -238,7 +233,7 @@ export function FileEditor({
           )}
           {/* 編集の有無で行の高さが変わらないよう、ボタンは常に出す */}
           {!playground && !cannotSave && (
-            <button type="button" className="run" disabled={!draft || saving} title="Ctrl+S" onClick={save}>
+            <button type="button" className="run" disabled={!draft || saving} onClick={save}>
               ファイルに保存
             </button>
           )}
@@ -271,7 +266,18 @@ export function FileEditor({
       </div>
       {stale && <p className="notes warn">編集を始めた後に、ファイルが変更されました。編集中の内容は変更前のファイルをもとにしています。</p>}
       <Suspense fallback={<p className="hint">エディタを読み込んでいます…</p>}>
-        <XmlEditor key={file} value={content} onChange={change} errors={errors} focus={focus} label={`${file} の編集`} onSave={save} />
+        <XmlEditor
+          key={file}
+          value={content}
+          onChange={change}
+          errors={errors}
+          focus={focus}
+          label={`${file} の編集`}
+          // Ctrl+S では、プレイグラウンドだけをすぐに保存する（プロジェクトのファイルは、手癖で保存しないよう「ファイルに保存」ボタンだけで保存する）
+          onSave={() => {
+            if (playground) flush();
+          }}
+        />
       </Suspense>
       {/* エラーは高さの変わらない 1 行に出す（出たり消えたりしてもエディタが動かないように） */}
       <div className="editor-status" role="status">
