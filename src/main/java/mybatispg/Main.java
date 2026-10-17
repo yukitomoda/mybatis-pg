@@ -116,6 +116,10 @@ public final class Main {
     String token = newToken();
     ToolServer server = startServer(workspace, connections, globals, port, token);
     server.useDrafts(drafts);
+    // 接続先のパスワード（マスターパスワードで暗号化して保存する）
+    Path secretsFile = configDir.resolve("secrets.json");
+    server.useVault(PasswordVault.load(secretsFile));
+    System.out.println("保存したパスワード（暗号化）: " + secretsFile);
     // このアプリだけで使う mapper XML（プロジェクトごと）
     Path playgroundDir = configDir.resolve("playground");
     server.usePlaygrounds(PlaygroundStore.open(playgroundDir, base == null ? "" : base.toString()));

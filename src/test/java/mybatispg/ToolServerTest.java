@@ -322,6 +322,55 @@ class ToolServerTest {
   }
 
   @Test
+  void パスワードの保存() throws Exception {
+    server.useVault(PasswordVault.inMemory());
+    try {
+      // マスターパスワードを設定していなければ、保存できない
+      api("POST", "/api/connections/save",
+          "{\"name\":\"v\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"password\":\"pw\",\"remember\":true}", 400);
+      assertEquals("{\"exists\":false,\"unlocked\":false,\"minLength\":8}", api("GET", "/api/vault", null, 200).toString());
+      api("POST", "/api/vault/setup", "{\"password\":\"short\"}", 400);
+      api("POST", "/api/vault/setup", "{\"password\":\"correct horse\"}", 200);
+      JsonObject saved = api("POST", "/api/connections/save",
+          "{\"name\":\"vault\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"password\":\"pw\",\"remember\":true}", 200);
+      String id = saved.get("id").getAsString();
+      assertTrue(saved.get("passwordSaved").getAsBoolean());
+      assertTrue(saved.get("hasPassword").getAsBoolean());
+
+      // 閉じると、保存しているパスワードは接続先から外れる。開くと戻る
+      api("POST", "/api/vault/lock", "{}", 200);
+      JsonObject locked = connection(id);
+      assertFalse(locked.get("hasPassword").getAsBoolean());
+      assertTrue(locked.get("passwordSaved").getAsBoolean());
+      api("POST", "/api/vault/unlock", "{\"password\":\"wrong password\"}", 400);
+      assertEquals("{\"exists\":true,\"unlocked\":true,\"minLength\":8}", api("POST", "/api/vault/unlock", "{\"password\":\"correct horse\"}", 200).toString());
+      assertTrue(connection(id).get("hasPassword").getAsBoolean());
+
+      // 保存しないにすると消す。接続先を消しても消す
+      api("POST", "/api/connections/save", "{\"id\":\"" + id + "\",\"name\":\"vault\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"remember\":false}", 200);
+      assertFalse(connection(id).get("passwordSaved").getAsBoolean());
+      assertTrue(connection(id).get("hasPassword").getAsBoolean());
+      // パスワード欄を空のまま保存するにしたら、入力済みのものを保存する
+      assertTrue(api("POST", "/api/connections/save", "{\"id\":\"" + id + "\",\"name\":\"vault\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"remember\":true}", 200)
+          .get("passwordSaved").getAsBoolean());
+      api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 200);
+      api("POST", "/api/vault/reset", "{}", 200);
+      assertEquals("{\"exists\":false,\"unlocked\":false,\"minLength\":8}", api("GET", "/api/vault", null, 200).toString());
+    } finally {
+      server.useVault(PasswordVault.inMemory());
+    }
+  }
+
+  private JsonObject connection(String id) throws Exception {
+    for (com.google.gson.JsonElement e : api("GET", "/api/connections", null, 200).getAsJsonArray("connections")) {
+      if (e.getAsJsonObject().get("id").getAsString().equals(id)) {
+        return e.getAsJsonObject();
+      }
+    }
+    throw new AssertionError(id);
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);

@@ -108,6 +108,20 @@ public final class ConnectionStore {
     return passwords.containsKey(id);
   }
 
+  /** メモリにあるパスワード（なければ null） */
+  String password(String id) {
+    return passwords.get(id);
+  }
+
+  /** パスワードをメモリに入れる（null なら消す）。ファイルには保存しない */
+  public void setPassword(String id, String password) {
+    if (password == null) {
+      passwords.remove(id);
+    } else {
+      passwords.put(id, password);
+    }
+  }
+
   /**
    * 接続先を追加または更新する。id がなければ新しく振る。
    *

@@ -72,6 +72,8 @@ public final class ToolServer {
   private final GlobalStore globals;
   /** 下書きの保存先。起動した後に useDrafts で決める */
   private volatile DraftStore draftStore = DraftStore.inMemory();
+  /** 接続先のパスワードの暗号化した保存先。起動した後に useVault で決める */
+  private volatile PasswordVault vault = PasswordVault.inMemory();
   /** プレイグラウンドの保存先。起動した後に usePlaygrounds で決める */
   private volatile PlaygroundStore playgrounds = PlaygroundStore.at(null);
   private volatile EditorLauncher editor = EditorLauncher.disabled();
@@ -125,6 +127,11 @@ public final class ToolServer {
   /** 下書きの保存先を決める */
   public void useDrafts(DraftStore store) {
     this.draftStore = store;
+  }
+
+  /** 接続先のパスワードの暗号化した保存先を決める */
+  public void useVault(PasswordVault v) {
+    this.vault = v;
   }
 
   /** プレイグラウンドの保存先を決める */
@@ -242,6 +249,20 @@ public final class ToolServer {
       case "/api/file/save":
         if (requireMethod(ex, method, "POST")) {
           saveFile(ex);
+        }
+        break;
+      case "/api/vault":
+        if (requireMethod(ex, method, "GET")) {
+          sendJson(ex, 200, vaultStatus());
+        }
+        break;
+      case "/api/vault/setup":
+      case "/api/vault/unlock":
+      case "/api/vault/lock":
+      case "/api/vault/change":
+      case "/api/vault/reset":
+        if (requireMethod(ex, method, "POST")) {
+          updateVault(ex, path.substring("/api/vault/".length()));
         }
         break;
       case "/api/playground/create":
@@ -616,9 +637,73 @@ public final class ToolServer {
     sendJson(ex, 200, body);
   }
 
+  // ---- パスワードの保存（マスターパスワードで暗号化） ----
+
+  /** {"exists": マスターパスワードを設定済みか, "unlocked": 開いているか, "minLength"} */
+  private Map<String, Object> vaultStatus() {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("exists", vault.exists());
+    m.put("unlocked", vault.isUnlocked());
+    m.put("minLength", PasswordVault.MIN_LENGTH);
+    return m;
+  }
+
   /**
-   * リクエスト: {"id"?, "name", "host", "port", "database", "user", "params", "password"?}。
+   * <ul>
+   * <li>setup: {"password"}（マスターパスワードを設定して開く）</li>
+   * <li>unlock: {"password"}（開いて、保存しているパスワードを接続先に入れる）</li>
+   * <li>lock: {}（閉じて、保存しているパスワードを接続先から外す）</li>
+   * <li>change: {"current", "password"}</li>
+   * <li>reset: {}（マスターパスワードを忘れたとき。保存しているパスワードごと消す）</li>
+   * </ul>
+   * 応答は vaultStatus と同じ形。
+   */
+  private void updateVault(HttpExchange ex, String action) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String password = string(req, "password");
+    try {
+      switch (action) {
+        case "setup":
+          vault.setup(chars(password));
+          break;
+        case "unlock":
+          for (Map.Entry<String, String> e : vault.unlock(chars(password)).entrySet()) {
+            if (connections.get(e.getKey()) != null) {
+              connections.setPassword(e.getKey(), e.getValue());
+            }
+          }
+          break;
+        case "lock":
+          vault.lock();
+          for (String id : vault.savedIds()) {
+            connections.setPassword(id, null);
+          }
+          break;
+        case "change":
+          vault.change(chars(string(req, "current")), chars(password));
+          break;
+        default:
+          vault.reset();
+          break;
+      }
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    sendJson(ex, 200, vaultStatus());
+  }
+
+  private static char[] chars(String s) {
+    return s == null ? new char[0] : s.toCharArray();
+  }
+
+  /**
+   * リクエスト: {"id"?, "name", "host", "port", "database", "user", "params", "password"?, "remember"?}。
    * id がなければ追加する。password がなければ今のパスワードのまま、空文字ならパスワードを消す。
+   * remember が true ならパスワードを暗号化して保存し（マスターパスワードで開いている必要がある）、false なら保存しているものを消す。
    */
   private void saveConnection(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
@@ -637,7 +722,21 @@ public final class ToolServer {
       if (req.has("port")) {
         p.port = req.get("port").getAsInt();
       }
-      sendJson(ex, 200, toJson(connections.save(p, password)));
+      Boolean remember = req.has("remember") && !req.get("remember").isJsonNull() ? req.get("remember").getAsBoolean() : null;
+      if (Boolean.TRUE.equals(remember) && !vault.isUnlocked()) {
+        sendJson(ex, 400, error("パスワードを保存するには、マスターパスワードを入れてください"));
+        return;
+      }
+      ConnectionStore.Profile saved = connections.save(p, password);
+      if (password != null && password.isEmpty() || Boolean.FALSE.equals(remember)) {
+        vault.remove(saved.id);
+      } else if (Boolean.TRUE.equals(remember) && password != null) {
+        vault.put(saved.id, password);
+      } else if (Boolean.TRUE.equals(remember) && !vault.has(saved.id) && connections.hasPassword(saved.id)) {
+        // 入力済みのパスワードを保存する（パスワード欄を空のまま「保存する」にしたとき）
+        vault.put(saved.id, connections.password(saved.id));
+      }
+      sendJson(ex, 200, toJson(saved));
     } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException e) {
       sendJson(ex, 400, error("ポートは整数で入力してください"));
     } catch (IllegalArgumentException e) {
@@ -654,6 +753,7 @@ public final class ToolServer {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
+    vault.remove(string(req, "id"));
     sendJson(ex, 200, new LinkedHashMap<String, Object>());
   }
 
@@ -688,6 +788,7 @@ public final class ToolServer {
     m.put("user", p.user);
     m.put("params", p.params);
     m.put("hasPassword", connections.hasPassword(p.id));
+    m.put("passwordSaved", vault.has(p.id));
     return m;
   }
 
