@@ -1938,3 +1938,9 @@ button.bulk-open {
 .ok-text {
   color: var(--ok);
 }
+
+.added-mark {
+  color: var(--warn);
+  font-size: 11px;
+  margin-left: 0.3rem;
+}

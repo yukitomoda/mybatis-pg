@@ -180,7 +180,8 @@ function Workspace({ api }: { api: Api }) {
         setLoadErrors(r.loadErrors);
       })
       .catch(handleError);
-  }, [api, generation]);
+    // 下書きを保存するたびにも取り直す（下書きで足した・消した statement を反映する）
+  }, [api, generation, drafts.version]);
 
   const target = statements.find((s) => s.id === selected) ?? null;
   // 編集中の mapper XML があれば、組み立て・実行・EXPLAIN にその内容を使う
@@ -534,7 +535,8 @@ function Workspace({ api }: { api: Api }) {
           globalSets={globals.sets}
           globalStatements={globals.statements}
           active={screen === 'bulk'}
-          generation={generation}
+          sourceVersion={`${generation}:${drafts.version}`}
+          draftOf={(file) => draftParam(drafts.get(file))}
           onOpen={(id) => {
             select(id);
             setTab('explain');
@@ -652,6 +654,11 @@ function StatementTree({
                   <li key={s.id}>
                     <button type="button" className={s.id === selected ? 'node stmt selected' : 'node stmt'} onClick={() => onSelect(s.id)} title={s.id}>
                       {shortId(s.id)}
+                      {s.added && (
+                        <span className="added-mark" title="下書きで足した statement（ファイルには保存していません）" aria-label="下書きで足した">
+                          ＋
+                        </span>
+                      )}
                     </button>
                   </li>
                 ))}

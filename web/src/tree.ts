@@ -6,6 +6,8 @@ export interface StatementEntry {
   file: string;
   /** SELECT・INSERT・UPDATE・DELETE など */
   type?: string;
+  /** 下書きで足した（保存されているファイルにない） */
+  added?: boolean;
 }
 
 export type TreeNode =

@@ -49,11 +49,14 @@ export interface Drafts {
   list: Draft[];
   /** 保存できなかったときの理由 */
   error: string | null;
+  /** 下書きをサーバに保存・削除するたびに増える（statement 一覧などを取り直す合図） */
+  version: number;
 }
 
 export function useDrafts(api: Api, generation: number, onApiError: (e: unknown) => void): Drafts {
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
   /** ファイルごとに、保存を順番に送る（後の内容が先の内容で上書きされないように） */
   const queues = useRef(new Map<string, Promise<unknown>>());
   const migrated = useRef(false);
@@ -89,7 +92,10 @@ export function useDrafts(api: Api, generation: number, onApiError: (e: unknown)
 
   const enqueue = (file: string, f: () => Promise<unknown>) => {
     const next = (queues.current.get(file) ?? Promise.resolve()).then(f).then(
-      () => setError(null),
+      () => {
+        setError(null);
+        setVersion((v) => v + 1);
+      },
       (e) => fail(e),
     );
     queues.current.set(file, next);
@@ -125,6 +131,7 @@ export function useDrafts(api: Api, generation: number, onApiError: (e: unknown)
     files: new Set(drafts.keys()),
     list: [...drafts.values()].sort((a, b) => b.updatedAt - a.updatedAt),
     error,
+    version,
   };
 }
 

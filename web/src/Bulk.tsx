@@ -1,6 +1,6 @@
 // 全 statement の一括チェック: 保存してある値でまとめて EXPLAIN し、重そうなものを一覧にする
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Api } from './api';
+import type { Api, DraftParam } from './api';
 import { BulkPicker, loadSelection, saveSelection } from './BulkPicker';
 import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
@@ -37,7 +37,8 @@ export function BulkCheck({
   globalSets,
   globalStatements,
   active,
-  generation,
+  sourceVersion,
+  draftOf,
   onOpen,
   onOpenParams,
 }: {
@@ -50,8 +51,10 @@ export function BulkCheck({
   globalStatements: StatementsSettings;
   /** この画面を表示している（表示するたびに、保存してある値を読み直す） */
   active: boolean;
-  /** mapper XML の読み込みの世代（変わったらパラメータの木を取り直す） */
-  generation: number;
+  /** mapper XML の読み込みと下書きの版（変わったらパラメータの木を取り直す） */
+  sourceVersion: string;
+  /** そのファイルの下書き（なければ null）。下書きのあるファイルは下書きの内容で調べて実行する */
+  draftOf: (file: string) => DraftParam;
   /** statement を開いて EXPLAIN タブを出す */
   onOpen: (id: string) => void;
   /** statement を開いて値を設定する */
@@ -65,22 +68,22 @@ export function BulkCheck({
   const [sort, setSort] = useState<SortKey>('cost');
   const cancelled = useRef(false);
 
-  const [schemas, setSchemas] = useState<{ generation: number; trees: Record<string, ParamSchema>; errors: Record<string, string> } | null>(null);
+  const [schemas, setSchemas] = useState<{ version: string; trees: Record<string, ParamSchema>; errors: Record<string, string> } | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   // 個別の値はクエリ画面で変わるので、表示するたびに読み直す
   const [shown, setShown] = useState(0);
   useEffect(() => {
     if (!active) return;
     setShown((n) => n + 1);
-    if (schemas && schemas.generation === generation) return;
+    if (schemas && schemas.version === sourceVersion) return;
     api.allParameters().then(
       (r) => {
-        setSchemas({ generation, ...r });
+        setSchemas({ version: sourceVersion, ...r });
         setSchemaError(null);
       },
       (e) => setSchemaError(message(e)),
     );
-  }, [active, generation]);
+  }, [active, sourceVersion]);
 
   /** statement ごとの足りないもの。パラメータの木を取るまでは null */
   const status = useMemo(() => {
@@ -142,14 +145,20 @@ export function BulkCheck({
       try {
         const ready = status?.get(s.id);
         if (!ready) throw new Error('パラメータを調べられませんでした');
-        const r = await api.explain(s.id, ready.value, current.id, {
-          analyze: analyze && !planOnly,
-          buffers: analyze && !planOnly,
-          readOnly: true,
-          timeoutSeconds: 30,
-          sixthExecution: false,
-          repeat: 1,
-        });
+        const r = await api.explain(
+          s.id,
+          ready.value,
+          current.id,
+          {
+            analyze: analyze && !planOnly,
+            buffers: analyze && !planOnly,
+            readOnly: true,
+            timeoutSeconds: 30,
+            sixthExecution: false,
+            repeat: 1,
+          },
+          draftOf(s.file),
+        );
         const plan = parsePlan(r.plan);
         row.cost = plan.root.totalCost;
         row.rows = plan.root.planRows;
