@@ -239,6 +239,11 @@ export function createApi(token: string) {
         : call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
     /** mapper XML の中身 */
     file: (path: string) => call<{ file: string; content: string }>(`api/file?path=${encodeURIComponent(path)}`),
+    /** 保存してある下書き（更新の新しい順） */
+    drafts: () =>
+      call<{ drafts: { file: string; base: string; content: string; updatedAt: number; loaded: boolean; changed: boolean }[] }>('api/drafts'),
+    saveDraft: (file: string, base: string, content: string) => call<object>('api/drafts/save', post(JSON.stringify({ file, base, content }))),
+    discardDrafts: (files: string[]) => call<object>('api/drafts/discard', post(JSON.stringify({ files }))),
     /** 下書きを読み込んでみる */
     checkDraft: (file: string, content: string, signal?: AbortSignal) =>
       call<{ statements: string[]; errors: { source: string; line: number | null; column: number | null; message: string }[] }>('api/draft/check', {

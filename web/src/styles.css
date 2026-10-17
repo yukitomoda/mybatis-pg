@@ -1902,3 +1902,35 @@ button.bulk-open {
 .editor-status .link.error-text {
   color: var(--error);
 }
+
+.draft-list {
+  margin-bottom: 0.5rem;
+  background: var(--warn-bg);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 13px;
+}
+
+.draft-list summary {
+  color: var(--warn);
+  cursor: pointer;
+}
+
+.draft-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0;
+}
+
+.draft-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+.draft-list .draft-file {
+  font-family: var(--mono);
+  text-align: left;
+}

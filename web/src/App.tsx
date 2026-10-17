@@ -7,6 +7,7 @@ import { ExplainPanel } from './Explain';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
+import type { Drafts } from './drafts';
 import { draftParam, useDrafts } from './drafts';
 import { FileEditor } from './FileEditor';
 import { GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
@@ -124,7 +125,6 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
-  const drafts = useDrafts();
   /** テンプレートのタブを開いたことがあるか（エディタは開くまで読み込まない） */
   const [templateSeen, setTemplateSeen] = useState(false);
   if (tab === 'template' && !templateSeen) setTemplateSeen(true);
@@ -141,6 +141,7 @@ function Workspace({ api }: { api: Api }) {
       setFatal('トークンが一致しません。サーバを起動し直した場合は、新しく表示された URL から開き直してください。');
     }
   };
+  const drafts = useDrafts(api, generation, handleError);
 
   const opener = useOpener(api, handleError);
   const conn = useConnections(api, handleError, () => go('connections'));
@@ -324,6 +325,17 @@ function Workspace({ api }: { api: Api }) {
       <div className="screen" hidden={screen !== 'query'}>
     <div className="layout" ref={panes.layout} style={panes.style}>
       <aside className="sidebar">
+        <DraftList
+          drafts={drafts}
+          onOpen={(file) => {
+            // 今の statement がそのファイルのものなら、そのまま
+            const s = statements.find((x) => x.file === file);
+            if (s && target?.file !== file) select(s.id);
+            setTab('template');
+            saveTab('template');
+          }}
+          hasStatements={(file) => statements.some((x) => x.file === file)}
+        />
         <StatementTree statements={statements} selected={selected} onSelect={select} opener={opener} drafted={drafts.files} />
         <LoadErrors errors={loadErrors} opener={opener} />
       </aside>
@@ -653,6 +665,49 @@ function StatementTree({
       <input type="search" placeholder="statement・ファイルを絞り込み" aria-label="statement を絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
       {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : <nav className="tree-list">{render(tree)}</nav>}
     </div>
+  );
+}
+
+/** 編集中（下書きがある）ファイルの一覧。いらなくなった下書きを片付ける */
+function DraftList({ drafts, onOpen, hasStatements }: { drafts: Drafts; onOpen: (file: string) => void; hasStatements: (file: string) => boolean }) {
+  if (drafts.list.length === 0) return null;
+  const when = (t: number) => new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return (
+    <details className="draft-list">
+      <summary>編集中のファイル {drafts.list.length} 件</summary>
+      <ul>
+        {drafts.list.map((d) => (
+          <li key={d.file}>
+            <button type="button" className="link draft-file" title={d.file} disabled={!hasStatements(d.file)} onClick={() => onOpen(d.file)}>
+              {d.file.slice(d.file.lastIndexOf('/') + 1)}
+            </button>
+            <span className="hint">{when(d.updatedAt)}</span>
+            {!d.loaded && <span className="badge warn">ファイルがありません</span>}
+            {d.loaded && d.changed && <span className="badge warn" title="編集を始めた後に、ファイルが変更されました">ファイルが変更済み</span>}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                if (window.confirm(`${d.file} の編集を取り消しますか？`)) drafts.discard([d.file]);
+              }}
+            >
+              取り消す
+            </button>
+          </li>
+        ))}
+      </ul>
+      {drafts.list.length > 1 && (
+        <button
+          type="button"
+          className="link"
+          onClick={() => {
+            if (window.confirm(`${drafts.list.length} 件のファイルの編集をすべて取り消しますか？`)) drafts.discard(drafts.list.map((d) => d.file));
+          }}
+        >
+          すべて取り消す
+        </button>
+      )}
+    </details>
   );
 }
 

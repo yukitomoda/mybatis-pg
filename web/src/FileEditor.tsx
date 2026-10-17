@@ -147,7 +147,7 @@ export function FileEditor({
               window.clearTimeout(timer.current);
               pending.current = null;
               setText(null);
-              drafts.discard(file);
+              drafts.discard([file]);
             }}
           >
             編集を取り消す
@@ -165,7 +165,9 @@ export function FileEditor({
       </Suspense>
       {/* エラーは高さの変わらない 1 行に出す（出たり消えたりしてもエディタが動かないように） */}
       <div className="editor-status" role="status">
-        {errors.length > 0 ? (
+        {drafts.error ? (
+          <span className="error-text">{drafts.error}</span>
+        ) : errors.length > 0 ? (
           <button
             type="button"
             className="link error-text"
