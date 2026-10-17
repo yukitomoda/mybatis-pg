@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, RenderResponse, ResultTable, VaultStatus } from './api';
 import { countParts, PartsPanel } from './Subquery';
+import type { GenContext } from './GenInput';
 import type { PValue } from './params';
 
 const CONNECTION_KEY = 'mybatis-pg.connection';
@@ -242,6 +243,7 @@ export function ExecutePanel({
   draft,
   ready,
   rendered,
+  gen,
   onApiError,
 }: {
   conn: Connections;
@@ -253,6 +255,8 @@ export function ExecutePanel({
   ready: boolean;
   /** 組み立てた SQL（部分ごとに実行するのに使う） */
   rendered: RenderResponse | null;
+  /** 式の計算（部分ごとに実行するときの外側の値に使う） */
+  gen: GenContext;
   onApiError: (e: unknown) => void;
 }) {
   const [commit, setCommit] = useState(false);
@@ -299,7 +303,7 @@ export function ExecutePanel({
       {rendered && ready && partCount > 0 && (
         <details className="parts">
           <summary>部分ごとに実行（サブクエリ・CTE {partCount} 個）</summary>
-          <PartsPanel conn={conn} statementId={statementId} value={value} draft={draft} rendered={rendered} onApiError={onApiError} />
+          <PartsPanel conn={conn} statementId={statementId} value={value} draft={draft} rendered={rendered} gen={gen} onApiError={onApiError} />
         </details>
       )}
     </div>

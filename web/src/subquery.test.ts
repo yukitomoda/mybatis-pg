@@ -101,3 +101,18 @@ SELECT * FROM products p WHERE p.category_id IN (SELECT id FROM tree)`);
     expect(cte.outerRefs).toEqual([]);
   });
 });
+
+describe('sqlLiteral', () => {
+  it('型に合わせて SQL の書き方にする', async () => {
+    const { sqlLiteral } = await import('./Subquery');
+    expect(sqlLiteral({ t: 'number', v: '42' })).toBe('42');
+    expect(sqlLiteral({ t: 'string', v: "O'Reilly" })).toBe("'O''Reilly'");
+    expect(sqlLiteral({ t: 'timestamp', v: '2026-10-17 09:00:00' })).toBe("TIMESTAMP '2026-10-17 09:00:00'");
+    expect(sqlLiteral({ t: 'date', v: '2026-10-17' })).toBe("DATE '2026-10-17'");
+    expect(sqlLiteral({ t: 'pg', type: 'uuid', v: 'a-b' })).toBe("CAST('a-b' AS uuid)");
+    expect(sqlLiteral({ t: 'boolean', v: true })).toBe('TRUE');
+    expect(sqlLiteral({ t: 'null' })).toBe('NULL');
+    expect(() => sqlLiteral({ t: 'number', v: 'abc' })).toThrow();
+    expect(() => sqlLiteral({ t: 'list', items: [] })).toThrow();
+  });
+});

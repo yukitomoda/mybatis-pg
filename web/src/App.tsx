@@ -564,6 +564,7 @@ function Workspace({ api }: { api: Api }) {
               draft={draftP}
               ready={numberIssues.length === 0 && !renderError}
               rendered={result && !renderError ? result : null}
+              gen={gen}
               onApiError={handleError}
             />
           ) : (

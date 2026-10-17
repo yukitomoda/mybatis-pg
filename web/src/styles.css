@@ -2004,10 +2004,17 @@ button.bulk-open {
 /* ---- サブクエリのタブ（試作） ---- */
 
 .subquery-body {
+  /* 実行タブの幅は狭いので、木を上、選んだ部分を下に並べる */
   display: grid;
-  grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.6rem;
+}
+
+.part-tree {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 0.2rem;
 }
 
 .part-tree,
@@ -2073,8 +2080,26 @@ button.bulk-open {
   margin: 0.2rem 0;
 }
 
-@media (max-width: 960px) {
-  .subquery-body {
-    grid-template-columns: 1fr;
-  }
+
+.outer-values h4 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 13px;
+}
+
+/* 外側の値は、外側の参照の項目だけにする（項目を足さない） */
+.outer-values .row.add {
+  display: none;
+}
+
+/* 外側の値は MyBatis のパラメータではないので、使われ方（#{} など）の列は出さない。狭い欄に収める */
+.outer-values .row {
+  grid-template-columns: minmax(5rem, 1fr) 0 6.5rem minmax(6rem, 1.6fr) 1.8rem;
+}
+
+.outer-values .row > * {
+  min-width: 0;
+}
+
+.outer-values .row .usages {
+  visibility: hidden;
 }

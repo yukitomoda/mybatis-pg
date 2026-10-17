@@ -3,7 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DraftParam, RenderResponse, ResultTable } from './api';
 import type { Connections } from './Execution';
 import { message, ResultGrid } from './Execution';
-import type { PValue } from './params';
+import { resolveTemplates } from './gen';
+import type { GenContext } from './GenInput';
+import { ParamTree } from './ParamTree';
+import type { ParamSchema, PValue } from './params';
+import { getAt, invalidNumbers, isValidNumber } from './params';
 import type { Part } from './subquery';
 import { analyze, partLabel, partSql } from './subquery';
 
@@ -18,6 +22,51 @@ const KIND_HINT: Record<Part['kind'], string> = {
   select: 'SELECT の列',
   scalar: '式の中',
 };
+
+/** 外側の値を SQL の書き方にする（型に合わせる）。使えない値は理由を投げる */
+export function sqlLiteral(v: PValue): string {
+  const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  switch (v.t) {
+    case 'string':
+      return quote(v.v);
+    case 'number':
+      if (!isValidNumber(v.v)) throw new Error(`数値として解釈できません: "${v.v}"`);
+      return v.v;
+    case 'timestamp':
+      return `TIMESTAMP ${quote(v.v)}`;
+    case 'date':
+      return `DATE ${quote(v.v)}`;
+    case 'pg':
+      return `CAST(${quote(v.v)} AS ${v.type})`;
+    case 'boolean':
+      return v.v ? 'TRUE' : 'FALSE';
+    case 'null':
+      return 'NULL';
+    default:
+      throw new Error('リストやオブジェクトは使えません');
+  }
+}
+
+/** 外側の値（statement ごとにブラウザに覚えておく） */
+const OUTER_PREFIX = 'mybatis-pg.outer:';
+
+function loadOuter(statementId: string): PValue | undefined {
+  try {
+    const v = JSON.parse(localStorage.getItem(OUTER_PREFIX + statementId) ?? 'null');
+    return v && v.t === 'object' ? (v as PValue) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveOuter(statementId: string, v: PValue | undefined) {
+  try {
+    if (v) localStorage.setItem(OUTER_PREFIX + statementId, JSON.stringify(v));
+    else localStorage.removeItem(OUTER_PREFIX + statementId);
+  } catch {
+    // 覚えられない環境では、開いている間だけ使う
+  }
+}
 
 const flatten = (root: Part): Part[] => {
   const out: Part[] = [];
@@ -35,6 +84,7 @@ export function PartsPanel({
   value,
   draft,
   rendered,
+  gen,
   onApiError,
 }: {
   conn: Connections;
@@ -42,6 +92,7 @@ export function PartsPanel({
   value: PValue | undefined;
   draft: DraftParam;
   rendered: RenderResponse;
+  gen: GenContext;
   onApiError: (e: unknown) => void;
 }) {
   // 実行はバインド変数を番号にした SQL で、位置の表示は値を埋め込んだ SQL で行う（どちらも同じ形に分かれる）
@@ -53,7 +104,32 @@ export function PartsPanel({
     return lit.length === parts.length && lit.every((p, i) => p.key === parts[i].key) ? new Map(lit.map((p) => [p.key, p])) : null;
   }, [literal, parts]);
   const [selectedKey, setSelectedKey] = useState<string>(numbered.root.key);
-  const [values, setValues] = useState<Record<string, string>>({});
+  /** 外側の値（パラメータと同じ形。項目名は o.id など） */
+  const [outer, setOuterState] = useState<PValue | undefined>(() => loadOuter(statementId));
+  const setOuter = (v: PValue | undefined) => {
+    setOuterState(v);
+    saveOuter(statementId, v);
+  };
+  // 式を計算して、外側の参照ごとに SQL の書き方にする（できないものは理由）
+  const literals = useMemo(() => {
+    const resolved = resolveTemplates(outer, gen.cache);
+    const out: Record<string, string> = {};
+    const errors: Record<string, string> = {};
+    for (const i of [...resolved.issues, ...invalidNumbers(resolved.value)]) errors[i.path] = i.message;
+    for (const p of parts) {
+      for (const ref of p.outerRefs) {
+        const v = getAt(resolved.value, [ref]);
+        if (!v || errors[ref]) continue;
+        try {
+          out[ref] = sqlLiteral(v);
+        } catch (e) {
+          errors[ref] = message(e);
+        }
+      }
+    }
+    return { values: out, errors };
+  }, [outer, parts, gen.cache, gen.version]);
+  const values = literals.values;
   const [results, setResults] = useState<Record<string, RunResult>>({});
   const [running, setRunning] = useState<string | null>(null);
 
@@ -144,13 +220,15 @@ export function PartsPanel({
             <>
               {selected.outerRefs.length > 0 && (
                 <div className="outer-values">
-                  <p className="hint">外側のクエリの値を使います。値を SQL の書き方で入れてください（例: 42、'paid'）。</p>
-                  {selected.outerRefs.map((r) => (
-                    <label key={r}>
-                      <code>{r}</code>
-                      <input type="text" value={values[r] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [r]: e.target.value }))} />
-                    </label>
-                  ))}
+                  <h4>外側の値</h4>
+                  <ParamTree schema={outerSchema(selected)} value={outer} onChange={setOuter} gen={gen} />
+                  {selected.outerRefs
+                    .filter((r) => literals.errors[r])
+                    .map((r) => (
+                      <p key={r} className="error-text">
+                        {r}: {literals.errors[r]}
+                      </p>
+                    ))}
                 </div>
               )}
               <div className="execute-bar">
@@ -179,6 +257,17 @@ export function PartsPanel({
       </div>
     </div>
   );
+}
+
+/** 外側の参照を、パラメータと同じ形の項目にする（型の選び方や式の書き方をパラメータとそろえる） */
+function outerSchema(part: Part): ParamSchema {
+  return {
+    name: null,
+    usages: [],
+    typeHints: [],
+    properties: part.outerRefs.map((r) => ({ name: r, usages: ['BIND'], typeHints: [], properties: [], element: null })),
+    element: null,
+  };
 }
 
 /** サブクエリ・CTE の数（メインのクエリを除く） */
