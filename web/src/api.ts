@@ -2,7 +2,7 @@
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
-import type { GlobalSet, RuleState } from './scope';
+import type { GlobalSet, Order } from './scope';
 import type { StatementEntry } from './tree';
 
 export interface LoadError {
@@ -127,8 +127,9 @@ export class ApiError extends Error {
 }
 
 export interface GlobalsResponse {
-  /** 並び順は優先順位に使う（同じ範囲の狭さなら下にあるほうが優先） */
   sets: GlobalSet[];
+  /** 場所ごとの適用順序 */
+  order: Order;
 }
 
 /** 共通パラメータの候補（全 statement で使われている項目） */
@@ -145,24 +146,23 @@ export interface ParameterName {
 function parseGlobals(text: string): GlobalsResponse {
   const root = fromJson(text);
   const str = (v: PValue | undefined) => (v && v.t === 'string' ? v.v : null);
+  const strs = (v: PValue | undefined) => (v && v.t === 'list' ? v.items.map((i) => str(i) ?? '').filter(Boolean) : []);
   const sets = getAt(root, ['sets']);
   return {
     sets:
       sets && sets.t === 'list'
-        ? sets.items.map((s) => {
-            const rules: Record<string, RuleState> = {};
-            const r = getAt(s, ['rules']);
-            if (r && r.t === 'object') {
-              for (const [place, v] of r.fields) if (v.t === 'string' && (v.v === 'on' || v.v === 'off')) rules[place] = v.v;
-            }
-            return {
-              id: str(getAt(s, ['id'])) ?? '',
-              name: str(getAt(s, ['name'])) ?? '',
-              values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
-              rules,
-            };
-          })
+        ? sets.items.map((s) => ({
+            id: str(getAt(s, ['id'])) ?? '',
+            name: str(getAt(s, ['name'])) ?? '',
+            values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
+            scope: strs(getAt(s, ['scope'])),
+            excludes: strs(getAt(s, ['excludes'])),
+          }))
         : [],
+    order: Object.fromEntries((() => {
+      const o = getAt(root, ['order']);
+      return o && o.t === 'object' ? o.fields.map(([place, ids]) => [place, strs(ids)]) : [];
+    })()),
   };
 }
 
@@ -227,9 +227,12 @@ export function createApi(token: string) {
       globalsCall('create', JSON.stringify({ name, copyFrom })),
     renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
     deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
-    /** 場所での適用する（on）・しない（off）を決める。null なら決めない（外側に従う） */
-    ruleGlobal: (id: string, place: string, state: RuleState | null) => globalsCall('rule', JSON.stringify({ id, place, state })),
-    moveGlobal: (id: string, offset: number) => globalsCall('move', JSON.stringify({ id, offset })),
+    /** スコープ（対象とする場所）を決める */
+    scopeGlobal: (id: string, places: string[]) => globalsCall('scope', JSON.stringify({ id, places })),
+    /** statement で適用しないか */
+    excludeGlobal: (id: string, statement: string, excluded: boolean) => globalsCall('exclude', JSON.stringify({ id, statement, excluded })),
+    /** 場所の適用順序（下ほど優先） */
+    orderGlobal: (place: string, ids: string[]) => globalsCall('order', JSON.stringify({ place, ids })),
     saveGlobalValues: (id: string, values: PValue) =>
       globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
     parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),

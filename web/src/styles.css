@@ -1736,15 +1736,6 @@ button.bulk-open {
   padding: 0;
 }
 
-.globals-list li {
-  display: flex;
-  align-items: center;
-  border-radius: 4px;
-}
-
-.globals-list li.selected {
-  background: var(--accent-bg);
-}
 
 .globals-list .global-item {
   flex: 1;
@@ -1763,8 +1754,8 @@ button.bulk-open {
   white-space: nowrap;
 }
 
-.globals-list li:hover .global-move,
-.globals-list li.selected .global-move {
+.globals-list .scope-sets li:hover .global-move,
+.globals-list .scope-sets li.selected .global-move {
   visibility: visible;
 }
 
@@ -1839,59 +1830,6 @@ button.bulk-open {
   font-weight: 700;
 }
 
-.place-result {
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.place-result.on {
-  color: var(--ok);
-}
-
-.rule-switch {
-  margin-left: auto;
-  display: inline-flex;
-  flex: none;
-}
-
-.rule-switch button {
-  font-size: 12px;
-  padding: 0.05rem 0.5rem;
-  border-radius: 0;
-  color: var(--muted);
-}
-
-.rule-switch button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-
-.rule-switch button:last-child {
-  border-radius: 0 4px 4px 0;
-  margin-left: -1px;
-}
-
-.rule-switch button.selected.on {
-  background: var(--ok);
-  border-color: var(--ok);
-  color: #fff;
-}
-
-.rule-switch button.selected.off {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-
-/* 設定のない場所のボタンは、行にマウスを乗せたときだけはっきり見せる */
-.place-row:not(.has-rule) .rule-switch {
-  opacity: 0.35;
-}
-
-.place-row:hover .rule-switch {
-  opacity: 1;
-}
-
 .place-missing {
   margin-top: 0.6rem;
 }
@@ -1942,16 +1880,6 @@ button.bulk-open {
   color: var(--muted);
 }
 
-.applied-globals .decided {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.applied-globals .decided.here {
-  color: var(--accent);
-}
-
 .applied-globals .values {
   font-family: var(--mono);
   font-size: 12px;
@@ -1960,4 +1888,75 @@ button.bulk-open {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- 共通パラメータの画面: スコープごとの一覧 ---- */
+
+.scope-groups ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 狭いスコープは内側に字下げし、外側のスコープと縦線でつなぐ */
+.scope-groups ul ul {
+  margin-left: 0.5rem;
+  padding-left: 0.7rem;
+  border-left: 1px solid var(--border);
+}
+
+.scope-groups .scope-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 0.3rem 0 0.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scope-groups .scope-node.all > .scope-label,
+.scope-groups .scope-node.none > .scope-label {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.scope-groups .scope-node.missing > .scope-label {
+  color: var(--warn);
+}
+
+.scope-groups .scope-sets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scope-groups .scope-sets li {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.scope-groups .scope-sets li.selected {
+  background: var(--accent-bg);
+}
+
+.applied-globals .scope-of {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.excludes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.excludes li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
 }

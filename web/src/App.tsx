@@ -202,7 +202,7 @@ function Workspace({ api }: { api: Api }) {
   const globals = useGlobals(api, handleError);
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
   const target = statements.find((s) => s.id === selected) ?? null;
-  const applied = useMemo(() => applicable(globals.sets, target), [globals.sets, target]);
+  const applied = useMemo(() => applicable(globals.sets, globals.order, target), [globals.sets, globals.order, target]);
   const base = useMemo(() => combine(applied), [applied]);
   // レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値）
   const effective = useMemo(() => effectiveValue(schema, base, value), [schema, base, value]);
@@ -471,6 +471,7 @@ function Workspace({ api }: { api: Api }) {
           conn={conn}
           statements={statements}
           globalSets={globals.sets}
+          globalOrder={globals.order}
           onOpen={(id) => {
             select(id);
             setTab('explain');
