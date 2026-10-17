@@ -139,6 +139,87 @@ function summary(values: PValue): string {
   return values.fields.map(([k, v]) => `${k} = ${short(v)}`).join(', ');
 }
 
+// ---- クエリ画面: 個別の値を共通パラメータにコピー ----
+
+/**
+ * 個別の値の項目を選んで、この statement に適用されている共通パラメータの 1 つにコピーする（個別の値は残す）。
+ */
+export function CopyToGlobal({ globals, applied, local, onClose }: { globals: Globals; applied: GlobalSet[]; local: PValue; onClose: () => void }) {
+  const fields = local.t === 'object' ? local.fields : [];
+  // 既定のコピー先は、一番優先される（一覧の一番下の）もの
+  const [targetId, setTargetId] = useState<string>(applied[applied.length - 1]?.id ?? '');
+  const [checked, setChecked] = useState<Set<string>>(() => new Set(fields.map(([k]) => k)));
+  const target = applied.find((s) => s.id === targetId) ?? null;
+  const copy = () => {
+    if (!target) return;
+    let values: PValue | undefined = target.values;
+    for (const [k, v] of fields) if (checked.has(k)) values = setAt(values, [k], v);
+    globals.setValues(target.id, values);
+    onClose();
+  };
+  return (
+    <section className="copy-to-global">
+      <header>
+        <h3>共通パラメータにコピー</h3>
+        <label>
+          コピー先
+          <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            {applied.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </header>
+      <table>
+        <tbody>
+          {fields.map(([k, v]) => {
+            const before = target ? getAt(target.values, [k]) : undefined;
+            return (
+              <tr key={k}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`${k} をコピーする`}
+                    checked={checked.has(k)}
+                    onChange={(e) =>
+                      setChecked((c) => {
+                        const next = new Set(c);
+                        if (e.target.checked) next.add(k);
+                        else next.delete(k);
+                        return next;
+                      })
+                    }
+                  />
+                </td>
+                <td className="global-name">{k}</td>
+                <td className="values" title={before === undefined ? short(v) : `${short(before)} → ${short(v)}`}>
+                  {before === undefined ? (
+                    <>
+                      {short(v)} <span className="badge muted">新しく足す</span>
+                    </>
+                  ) : (
+                    `${short(before)} → ${short(v)}`
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="actions">
+        <button type="button" className="run" disabled={!target || checked.size === 0} onClick={copy}>
+          {checked.size} 項目をコピー
+        </button>
+        <button type="button" className="link" onClick={onClose}>
+          やめる
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // ---- クエリ画面: 共通タブ ----
 
 /**

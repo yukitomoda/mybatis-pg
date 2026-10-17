@@ -11,7 +11,7 @@ import type { GenContext } from './GenInput';
 import type { Drafts } from './drafts';
 import { draftParam, useDrafts } from './drafts';
 import { FileEditor } from './FileEditor';
-import { GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
+import { CopyToGlobal, GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
 import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
@@ -138,6 +138,8 @@ function Workspace({ api }: { api: Api }) {
   if (tab === 'template' && !templateSeen) setTemplateSeen(true);
   /** パラメータ欄のタブ: 個別の値か、共通パラメータか */
   const [paramTab, setParamTab] = useState<'local' | 'global'>('local');
+  /** 個別の値を共通パラメータにコピーする欄を開いている */
+  const [copying, setCopying] = useState(false);
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
   /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
@@ -308,6 +310,7 @@ function Workspace({ api }: { api: Api }) {
   selectedRef.current = selected;
   const select = (id: string) => {
     setSelected(id);
+    setCopying(false);
     setLooseFile(null);
     setValue(loadParams(id));
     setResult(null);
@@ -474,6 +477,14 @@ function Workspace({ api }: { api: Api }) {
               />
             ) : (
               <>
+                {value && value.t === 'object' && value.fields.length > 0 && applied.length > 0 && !copying && (
+                  <div className="param-actions">
+                    <button type="button" className="link" onClick={() => setCopying(true)} title="個別の値を、この statement に適用されている共通パラメータにコピーする">
+                      共通にコピー
+                    </button>
+                  </div>
+                )}
+                {copying && value && applied.length > 0 && <CopyToGlobal key={selected} globals={globals} applied={applied} local={value} onClose={() => setCopying(false)} />}
                 <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
                 {warnings.length > 0 && (
                   <ul className="notes warn">

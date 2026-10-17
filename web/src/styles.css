@@ -2103,3 +2103,67 @@ button.bulk-open {
 .outer-values .row .usages {
   visibility: hidden;
 }
+
+/* ---- 個別の値を共通パラメータにコピー ---- */
+
+.param-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.2rem 0 0.3rem;
+}
+
+.copy-to-global {
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+.copy-to-global header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.copy-to-global h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.copy-to-global table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.4rem 0;
+  table-layout: fixed;
+}
+
+.copy-to-global td {
+  padding: 0.15rem 0.3rem;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-to-global td:first-child {
+  width: 1.6rem;
+}
+
+.copy-to-global .global-name {
+  font-family: var(--mono);
+  width: 30%;
+}
+
+.copy-to-global .values {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.copy-to-global .actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
