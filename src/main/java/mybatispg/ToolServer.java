@@ -198,6 +198,11 @@ public final class ToolServer {
           parameters(ex);
         }
         break;
+      case "/api/parameters-all":
+        if (requireMethod(ex, method, "GET")) {
+          allParameters(ex);
+        }
+        break;
       case "/api/template":
         if (requireMethod(ex, method, "GET")) {
           template(ex);
@@ -352,6 +357,27 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("tree", toJson(r.root));
     body.put("warnings", r.warnings);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * すべての statement のパラメータの木: {"trees": {id: 木}, "errors": {id: 理由}}。
+   * 一括チェックで、値が足りない statement を選ぶ前に見分けるのに使う。
+   */
+  private void allParameters(HttpExchange ex) throws IOException {
+    SqlRenderer renderer = workspace.renderer();
+    Map<String, Object> trees = new LinkedHashMap<>();
+    Map<String, Object> errors = new LinkedHashMap<>();
+    for (String id : renderer.statementIds()) {
+      try {
+        trees.put(id, toJson(renderer.parameters(id).root));
+      } catch (RuntimeException e) {
+        errors.put(id, Errors.describe(e));
+      }
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("trees", trees);
+    body.put("errors", errors);
     sendJson(ex, 200, body);
   }
 

@@ -120,6 +120,10 @@ class ToolServerTest {
     assertEquals("id", elementProps.get(0).getAsJsonObject().get("name").getAsString());
 
     api("GET", "/api/parameters?id=no.such", null, 404);
+
+    JsonObject all = api("GET", "/api/parameters-all", null, 200);
+    assertEquals(body.get("tree"), all.getAsJsonObject("trees").get("sample.UserMapper.bulkInsert"));
+    assertEquals(0, all.getAsJsonObject("errors").size());
   }
 
   @Test
