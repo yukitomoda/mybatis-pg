@@ -1847,13 +1847,28 @@ button.bulk-open {
 
 .file-editor .sql-title {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.5rem;
 }
 
+.file-editor .sql-title .template-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.file-editor .sql-title .actions {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .file-editor .xml-editor {
-  height: calc(100vh - 11rem);
+  height: calc(100vh - 13rem);
   min-height: 16rem;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1865,4 +1880,25 @@ button.bulk-open {
   color: var(--warn);
   font-size: 10px;
   margin-left: 0.3rem;
+}
+
+.editor-status {
+  height: 1.6rem;
+  line-height: 1.6rem;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.editor-status .link {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.editor-status .link.error-text {
+  color: var(--error);
 }

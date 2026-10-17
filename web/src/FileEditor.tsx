@@ -111,7 +111,17 @@ export function FileEditor({
 
   // statement を選んだら、その行へ移る（編集のたびには移らない）
   const focusLine = useMemo(() => (content === null ? null : statementLine(content, statementId)), [statementId, content === null]);
-  const focus = visible && focusLine !== null ? { key: statementId, line: focusLine } : null;
+  /** エラーの行へ移る（押すたびに n を増やして、同じ行でも移る） */
+  const [jump, setJump] = useState({ line: 0, n: 0 });
+  // 別の statement を選んだら、その statement の行へ移る
+  useEffect(() => setJump({ line: 0, n: 0 }), [statementId]);
+  const focus = !visible
+    ? null
+    : jump.n > 0
+      ? { key: `${statementId}#${jump.n}`, line: jump.line }
+      : focusLine !== null
+        ? { key: statementId, line: focusLine }
+        : null;
 
   if (loadError) return <pre className="render-error">{loadError}</pre>;
   if (content === null) return null;
@@ -119,23 +129,29 @@ export function FileEditor({
   return (
     <div className="file-editor">
       <div className="sql-title">
-        <code className="template-file">{file}</code>
-        {draft && <span className="badge warn">編集中（ファイルには保存していません）</span>}
+        <code className="template-file" title={file}>
+          {file}
+        </code>
+        {draft && (
+          <span className="badge warn" title="ファイルには保存していません">
+            編集中
+          </span>
+        )}
         <span className="actions">
-          {draft && (
-            <button
-              type="button"
-              onClick={() => {
-                if (!window.confirm(`${file} の編集を取り消して、保存されている内容に戻しますか？`)) return;
-                window.clearTimeout(timer.current);
-                pending.current = null;
-                setText(null);
-                drafts.discard(file);
-              }}
-            >
-              編集を取り消す
-            </button>
-          )}
+          {/* 編集の有無で行の高さが変わらないよう、ボタンは常に出す */}
+          <button
+            type="button"
+            disabled={!draft}
+            onClick={() => {
+              if (!window.confirm(`${file} の編集を取り消して、保存されている内容に戻しますか？`)) return;
+              window.clearTimeout(timer.current);
+              pending.current = null;
+              setText(null);
+              drafts.discard(file);
+            }}
+          >
+            編集を取り消す
+          </button>
           {opener && (
             <button type="button" onClick={() => opener.open({ statementId })}>
               {opener.label}
@@ -144,20 +160,26 @@ export function FileEditor({
         </span>
       </div>
       {stale && <p className="notes warn">編集を始めた後に、ファイルが変更されました。編集中の内容は変更前のファイルをもとにしています。</p>}
-      {missing && <p className="notes warn">編集中の XML に、この statement（{statementId}）がありません。</p>}
-      {errors.length > 0 && (
-        <ul className="notes error">
-          {errors.map((e, i) => (
-            <li key={i}>
-              {e.line !== null && `${e.line} 行目: `}
-              {e.message}
-            </li>
-          ))}
-        </ul>
-      )}
       <Suspense fallback={<p className="hint">エディタを読み込んでいます…</p>}>
         <XmlEditor key={file} value={content} onChange={change} errors={errors} focus={focus} label={`${file} の編集`} />
       </Suspense>
+      {/* エラーは高さの変わらない 1 行に出す（出たり消えたりしてもエディタが動かないように） */}
+      <div className="editor-status" role="status">
+        {errors.length > 0 ? (
+          <button
+            type="button"
+            className="link error-text"
+            title={errors.map((e) => (e.line !== null ? `${e.line} 行目: ` : '') + e.message).join('\n')}
+            onClick={() => setJump((j) => ({ line: errors[0].line ?? 1, n: j.n + 1 }))}
+          >
+            {errors[0].line !== null && `${errors[0].line} 行目: `}
+            {errors[0].message}
+            {errors.length > 1 && `（ほか ${errors.length - 1} 件）`}
+          </button>
+        ) : missing ? (
+          <span className="warn-text">編集中の XML に、この statement（{statementId}）がありません</span>
+        ) : null}
+      </div>
     </div>
   );
 }
