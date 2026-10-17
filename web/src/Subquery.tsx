@@ -1,8 +1,8 @@
-// 実行タブの「部分ごとに実行」（試作）: SQL の中のサブクエリ・CTE を木で見せ、部分ごとに本番と同じバインド変数で実行する
+// サブクエリのタブ: SQL の中のサブクエリ・CTE を木で見せ、部分ごとに本番と同じバインド変数で実行する（読み取り専用、必ずロールバック）
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DraftParam, RenderResponse, ResultTable } from './api';
 import type { Connections } from './Execution';
-import { message, ResultGrid } from './Execution';
+import { ConnectionPicker, message, ResultGrid } from './Execution';
 import { resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
 import { ParamTree } from './ParamTree';
@@ -198,10 +198,10 @@ export function PartsPanel({
   return (
     <div className="subquery-panel">
       <div className="execute-bar">
-        <button type="button" disabled={!conn.current || running !== null} onClick={runAll} title="外側の値がいらない部分を、すべて実行して件数を出す">
+        <ConnectionPicker conn={conn} />
+        <button type="button" disabled={!conn.current || running !== null} onClick={runAll} title="実行できる部分をまとめて実行し、部分ごとの件数を出す">
           すべての部分を実行
         </button>
-        <span className="hint">本番と同じバインド変数で、読み取り専用で実行し、必ずロールバックします。</span>
       </div>
       <div className="subquery-body">
         <ul className="part-tree">{tree(numbered.root, 0)}</ul>
@@ -215,7 +215,7 @@ export function PartsPanel({
             </pre>
           </details>
           {selected.writes ? (
-            <p className="hint">データを書き換える部分は、ここでは実行しません（上の「実行」を使ってください）。</p>
+            <p className="hint">データを書き換える部分は、ここでは実行しません（実行タブを使ってください）。</p>
           ) : (
             <>
               {selected.outerRefs.length > 0 && (
