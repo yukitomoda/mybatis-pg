@@ -209,6 +209,20 @@ class ToolServerTest {
     api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":\"old\",\"content\":" + gson.toJson(content) + "}", 200);
     assertEquals(0, api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").size());
 
+    // 下書きのあるファイルは、statement 一覧と全 statement の木に下書きの内容を使う。足したものには added を付け、消したものは出さない
+    String withAdded = content.replace("<select id=\"search\"", "<select id=\"added\">SELECT #{y}</select>\n  <select id=\"search\"")
+        .replaceAll("(?s)<select id=\"findStatic\".*?</select>", "");
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":" + gson.toJson(content) + ",\"content\":" + gson.toJson(withAdded) + "}", 200);
+    String list = api("GET", "/api/statements", null, 200).getAsJsonArray("statements").toString();
+    assertTrue(list.contains("{\"id\":\"sample.UserMapper.added\",\"file\":\"mappers/UserMapper.xml\",\"type\":\"SELECT\",\"added\":true}"), list);
+    assertTrue(list.contains("{\"id\":\"sample.UserMapper.search\",\"file\":\"mappers/UserMapper.xml\",\"type\":\"SELECT\"}"), list);
+    assertFalse(list.contains("sample.UserMapper.findStatic"), list);
+    assertTrue(api("GET", "/api/parameters-all", null, 200).getAsJsonObject("trees").get("sample.UserMapper.added").toString().contains("\"y\""));
+    // 下書きにエラーがある間は、保存されているファイルの statement のまま
+    api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":" + gson.toJson(content) + ",\"content\":" + gson.toJson(withAdded + "<broken") + "}", 200);
+    list = api("GET", "/api/statements", null, 200).getAsJsonArray("statements").toString();
+    assertTrue(list.contains("sample.UserMapper.findStatic") && !list.contains("sample.UserMapper.added"), list);
+
     api("POST", "/api/drafts/save", "{\"file\":\"mappers/UserMapper.xml\",\"base\":" + gson.toJson(content) + ",\"content\":\"x\"}", 200);
     api("POST", "/api/drafts/discard", "{\"files\":[\"mappers/UserMapper.xml\",\"gone.xml\"]}", 200);
     assertEquals(0, api("GET", "/api/drafts", null, 200).getAsJsonArray("drafts").size());

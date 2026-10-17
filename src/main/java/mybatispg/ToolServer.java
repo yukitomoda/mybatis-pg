@@ -347,15 +347,65 @@ public final class ToolServer {
   }
 
   /** statement の一覧（定義したファイル付き）と、読み込みエラーの一覧 */
+  /** statement と、それを組み立てる renderer（下書きのあるファイルなら下書きで読み込んだもの） */
+  private static final class StatementRef {
+    final SqlRenderer renderer;
+    final String id;
+    final String file;
+    /** 下書きで足した（保存されているファイルにない） */
+    final boolean added;
+
+    StatementRef(SqlRenderer renderer, String id, String file, boolean added) {
+      this.renderer = renderer;
+      this.id = id;
+      this.file = file;
+      this.added = added;
+    }
+  }
+
+  /**
+   * すべての statement。下書きのあるファイルは、下書きの中の statement にする（足した・消した・名前を変えたものを反映する）。
+   * ただし下書きにエラーがある間（入力の途中など）は、保存されているファイルの statement のままにする。
+   */
+  private List<StatementRef> allStatements() throws IOException {
+    SqlRenderer base = workspace.renderer();
+    Map<String, SqlRenderer> drafted = new LinkedHashMap<>();
+    for (DraftStore.Draft d : draftStore.list()) {
+      Path file = mapperFile(d.file);
+      if (file != null) {
+        SqlRenderer r = draftRenderer(file, d.content);
+        if (r.getLoadErrors().isEmpty()) {
+          drafted.put(d.file, r);
+        }
+      }
+    }
+    List<StatementRef> out = new ArrayList<>();
+    for (String id : base.statementIds()) {
+      String file = displayPath(base.statementSource(id));
+      if (!drafted.containsKey(file)) {
+        out.add(new StatementRef(base, id, file, false));
+      }
+    }
+    for (Map.Entry<String, SqlRenderer> e : drafted.entrySet()) {
+      for (String id : e.getValue().statementIds()) {
+        out.add(new StatementRef(e.getValue(), id, e.getKey(), !base.hasStatement(id)));
+      }
+    }
+    return out;
+  }
+
   private void statements(HttpExchange ex) throws IOException {
     long generation = workspace.generation();
     SqlRenderer renderer = workspace.renderer();
     List<Map<String, Object>> statements = new ArrayList<>();
-    for (String id : renderer.statementIds()) {
+    for (StatementRef s : allStatements()) {
       Map<String, Object> m = new LinkedHashMap<>();
-      m.put("id", id);
-      m.put("file", displayPath(renderer.statementSource(id)));
-      m.put("type", renderer.statementType(id));
+      m.put("id", s.id);
+      m.put("file", s.file);
+      m.put("type", s.renderer.statementType(s.id));
+      if (s.added) {
+        m.put("added", true);
+      }
       statements.add(m);
     }
     Map<String, Object> body = new LinkedHashMap<>();
@@ -403,18 +453,18 @@ public final class ToolServer {
   }
 
   /**
-   * すべての statement のパラメータの木: {"trees": {id: 木}, "errors": {id: 理由}}。
+   * すべての statement のパラメータの木: {"trees": {id: 木}, "errors": {id: 理由}}（下書きのあるファイルは下書きの内容で）。
    * 一括チェックで、値が足りない statement を選ぶ前に見分けるのに使う。
    */
   private void allParameters(HttpExchange ex) throws IOException {
-    SqlRenderer renderer = workspace.renderer();
     Map<String, Object> trees = new LinkedHashMap<>();
     Map<String, Object> errors = new LinkedHashMap<>();
-    for (String id : renderer.statementIds()) {
+    // 下書きのあるファイルは、下書きの内容で調べる（statement 一覧と同じ）
+    for (StatementRef s : allStatements()) {
       try {
-        trees.put(id, toJson(renderer.parameters(id).root));
+        trees.put(s.id, toJson(s.renderer.parameters(s.id).root));
       } catch (RuntimeException e) {
-        errors.put(id, Errors.describe(e));
+        errors.put(s.id, Errors.describe(e));
       }
     }
     Map<String, Object> body = new LinkedHashMap<>();
