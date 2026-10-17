@@ -119,6 +119,8 @@ function Workspace({ api }: { api: Api }) {
   const [loadErrors, setLoadErrors] = useState<LoadError[]>([]);
   const [selected, setSelected] = useState<string | null>(initialStatement);
   const [playgrounds, setPlaygrounds] = useState<PlaygroundEntry[]>([]);
+  /** ファイルに保存できない（JAR から読み込んだときなど） */
+  const [readOnly, setReadOnly] = useState(false);
   /** プレイグラウンドを作ったり保存したりするたびに増やして、statement 一覧を取り直す */
   const [playgroundVersion, setPlaygroundVersion] = useState(0);
   /** statement を選ばずにエディタで開いているファイル（statement がないプレイグラウンドなど） */
@@ -183,6 +185,7 @@ function Workspace({ api }: { api: Api }) {
       .then((r) => {
         setStatements(r.statements);
         setPlaygrounds(r.playgrounds);
+        setReadOnly(r.readOnly);
         setLoadErrors(r.loadErrors);
       })
       .catch(handleError);
@@ -598,6 +601,7 @@ function Workspace({ api }: { api: Api }) {
               opener={opener}
               visible={tab === 'template'}
               playground={playgroundOf(looseFile)}
+              readOnly={readOnly}
             />
           ) : selected ? (
             !templateSeen ? null : editorFile ? (
@@ -611,6 +615,7 @@ function Workspace({ api }: { api: Api }) {
                 opener={opener}
                 visible={tab === 'template'}
                 playground={playgroundOf(editorFile)}
+                readOnly={readOnly}
               />
             ) : (
               <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />

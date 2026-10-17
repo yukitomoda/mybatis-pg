@@ -51,6 +51,25 @@ class FileWatcherTest {
     }
   }
 
+  @Test
+  void JARを作り直したら取り出し直す(@TempDir Path dir) throws Exception {
+    Path jar = dir.resolve("app.jar");
+    Files.write(jar, JarMappersTest.zip("mapper/A.xml", JarMappersTest.mapper("a", "<select id=\"s\">SELECT 1</select>")));
+    // JAR と同じディレクトリのほかのファイルの変更では読み込み直さない
+    Files.createDirectories(dir.resolve("classes"));
+    MapperWorkspace ws = MapperWorkspace.ofJar(jar);
+    assertEquals(Collections.singletonList("a.s"), ws.renderer().statementIds());
+    try (FileWatcher watcher = FileWatcher.startFile(ws.jar(), ws::reload)) {
+      long g = ws.generation();
+      write(dir, "classes/Other.xml", "<x/>");
+      assertEquals(g, ws.awaitChange(g, 1500));
+
+      Files.write(jar, JarMappersTest.zip("mapper/A.xml", JarMappersTest.mapper("a", "<select id=\"s\">SELECT 1</select><select id=\"t\">SELECT 2</select>")));
+      Files.setLastModifiedTime(jar, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 2000));
+      waitFor(ws, g, Arrays.asList("a.s", "a.t"));
+    }
+  }
+
   /** 1 回の保存で複数回読み込み直されることがあるため、期待した状態になるまで待つ */
   private static void waitFor(MapperWorkspace ws, long since, java.util.List<String> expected) throws Exception {
     long deadline = System.currentTimeMillis() + TIMEOUT;

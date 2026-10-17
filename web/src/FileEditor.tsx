@@ -23,6 +23,7 @@ export function FileEditor({
   opener,
   visible,
   playground,
+  readOnly,
 }: {
   api: Api;
   statementId: string;
@@ -36,7 +37,11 @@ export function FileEditor({
   visible: boolean;
   /** プレイグラウンドなら、その名前と操作 */
   playground?: { name: string; onSaved: () => void; onRename: () => void; onDelete: () => void };
+  /** ファイルに保存できない（JAR から読み込んだときなど）。編集して試すことはできる */
+  readOnly?: boolean;
 }) {
+  // プレイグラウンドは JAR から読み込んだときも保存できる
+  const cannotSave = !!readOnly && !playground;
   /** 保存されているファイルの内容（どのファイルのものかも持ち、別のファイルの内容を取り違えないようにする） */
   const [loaded, setLoaded] = useState<{ file: string; content: string } | null>(null);
   const saved = loaded?.file === file ? loaded.content : null;
@@ -127,6 +132,7 @@ export function FileEditor({
       flush();
       return;
     }
+    if (cannotSave) return;
     const current = text ?? draft?.content;
     if (saving || saved === null || current === undefined || current === null || (!draft && text === null)) return;
     if (errors.length > 0 && !window.confirm('XML にエラーがあります。このままファイルに保存しますか？')) return;
@@ -231,10 +237,15 @@ export function FileEditor({
             </>
           )}
           {/* 編集の有無で行の高さが変わらないよう、ボタンは常に出す */}
-          {!playground && (
+          {!playground && !cannotSave && (
             <button type="button" className="run" disabled={!draft || saving} title="Ctrl+S" onClick={save}>
               ファイルに保存
             </button>
+          )}
+          {cannotSave && (
+            <span className="badge muted" title="JAR から読み込んだ mapper XML は、ファイルに保存できません（編集して試すことはできます）">
+              読み取り専用
+            </span>
           )}
           {!playground && (
             <button
@@ -251,7 +262,7 @@ export function FileEditor({
               編集を取り消す
             </button>
           )}
-          {opener && (
+          {opener && !cannotSave && (
             <button type="button" onClick={() => opener.open(playground ? { file } : { statementId })}>
               {opener.label}
             </button>

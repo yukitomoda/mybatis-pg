@@ -25,6 +25,8 @@ export interface StatementsResponse {
   generation: number;
   statements: StatementEntry[];
   playgrounds: PlaygroundEntry[];
+  /** ファイルに保存できない（JAR から読み込んだときなど） */
+  readOnly: boolean;
   loadErrors: LoadError[];
 }
 

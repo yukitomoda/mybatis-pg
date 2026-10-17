@@ -104,11 +104,17 @@ public final class Main {
     printSummary(workspace, "読み込み");
 
     final MapperWorkspace ws = workspace;
-    FileWatcher.start(workspace.watchRoots(), () -> {
+    Runnable reload = () -> {
       ws.reload();
       printSummary(ws, "再読み込み");
-    });
-    System.out.println("監視中: " + workspace.watchRoots());
+    };
+    if (workspace.jar() != null) {
+      FileWatcher.startFile(workspace.jar(), reload);
+      System.out.println("監視中: " + workspace.jar());
+    } else {
+      FileWatcher.start(workspace.watchRoots(), reload);
+      System.out.println("監視中: " + workspace.watchRoots());
+    }
 
     Path configDir = Paths.get(System.getProperty("user.home"), CONFIG_DIR);
     migrateConfig(Paths.get(System.getProperty("user.home"), OLD_CONFIG_DIR), configDir);

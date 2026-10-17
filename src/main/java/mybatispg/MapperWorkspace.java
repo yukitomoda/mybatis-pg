@@ -24,6 +24,8 @@ public final class MapperWorkspace {
   private final String projectKey;
   /** ファイルに保存できない（JAR から取り出したものなど） */
   private final boolean readOnly;
+  /** JAR から読み込んでいるときの JAR（見張る対象） */
+  private Path jar;
   private volatile SqlRenderer renderer;
   /** reload() のたびに増える。画面はこれを見て再取得する */
   private long generation;
@@ -70,7 +72,10 @@ public final class MapperWorkspace {
         return MapperLocations.mapperXmlUnder(dir);
       }
     };
-    return new MapperWorkspace(files, Collections.singletonList(abs.getParent()), dir, abs.toString(), true);
+    // JAR のディレクトリをまるごとは見張らない（Main が JAR だけを見張る）
+    MapperWorkspace ws = new MapperWorkspace(files, Collections.<Path>emptyList(), dir, abs.toString(), true);
+    ws.jar = abs;
+    return ws;
   }
 
   /** mapper XML のファイル、またはそれを含むディレクトリを直接指定する */
@@ -144,6 +149,11 @@ public final class MapperWorkspace {
 
   public String projectKey() {
     return projectKey;
+  }
+
+  /** JAR から読み込んでいるときの JAR。そうでなければ null */
+  public Path jar() {
+    return jar;
   }
 
   public boolean isReadOnly() {

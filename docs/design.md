@@ -45,6 +45,10 @@ starterとMyBatis・Spring Bootの対応は[MyBatis公式ブログ](https://blog
   - 目印を `?` に戻したものがMyBatisの `?` 付きSQLと完全一致することを検証してから、目印をリテラルに置き換える
   - 値は `DefaultParameterHandler` と同じ手順で解決する
 - **XMLの編集**: IDEで本物のファイルを編集し、ツールは `WatchService` で変更を監視する。`<include>` は別ファイルを参照できるため、変更があれば全mapperを読み込み直す
+- **読み込む対象**: 次のどれか1つを起動時に指定する
+  - `--project` プロジェクトのディレクトリ（Spring Bootの `mybatis.mapper-locations` から探す）
+  - mapper XMLのファイルかディレクトリ
+  - `--jar` アプリのJAR（war）。引数に `.jar`・`.war` を渡しても同じ。中（中のJAR、Spring Bootの `BOOT-INF/lib/*.jar` やwarの `WEB-INF/lib/*.jar` を含む）のmapper XMLを一時ディレクトリに取り出して読み込み、画面ではJARの中のパス（中のJARのものは `BOOT-INF/lib/core.jar/mapper/X.xml` のように）で見せる。JARだけを見張り、作り直されたら取り出し直す。編集して試す（下書き）ことはできるが、ファイルには保存できない（プレイグラウンドは使える）。下書き・共通パラメータ・プレイグラウンドはJARのパスでプロジェクトを区別する
 - **GUI**: ローカルWeb（JVMサーバ + ブラウザ）
   - ツール自体もJava 8で動かす
   - サーバはJDK標準の `com.sun.net.httpserver` かJavalin 4系。Spring Bootは使わない

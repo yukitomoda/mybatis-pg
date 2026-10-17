@@ -38,10 +38,18 @@ public final class FileWatcher implements Closeable {
   private final Map<WatchKey, Path> keys = new ConcurrentHashMap<>();
   private final Runnable onChange;
   private final Thread thread;
+  /** 1 つのファイルだけを見張るとき（JAR など）のそのファイル。null ならディレクトリの mapper XML や設定ファイル */
+  private final Path singleFile;
 
-  private FileWatcher(List<Path> roots, Runnable onChange) throws IOException {
+  private FileWatcher(List<Path> roots, Path singleFile, Runnable onChange) throws IOException {
     this.service = FileSystems.getDefault().newWatchService();
     this.onChange = onChange;
+    this.singleFile = singleFile;
+    if (singleFile != null) {
+      // ファイルのあるディレクトリだけを見る（サブディレクトリは見ない）
+      Path dir = singleFile.getParent();
+      keys.put(dir.register(service, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY), dir);
+    }
     for (Path root : roots) {
       if (Files.isDirectory(root)) {
         registerTree(root);
@@ -52,7 +60,14 @@ public final class FileWatcher implements Closeable {
   }
 
   public static FileWatcher start(List<Path> roots, Runnable onChange) throws IOException {
-    FileWatcher w = new FileWatcher(roots, onChange);
+    FileWatcher w = new FileWatcher(roots, null, onChange);
+    w.thread.start();
+    return w;
+  }
+
+  /** 1 つのファイル（JAR など）が作り直されたら通知する */
+  public static FileWatcher startFile(Path file, Runnable onChange) throws IOException {
+    FileWatcher w = new FileWatcher(java.util.Collections.<Path>emptyList(), file.toAbsolutePath().normalize(), onChange);
     w.thread.start();
     return w;
   }
@@ -110,6 +125,10 @@ public final class FileWatcher implements Closeable {
         continue;
       }
       Path child = dir.resolve((Path) event.context());
+      if (singleFile != null) {
+        relevant |= child.equals(singleFile);
+        continue;
+      }
       if (event.kind() == ENTRY_CREATE && Files.isDirectory(child)) {
         // 新しいディレクトリにも mapper XML が置かれうる
         try {
