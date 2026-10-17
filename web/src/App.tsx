@@ -275,6 +275,11 @@ function Workspace({ api }: { api: Api }) {
   }, [resolved, sent]);
   const missing = useMemo(() => (schema ? missingParams(schema, effective) : []), [schema, effective]);
 
+  /** サブクエリ・CTE があるときだけ「サブクエリ」タブを出す */
+  const hasParts = useMemo(() => !!result && !renderError && countParts(result.numberedSql) > 0, [result?.numberedSql, renderError]);
+  /** 表示するタブ。サブクエリのタブを選んでいても、サブクエリがなければ SQL タブを出す（選んだタブは覚えておく） */
+  const shown: Tab = tab === 'subquery' && !hasParts ? 'sql' : tab;
+
   // 入力や XML が変わるたびにレンダリングする
   useEffect(() => {
     if (!selected || !schema || numberIssues.length > 0) return;
@@ -499,13 +504,15 @@ function Workspace({ api }: { api: Api }) {
               ['explain', 'EXPLAIN'],
               ['subquery', 'サブクエリ'],
             ] as const
-          ).map(([key, label]) => (
+          )
+            .filter(([key]) => key !== 'subquery' || hasParts)
+            .map(([key, label]) => (
             <button
               key={key}
               type="button"
               role="tab"
-              aria-selected={tab === key}
-              className={tab === key ? 'tab selected' : 'tab'}
+              aria-selected={shown === key}
+              className={shown === key ? 'tab selected' : 'tab'}
               onClick={() => {
                 setTab(key);
                 saveTab(key);
@@ -521,7 +528,7 @@ function Workspace({ api }: { api: Api }) {
           ))}
         </div>
 
-        {tab === 'sql' && (
+        {shown === 'sql' && (
           <>
             {numberIssues.length > 0 && (
               <ul className="notes error">
@@ -556,7 +563,7 @@ function Workspace({ api }: { api: Api }) {
         )}
 
         {/* 実行結果が消えないよう、切り替えても実行のタブは残しておく */}
-        <div hidden={tab !== 'execute'}>
+        <div hidden={shown !== 'execute'}>
           {selected && schema ? (
             <ExecutePanel
               key={selected}
@@ -573,20 +580,14 @@ function Workspace({ api }: { api: Api }) {
         </div>
 
         {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
-        <div hidden={tab !== 'subquery'}>
-          {selected && schema && result && !renderError && numberIssues.length === 0 ? (
-            countParts(result.numberedSql) > 0 ? (
-              <PartsPanel key={selected} conn={conn} statementId={selected} value={sent} draft={draftP} rendered={result} gen={gen} onApiError={handleError} />
-            ) : (
-              <p className="hint">この SQL にはサブクエリ・CTE がありません。</p>
-            )
-          ) : (
-            <p className="hint">{selected ? 'SQL を組み立てると、サブクエリを調べられます。' : '左の一覧から statement を選んでください。'}</p>
+        <div hidden={shown !== 'subquery'}>
+          {hasParts && selected && result && (
+            <PartsPanel key={selected} conn={conn} statementId={selected} value={sent} draft={draftP} rendered={result} gen={gen} onApiError={handleError} />
           )}
         </div>
 
         {/* 取得した計画が消えないよう、切り替えても EXPLAIN のタブは残しておく */}
-        <div hidden={tab !== 'explain'}>
+        <div hidden={shown !== 'explain'}>
           {selected && schema ? (
             <ExplainPanel
               key={selected}
