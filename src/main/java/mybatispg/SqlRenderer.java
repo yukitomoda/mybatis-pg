@@ -3,6 +3,7 @@ package mybatispg;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.PreparedStatement;
@@ -10,8 +11,11 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.builder.xml.XMLStatementBuilder;
@@ -65,12 +69,45 @@ public class SqlRenderer {
     return renderer;
   }
 
-  private void loadFile(Path file) {
-    try {
-      byte[] xml;
-      try (InputStream in = Files.newInputStream(file)) {
-        xml = MapperPreprocessor.preprocess(in, file.toUri().toString());
+  /**
+   * 1 つのファイルを、保存していない内容（下書き）で読み込み直したものを作る。この renderer は変えない。
+   * 作ったものには、そのファイルの statement だけが入る。include 先の &lt;sql&gt; は、ほかのファイルの読み込み済みのものを使う
+   * （このファイルの名前空間のものは、下書きの内容を使う）。読み込みのエラーは getLoadErrors() に入る。
+   */
+  public SqlRenderer withDraft(Path file, String content) {
+    String resource = file.toString();
+    Set<String> namespaces = new HashSet<>();
+    for (String id : statementIds()) {
+      if (resource.equals(statementSource(id)) && id.lastIndexOf('.') > 0) {
+        namespaces.add(id.substring(0, id.lastIndexOf('.')));
       }
+    }
+    SqlRenderer draft = new SqlRenderer();
+    Map<String, XNode> fragments = draft.configuration.getSqlFragments();
+    for (Map.Entry<String, XNode> e : configuration.getSqlFragments().entrySet()) {
+      String key = e.getKey();
+      int dot = key.lastIndexOf('.');
+      // 短縮名は完全名を入れたときに作られる。このファイルの名前空間のものは下書きから読む
+      if (dot > 0 && !namespaces.contains(key.substring(0, dot)) && !fragments.containsKey(key)) {
+        fragments.put(key, e.getValue());
+      }
+    }
+    draft.loadFile(file, new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)));
+    draft.resolveIncompleteStatements();
+    return draft;
+  }
+
+  private void loadFile(Path file) {
+    try (InputStream in = Files.newInputStream(file)) {
+      loadFile(file, in);
+    } catch (java.io.IOException e) {
+      loadErrors.add(new LoadError(file.toString(), null, null, Errors.describe(e)));
+    }
+  }
+
+  private void loadFile(Path file, InputStream in) {
+    try {
+      byte[] xml = MapperPreprocessor.preprocess(in, file.toUri().toString());
       new XMLMapperBuilder(new ByteArrayInputStream(xml), configuration, file.toString(),
           configuration.getSqlFragments()).parse();
     } catch (SAXParseException e) {

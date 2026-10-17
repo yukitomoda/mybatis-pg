@@ -152,6 +152,44 @@ class ToolServerTest {
   }
 
   @Test
+  void 下書き() throws Exception {
+    JsonObject file = api("GET", "/api/file?path=mappers/UserMapper.xml", null, 200);
+    assertEquals("mappers/UserMapper.xml", file.get("file").getAsString());
+    String content = file.get("content").getAsString();
+    assertTrue(content.contains("namespace=\"sample.UserMapper\""));
+    // 読み込んでいない mapper XML 以外は返さない
+    api("GET", "/api/file?path=../pom.xml", null, 404);
+
+    // 下書きの内容で組み立てる。別ファイルの sql 断片の include もそのまま使える
+    String draft = content.replace("<select id=\"search\" resultType=\"map\">",
+        "<select id=\"search\" resultType=\"map\">\n    /* 編集中 */")
+        .replace("</mapper>", "<select id=\"added\">SELECT <include refid=\"sample.Common.userColumns\"/> FROM t WHERE x = #{x}</select>\n</mapper>");
+    String draftJson = "{\"file\":\"mappers/UserMapper.xml\",\"content\":" + new com.google.gson.Gson().toJson(draft) + "}";
+    JsonObject rendered = api("POST", "/api/render",
+        "{\"statementId\":\"sample.UserMapper.search\",\"parameters\":{\"cond\":{\"name\":\"a\"}},\"draft\":" + draftJson + "}", 200);
+    assertTrue(rendered.get("literalSql").getAsString().contains("/* 編集中 */"), rendered.toString());
+    JsonObject added = api("POST", "/api/render", "{\"statementId\":\"sample.UserMapper.added\",\"parameters\":{\"x\":1},\"draft\":" + draftJson + "}", 200);
+    assertTrue(added.get("literalSql").getAsString().contains("id, name, status  FROM t WHERE x = 1"), added.toString());
+    JsonObject params = api("POST", "/api/parameters", "{\"id\":\"sample.UserMapper.added\",\"draft\":" + draftJson + "}", 200);
+    assertTrue(params.get("tree").toString().contains("\"name\":\"x\""), params.toString());
+    // 保存したファイルの内容は変わらない
+    api("POST", "/api/render", "{\"statementId\":\"sample.UserMapper.added\",\"parameters\":{}}", 404);
+
+    JsonObject check = api("POST", "/api/draft/check", draftJson, 200);
+    assertTrue(check.get("statements").toString().contains("sample.UserMapper.added"), check.toString());
+    assertEquals(0, check.getAsJsonArray("errors").size());
+
+    // 構文エラーは行番号つきで返し、statement は使えない
+    String brokenJson = "{\"file\":\"mappers/UserMapper.xml\",\"content\":" + new com.google.gson.Gson().toJson(content.replace("</mapper>", "<select id=\"x\">")) + "}";
+    JsonObject broken = api("POST", "/api/draft/check", brokenJson, 200);
+    JsonObject error = broken.getAsJsonArray("errors").get(0).getAsJsonObject();
+    assertTrue(error.has("line"), broken.toString());
+    JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.UserMapper.search\",\"parameters\":{},\"draft\":" + brokenJson + "}", 422);
+    assertTrue(e.get("error").getAsString().contains("行目"), e.toString());
+    api("POST", "/api/draft/check", "{\"file\":\"../pom.xml\",\"content\":\"\"}", 400);
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);

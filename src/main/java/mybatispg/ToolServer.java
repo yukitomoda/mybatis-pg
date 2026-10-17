@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
@@ -194,8 +195,24 @@ public final class ToolServer {
         }
         break;
       case "/api/parameters":
+        // 下書きを渡すときは POST {"id", "draft"}
+        if ("POST".equals(method)) {
+          JsonObject req = readJson(ex);
+          if (req != null) {
+            parameters(ex, string(req, "id"), req);
+          }
+        } else if (requireMethod(ex, method, "GET")) {
+          parameters(ex, query(ex).get("id"), null);
+        }
+        break;
+      case "/api/file":
         if (requireMethod(ex, method, "GET")) {
-          parameters(ex);
+          file(ex);
+        }
+        break;
+      case "/api/draft/check":
+        if (requireMethod(ex, method, "POST")) {
+          checkDraft(ex);
         }
         break;
       case "/api/parameters-all":
@@ -346,11 +363,9 @@ public final class ToolServer {
   }
 
   /** statement が参照するパラメータの木 */
-  private void parameters(HttpExchange ex) throws IOException {
-    String id = query(ex).get("id");
-    SqlRenderer renderer = workspace.renderer();
-    if (id == null || !renderer.hasStatement(id)) {
-      sendJson(ex, 404, error("statement がありません: " + id));
+  private void parameters(HttpExchange ex, String id, JsonObject req) throws IOException {
+    SqlRenderer renderer = rendererFor(ex, req, id);
+    if (renderer == null) {
       return;
     }
     ParameterExtractor.Result r = renderer.parameters(id);
@@ -428,9 +443,8 @@ public final class ToolServer {
       return;
     }
 
-    SqlRenderer renderer = workspace.renderer();
-    if (!renderer.hasStatement(statementId)) {
-      sendJson(ex, 404, error("statement がありません: " + statementId));
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
       return;
     }
     SqlRenderer.Result r;
@@ -719,9 +733,8 @@ public final class ToolServer {
       return;
     }
 
-    SqlRenderer renderer = workspace.renderer();
-    if (!renderer.hasStatement(statementId)) {
-      sendJson(ex, 404, error("statement がありません: " + statementId));
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
       return;
     }
     if (connections.get(connectionId) == null) {
@@ -743,6 +756,107 @@ public final class ToolServer {
     body.put("warnings", r.warnings);
     body.put("committed", r.committed);
     body.put("elapsedMillis", r.elapsedMillis);
+    sendJson(ex, 200, body);
+  }
+
+  // ---- 下書き（保存していない mapper XML の編集内容） ----
+
+  /** 下書きで読み込んだもの。同じ内容で何度も読み込まないよう、最近のものを覚えておく */
+  private final Map<String, SqlRenderer> drafts = new LinkedHashMap<String, SqlRenderer>(16, 0.75f, true) {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    protected boolean removeEldestEntry(Map.Entry<String, SqlRenderer> eldest) {
+      return size() > 8;
+    }
+  };
+
+  private SqlRenderer draftRenderer(Path file, String content) {
+    SqlRenderer base = workspace.renderer();
+    // 元のファイルや他のファイルが読み込み直されたら、作り直す
+    String key = System.identityHashCode(base) + "\u0000" + file + "\u0000" + content;
+    synchronized (drafts) {
+      SqlRenderer r = drafts.get(key);
+      if (r == null) {
+        r = base.withDraft(file, content);
+        drafts.put(key, r);
+      }
+      return r;
+    }
+  }
+
+  /**
+   * statement を組み立てる renderer。リクエストに draft {"file": 画面のパス, "content"} があれば、そのファイルを下書きの内容で読み込んだものを使う。
+   * 使えなければ応答を送って null を返す。
+   */
+  private SqlRenderer rendererFor(HttpExchange ex, JsonObject req, String statementId) throws IOException {
+    JsonElement d = req == null ? null : req.get("draft");
+    if (d == null || d.isJsonNull()) {
+      SqlRenderer renderer = workspace.renderer();
+      if (statementId == null || !renderer.hasStatement(statementId)) {
+        sendJson(ex, 404, error("statement がありません: " + statementId));
+        return null;
+      }
+      return renderer;
+    }
+    if (!d.isJsonObject()) {
+      sendJson(ex, 400, error("draft の形が正しくありません"));
+      return null;
+    }
+    Path file = mapperFile(string(d.getAsJsonObject(), "file"));
+    String content = string(d.getAsJsonObject(), "content");
+    if (file == null || content == null) {
+      sendJson(ex, 400, error("下書きのファイルが、読み込んでいる mapper XML ではありません"));
+      return null;
+    }
+    SqlRenderer renderer = draftRenderer(file, content);
+    if (statementId == null || !renderer.hasStatement(statementId)) {
+      StringBuilder message = new StringBuilder("編集中の XML に statement がありません: " + statementId);
+      for (LoadError e : renderer.getLoadErrors()) {
+        message.append("\n").append(e.line == null ? "" : e.line + " 行目: ").append(e.message);
+      }
+      sendJson(ex, 422, error(message.toString()));
+      return null;
+    }
+    return renderer;
+  }
+
+  /** mapper XML の中身: {"file", "content"}。読み込んでいる mapper XML だけを返す */
+  private void file(HttpExchange ex) throws IOException {
+    Path file = mapperFile(query(ex).get("path"));
+    if (file == null) {
+      sendJson(ex, 404, error("読み込んでいる mapper XML ではありません"));
+      return;
+    }
+    String content;
+    try {
+      content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      sendJson(ex, 422, error("ファイルを読み込めません: " + Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("file", displayPath(file.toString()));
+    body.put("content", content);
+    sendJson(ex, 200, body);
+  }
+
+  /** 下書きを読み込んでみる: {"file", "content"} → {"statements": [id...], "errors": [LoadError...]} */
+  private void checkDraft(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    Path file = mapperFile(string(req, "file"));
+    String content = string(req, "content");
+    if (file == null || content == null) {
+      sendJson(ex, 400, error("下書きのファイルが、読み込んでいる mapper XML ではありません"));
+      return;
+    }
+    SqlRenderer renderer = draftRenderer(file, content);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("statements", renderer.statementIds());
+    body.put("errors", renderer.getLoadErrors());
     sendJson(ex, 200, body);
   }
 
@@ -806,9 +920,8 @@ public final class ToolServer {
       sendJson(ex, 400, error(e.getMessage()));
       return;
     }
-    SqlRenderer renderer = workspace.renderer();
-    if (!renderer.hasStatement(statementId)) {
-      sendJson(ex, 404, error("statement がありません: " + statementId));
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
       return;
     }
     ConnectionStore.Profile profile = connections.get(connectionId);
