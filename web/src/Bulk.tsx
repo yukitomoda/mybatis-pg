@@ -1,12 +1,13 @@
 // 全 statement の一括チェック: 保存してある値でまとめて EXPLAIN し、重そうなものを一覧にする
 import { useMemo, useRef, useState } from 'react';
 import type { Api } from './api';
+import { BulkPicker, loadSelection, saveSelection } from './BulkPicker';
 import { diagnose } from './diagnose';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import { resolveTemplates } from './gen';
 import { loadParams } from './paramStore';
-import { effectiveValue } from './params';
+import { effectiveValue, missingParams } from './params';
 import { flatten, parsePlan } from './plan';
 import type { GlobalSet, StatementsSettings } from './globalModel';
 import { applicable, combine } from './globalModel';
@@ -26,6 +27,8 @@ interface Row {
   seqScans: string[];
   findings: { high: number; medium: number };
   error: string | null;
+  /** 値がない（NULL として扱われる）項目 */
+  missing: string[];
 }
 
 type SortKey = 'cost' | 'time' | 'findings' | 'id';
@@ -49,14 +52,18 @@ export function BulkCheck({
   onOpen: (id: string) => void;
 }) {
   const [analyze, setAnalyze] = useState(false);
-  const [filter, setFilter] = useState('');
+  const [selection, setSelection] = useState<Set<string>>(loadSelection);
   const [rows, setRows] = useState<Row[]>([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [sort, setSort] = useState<SortKey>('cost');
   const cancelled = useRef(false);
 
-  const targets = statements.filter((s) => s.id.toLowerCase().includes(filter.trim().toLowerCase()) || s.file.toLowerCase().includes(filter.trim().toLowerCase()));
+  const targets = statements.filter((s) => selection.has(s.id));
+  const select = (ids: Set<string>) => {
+    setSelection(ids);
+    saveSelection(ids);
+  };
 
   const run = async () => {
     const current = conn.current;
@@ -70,11 +77,25 @@ export function BulkCheck({
       if (cancelled.current) break;
       const type = s.type ?? 'UNKNOWN';
       const planOnly = analyze && type !== 'SELECT';
-      const row: Row = { id: s.id, type, status: 'ok', planOnly, cost: null, rows: null, executionMs: null, seqScans: [], findings: { high: 0, medium: 0 }, error: null };
+      const row: Row = {
+        id: s.id,
+        type,
+        status: 'ok',
+        planOnly,
+        cost: null,
+        rows: null,
+        executionMs: null,
+        seqScans: [],
+        findings: { high: 0, medium: 0 },
+        error: null,
+        missing: [],
+      };
       try {
         // 画面で開いたときと同じく、個別の値・共通パラメータ・既定の値・式から値を作る
         const schema = (await api.parameters(s.id)).tree;
-        const resolved = resolveTemplates(effectiveValue(schema, combine(applicable(globalSets, globalStatements[s.id])), loadParams(s.id)), new Map());
+        const effective = effectiveValue(schema, combine(applicable(globalSets, globalStatements[s.id])), loadParams(s.id));
+        row.missing = missingParams(schema, effective);
+        const resolved = resolveTemplates(effective, new Map());
         if (resolved.issues.length > 0) throw new Error(`式の誤り: ${resolved.issues.map((x) => `${x.path}: ${x.message}`).join('、')}`);
         const r = await api.explain(s.id, resolved.value, current.id, {
           analyze: analyze && !planOnly,
@@ -106,6 +127,8 @@ export function BulkCheck({
     }
     setRunning(false);
   };
+
+  const missingCount = rows.filter((r) => r.missing.length > 0).length;
 
   const sorted = useMemo(() => {
     const list = [...rows];
@@ -141,79 +164,91 @@ export function BulkCheck({
         <h2>一括チェック</h2>
         <span className="hint">保存してある個別の値・共通パラメータで、statement をまとめて EXPLAIN します</span>
       </header>
-      <div className="execute-bar">
-        <ConnectionPicker conn={conn} />
-        <input type="search" placeholder="statement・ファイルで絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} disabled={running} />
-        <label className="check" title="SELECT だけを実際に実行して測る（読み取り専用のトランザクションで、ロールバックする）。更新系は計画だけ">
-          <input type="checkbox" checked={analyze} onChange={(e) => setAnalyze(e.target.checked)} disabled={running} />
-          ANALYZE（SELECT だけ実行して測る）
-        </label>
-        {running ? (
-          <button type="button" onClick={() => (cancelled.current = true)}>
-            止める（{progress} / {targets.length}）
-          </button>
-        ) : (
-          <button type="button" className="run" disabled={!conn.current || targets.length === 0} onClick={run}>
-            {targets.length} 件をチェック
-          </button>
-        )}
-      </div>
-      <p className="hint">
-        計画のみ（既定）では SQL を実行しません。値が保存されていない statement は、未設定の項目を NULL として扱うため、実際とは違う計画になることがあります。行をクリックすると、その statement の EXPLAIN タブを開きます。
-      </p>
-      {rows.length > 0 && (
-        <div className="grid-scroll bulk-scroll">
-          <table className="bulk-table">
-            <thead>
-              <tr>
-                {header('id', 'statement')}
-                <th>種類</th>
-                {header('cost', 'コスト', '見積もりのコスト（一番上のノード）')}
-                <th title="見積もりの行数">行数</th>
-                {header('time', '実行時間', 'ANALYZE のときだけ')}
-                <th title="全件読み込みする表">全件読み込み</th>
-                {header('findings', '指摘', 'ANALYZE のときだけ。要確認 / 確認')}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((r) => (
-                <tr
-                  key={r.id}
-                  className={r.status === 'error' ? 'error' : undefined}
-                  onClick={() => {
-                    onOpen(r.id);
-                  }}
-                >
-                  <td className="bulk-id" title={r.id}>
-                    {r.id}
-                  </td>
-                  <td>
-                    {r.type}
-                    {r.planOnly && <span className="badge muted">計画のみ</span>}
-                  </td>
-                  {r.status === 'error' ? (
-                    <td colSpan={5} className="error-text bulk-error" title={r.error ?? undefined}>
-                      {r.error}
-                    </td>
-                  ) : (
-                    <>
-                      <td className="num">{r.cost === null ? '-' : Math.round(r.cost).toLocaleString('ja-JP')}</td>
-                      <td className="num">{r.rows === null ? '-' : r.rows.toLocaleString('ja-JP')}</td>
-                      <td className="num">{r.executionMs === null ? '-' : `${r.executionMs.toFixed(1)} ms`}</td>
-                      <td className={r.seqScans.length > 0 ? 'warn-text' : undefined}>{r.seqScans.join(', ') || '-'}</td>
-                      <td className="num">
-                        {r.findings.high > 0 && <span className="severity high">要確認 {r.findings.high}</span>}
-                        {r.findings.medium > 0 && <span className="severity medium">確認 {r.findings.medium}</span>}
-                        {r.findings.high + r.findings.medium === 0 && '-'}
+      <div className="bulk-body">
+        <BulkPicker statements={statements} selected={selection} onChange={select} disabled={running} />
+        <div className="bulk-main">
+          <div className="execute-bar">
+            <ConnectionPicker conn={conn} />
+            <label className="check" title="SELECT だけを実際に実行して測る（読み取り専用のトランザクションで、ロールバックする）。更新系は計画だけ">
+              <input type="checkbox" checked={analyze} onChange={(e) => setAnalyze(e.target.checked)} disabled={running} />
+              ANALYZE（SELECT だけ実行して測る）
+            </label>
+            {running ? (
+              <button type="button" onClick={() => (cancelled.current = true)}>
+                止める（{progress} / {targets.length}）
+              </button>
+            ) : (
+              <button type="button" className="run" disabled={!conn.current || targets.length === 0} onClick={run}>
+                選んだ {targets.length} 件をチェック
+              </button>
+            )}
+          </div>
+          <p className="hint">計画のみ（既定）では SQL を実行しません。行をクリックすると、その statement の EXPLAIN タブを開きます。</p>
+          {missingCount > 0 && (
+            <p className="notes warn">
+              {missingCount} 件の statement に未設定の項目があります。未設定の項目は NULL として扱うため、実際とは違う計画になることがあります。
+            </p>
+          )}
+          {rows.length > 0 && (
+            <div className="grid-scroll bulk-scroll">
+              <table className="bulk-table">
+                <thead>
+                  <tr>
+                    {header('id', 'statement')}
+                    <th>種類</th>
+                    {header('cost', 'コスト', '見積もりのコスト（一番上のノード）')}
+                    <th title="見積もりの行数">行数</th>
+                    {header('time', '実行時間', 'ANALYZE のときだけ')}
+                    <th title="全件読み込みする表">全件読み込み</th>
+                    {header('findings', '指摘', 'ANALYZE のときだけ。要確認 / 確認')}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((r) => (
+                    <tr
+                      key={r.id}
+                      className={r.status === 'error' ? 'error' : undefined}
+                      onClick={() => {
+                        onOpen(r.id);
+                      }}
+                    >
+                      <td className="bulk-id" title={r.id}>
+                        {r.missing.length > 0 && (
+                          <span className="badge warn" title={`未設定（NULL として扱われます）: ${r.missing.join(', ')}`}>
+                            未設定 {r.missing.length}
+                          </span>
+                        )}
+                        {r.id}
                       </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      <td>
+                        {r.type}
+                        {r.planOnly && <span className="badge muted">計画のみ</span>}
+                      </td>
+                      {r.status === 'error' ? (
+                        <td colSpan={5} className="error-text bulk-error" title={r.error ?? undefined}>
+                          {r.error}
+                        </td>
+                      ) : (
+                        <>
+                          <td className="num">{r.cost === null ? '-' : Math.round(r.cost).toLocaleString('ja-JP')}</td>
+                          <td className="num">{r.rows === null ? '-' : r.rows.toLocaleString('ja-JP')}</td>
+                          <td className="num">{r.executionMs === null ? '-' : `${r.executionMs.toFixed(1)} ms`}</td>
+                          <td className={r.seqScans.length > 0 ? 'warn-text' : undefined}>{r.seqScans.join(', ') || '-'}</td>
+                          <td className="num">
+                            {r.findings.high > 0 && <span className="severity high">要確認 {r.findings.high}</span>}
+                            {r.findings.medium > 0 && <span className="severity medium">確認 {r.findings.medium}</span>}
+                            {r.findings.high + r.findings.medium === 0 && '-'}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

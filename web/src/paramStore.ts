@@ -21,3 +21,12 @@ export function saveParams(id: string, value: PValue | undefined) {
     // 保存できない環境（プライベートウィンドウなど）では保存しない
   }
 }
+
+/** 個別の値を保存してあるか */
+export function hasParams(id: string): boolean {
+  try {
+    return localStorage.getItem(STORAGE_PREFIX + id) !== null;
+  } catch {
+    return false;
+  }
+}

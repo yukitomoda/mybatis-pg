@@ -1728,3 +1728,91 @@ button.bulk-open {
   padding: 0.5rem 0.4rem 0.5rem 0;
   cursor: pointer;
 }
+
+/* ---- 一括チェック: 実行するものを選ぶ ---- */
+
+.bulk-body {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.bulk-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.bulk-picker {
+  border-right: 1px solid var(--border);
+  padding-right: 0.8rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bulk-picker fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.bulk-picker input[type='search'] {
+  width: 100%;
+}
+
+.bulk-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  font-size: 13px;
+}
+
+.bulk-picker .tree-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.pick-line {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.pick-line.stmt {
+  cursor: pointer;
+  padding-left: 1.2rem;
+}
+
+.pick-line .node {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+@media (max-width: 720px) {
+  .bulk-body {
+    grid-template-columns: 1fr;
+  }
+  .bulk-picker {
+    border-right: none;
+    max-height: 50vh;
+  }
+}
+
+.badge.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn);
+  font-weight: 600;
+}
