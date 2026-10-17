@@ -225,7 +225,10 @@ public final class GlobalStore {
    * statement で無効・適用しないにしていたもの（disabled、excludes、rules の statement での off）は、その statement で外したものにする。
    */
   private static void migrate(JsonObject p) {
-    p.remove("active");
+    // v0.2.1 までの形: 選んだ 1 つ（active）だけを使う。それだけを既定で入れるものにする（同じ値から同じ SQL を作るため）
+    boolean hadActive = p.has("active");
+    JsonElement activeEl = p.remove("active");
+    String active = activeEl != null && activeEl.isJsonPrimitive() ? activeEl.getAsString() : null;
     p.remove("order");
     JsonObject statements = p.getAsJsonObject("statements");
     for (Map.Entry<String, JsonElement> e : statements.entrySet()) {
@@ -258,7 +261,7 @@ public final class GlobalStore {
       set.remove("scope");
       set.remove("enabled");
       if (!set.has("default")) {
-        set.addProperty("default", true);
+        set.addProperty("default", !hadActive || id.equals(active));
       }
       for (String statementId : off) {
         JsonObject settings = statements.getAsJsonObject(statementId);

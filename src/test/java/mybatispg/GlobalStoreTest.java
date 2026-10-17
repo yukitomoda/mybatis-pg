@@ -114,11 +114,20 @@ class GlobalStoreTest {
   }
 
   @Test
-  void 一つを選ぶ形と範囲とオンオフの形は既定で入れる() throws Exception {
-    JsonObject p = migrate("{\"active\":\"a\",\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}},"
-        + "{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"enabled\":false,\"scope\":{\"all\":true,\"items\":[]}}]}");
+  void 一つを選ぶ形は選んでいたものだけを既定で入れる() throws Exception {
+    // v0.2.1 までの形
+    JsonObject p = migrate("{\"active\":\"a\",\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}},{\"id\":\"b\",\"name\":\"B\",\"values\":{}}]}");
     assertEquals("{\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{},\"default\":true},"
-        + "{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"default\":true}],\"statements\":{}}", p.toString());
+        + "{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"default\":false}],\"statements\":{}}", p.toString());
+    // 何も選んでいなければ、どれも入れない
+    JsonObject none = migrate("{\"active\":null,\"sets\":[{\"id\":\"a\",\"name\":\"A\",\"values\":{}}]}");
+    assertEquals("false", none.getAsJsonArray("sets").get(0).getAsJsonObject().get("default").toString());
+  }
+
+  @Test
+  void 範囲とオンオフの形は既定で入れる() throws Exception {
+    JsonObject p = migrate("{\"sets\":[{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"enabled\":false,\"scope\":{\"all\":true,\"items\":[]}}]}");
+    assertEquals("{\"sets\":[{\"id\":\"b\",\"name\":\"B\",\"values\":{},\"default\":true}],\"statements\":{}}", p.toString());
   }
 
   @Test
