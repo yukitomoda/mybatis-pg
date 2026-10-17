@@ -1,5 +1,6 @@
 package mybatispg;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,15 +20,57 @@ public final class MapperWorkspace {
   private final List<Path> watchRoots;
   /** 画面でファイルを相対パスで見せるときの基準 */
   private final Path baseDir;
+  /** 下書き・共通パラメータ・プレイグラウンドを分けるための、プロジェクトを区別する文字列 */
+  private final String projectKey;
+  /** ファイルに保存できない（JAR から取り出したものなど） */
+  private final boolean readOnly;
   private volatile SqlRenderer renderer;
   /** reload() のたびに増える。画面はこれを見て再取得する */
   private long generation;
 
   private MapperWorkspace(Supplier<List<Path>> files, List<Path> watchRoots, Path baseDir) {
+    this(files, watchRoots, baseDir, baseDir == null ? "" : baseDir.toString(), false);
+  }
+
+  private MapperWorkspace(Supplier<List<Path>> files, List<Path> watchRoots, Path baseDir, String projectKey, boolean readOnly) {
     this.files = files;
     this.watchRoots = Collections.unmodifiableList(new ArrayList<>(watchRoots));
     this.baseDir = baseDir;
+    this.projectKey = projectKey;
+    this.readOnly = readOnly;
     reload();
+  }
+
+  /**
+   * JAR（war）の中の mapper XML を使う。一時ディレクトリに取り出して読み込み、JAR が変わったら取り出し直す。
+   * 画面では JAR の中のパスで見せる。ファイルには保存できない。
+   */
+  public static MapperWorkspace ofJar(Path jar) throws IOException {
+    final Path abs = jar.toAbsolutePath().normalize();
+    final Path dir = Files.createTempDirectory("mybatis-pg-jar");
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      try {
+        JarMappers.clear(dir);
+      } catch (IOException e) {
+        // 一時ディレクトリなので、消せなくても困らない
+      }
+    }));
+    final long[] extractedAt = {Long.MIN_VALUE};
+    Supplier<List<Path>> files = () -> {
+      synchronized (extractedAt) {
+        try {
+          long modified = Files.getLastModifiedTime(abs).toMillis();
+          if (modified != extractedAt[0]) {
+            JarMappers.extract(abs, dir);
+            extractedAt[0] = modified;
+          }
+        } catch (IOException e) {
+          throw new IllegalStateException(abs + " から mapper XML を取り出せません", e);
+        }
+        return MapperLocations.mapperXmlUnder(dir);
+      }
+    };
+    return new MapperWorkspace(files, Collections.singletonList(abs.getParent()), dir, abs.toString(), true);
   }
 
   /** mapper XML のファイル、またはそれを含むディレクトリを直接指定する */
@@ -97,6 +140,14 @@ public final class MapperWorkspace {
   /** 画面でファイルを相対パスで見せるときの基準。null なら絶対パスで見せる */
   public Path baseDir() {
     return baseDir;
+  }
+
+  public String projectKey() {
+    return projectKey;
+  }
+
+  public boolean isReadOnly() {
+    return readOnly;
   }
 
   /** 変更を監視するディレクトリ */

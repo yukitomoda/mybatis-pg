@@ -485,6 +485,8 @@ public final class ToolServer {
     body.put("generation", generation);
     body.put("statements", statements);
     body.put("playgrounds", playgroundList);
+    // JAR から読み込んだときなど、ファイルに保存できない
+    body.put("readOnly", workspace.isReadOnly());
     body.put("loadErrors", renderer.getLoadErrors());
     sendJson(ex, 200, body);
   }
@@ -1153,7 +1155,12 @@ public final class ToolServer {
       sendJson(ex, 400, error("保存するファイルが、読み込んでいる mapper XML ではありません"));
       return;
     }
+    if (workspace.isReadOnly() && !shown.startsWith(PlaygroundStore.PREFIX)) {
+      sendJson(ex, 403, error("JAR から読み込んだ mapper XML は、ファイルに保存できません"));
+      return;
+    }
     boolean force = req.has("force") && req.get("force").getAsBoolean();
+
     try {
       // エディタは改行を LF にそろえるので、改行の違いだけなら変わっていないものとする
       String current = MapperText.read(file);

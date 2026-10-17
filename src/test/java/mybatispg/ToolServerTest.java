@@ -371,6 +371,23 @@ class ToolServerTest {
   }
 
   @Test
+  void JARから読み込んだものは保存できない(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+    ToolServer s = ToolServer.start(MapperWorkspace.ofJar(JarMappersTest.springBootJar(dir)), ConnectionStore.inMemory(), GlobalStore.inMemory(), 0, TOKEN);
+    try {
+      String jarHost = "127.0.0.1:" + s.getPort();
+      Response list = request(s.getPort(), "GET", "/api/statements", headers("Host", jarHost, "X-Auth-Token", TOKEN), null);
+      assertTrue(list.body.contains("\"file\":\"BOOT-INF/classes/mapper/UserMapper.xml\""), list.body);
+      assertTrue(list.body.contains("\"readOnly\":true"), list.body);
+      Response save = request(s.getPort(), "POST", "/api/file/save", headers("Host", jarHost, "X-Auth-Token", TOKEN, "Content-Type", "application/json"),
+          "{\"file\":\"BOOT-INF/classes/mapper/UserMapper.xml\",\"base\":\"\",\"content\":\"x\",\"force\":true}");
+      assertEquals(403, save.status, save.body);
+    } finally {
+      s.stop();
+    }
+    assertTrue(api("GET", "/api/statements", null, 200).toString().contains("\"readOnly\":false"));
+  }
+
+  @Test
   void レンダリングのエラー() throws Exception {
     // OGNL の評価エラーは 422
     JsonObject e = api("POST", "/api/render", "{\"statementId\":\"sample.ParamMapper.broken\",\"parameters\":{}}", 422);

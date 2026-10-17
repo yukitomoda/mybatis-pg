@@ -16,6 +16,7 @@ import java.util.List;
  * <pre>
  * java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ
  * java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...
+ * java -jar mybatis-pg.jar [オプション] --jar アプリのJAR（war）
  * </pre>
  */
 public final class Main {
@@ -28,6 +29,8 @@ public final class Main {
   private static final String USAGE = "使い方:\n"
       + "  java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ\n"
       + "  java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...\n"
+      + "  java -jar mybatis-pg.jar [オプション] --jar アプリのJAR（war）\n"
+      + "                       JAR の中（中の JAR を含む）の mapper XML を読み込む。編集して試せるが、ファイルには保存できない\n"
       + "オプション:\n"
       + "  --port 番号          待ち受けるポート。省略すると 7171 から順に空いているポートを使う（複数起動できる）。0 なら OS が選ぶ\n"
       + "  --public-url URL     リバースプロキシ経由で公開する URL。{port} は使ったポートに置き換える\n"
@@ -43,6 +46,7 @@ public final class Main {
     // null なら空いているポートを探す
     Integer port = null;
     Path project = null;
+    Path jar = null;
     List<Path> sources = new ArrayList<>();
     List<String> publicUrls = new ArrayList<>();
     String editorCommand = null;
@@ -58,19 +62,31 @@ public final class Main {
         publicUrls.add(args[++i]);
       } else if ("--project".equals(args[i]) && i + 1 < args.length) {
         project = absolute(args[++i]);
+      } else if ("--jar".equals(args[i]) && i + 1 < args.length) {
+        jar = absolute(args[++i]);
       } else if (args[i].startsWith("-")) {
         usage();
+      } else if (args[i].endsWith(".jar") || args[i].endsWith(".war")) {
+        jar = absolute(args[i]);
       } else {
         sources.add(absolute(args[i]));
       }
     }
-    if ((project == null) == sources.isEmpty()) {
+    // --project・mapper のファイル・--jar のどれか 1 つだけを指定する
+    if ((project != null ? 1 : 0) + (sources.isEmpty() ? 0 : 1) + (jar != null ? 1 : 0) != 1) {
       usage();
     }
     System.out.println("mybatis-pg " + version());
 
     MapperWorkspace workspace;
-    if (project != null) {
+    if (jar != null) {
+      if (!Files.isRegularFile(jar)) {
+        System.err.println("ファイルがありません: " + jar);
+        System.exit(2);
+      }
+      System.out.println("JAR の中の mapper XML を読み込みます（ファイルには保存できません）: " + jar);
+      workspace = MapperWorkspace.ofJar(jar);
+    } else if (project != null) {
       if (!Files.isDirectory(project)) {
         System.err.println("ディレクトリがありません: " + project);
         System.exit(2);
@@ -104,13 +120,12 @@ public final class Main {
 
     // 共通パラメータ（プロジェクトごと）
     Path globalsFile = configDir.resolve("globals.json");
-    Path base = workspace.baseDir();
-    GlobalStore globals = GlobalStore.load(globalsFile, base == null ? "" : base.toString());
+    GlobalStore globals = GlobalStore.load(globalsFile, workspace.projectKey());
     System.out.println("共通パラメータ: " + globalsFile);
 
     // mapper XML の編集中の内容（プロジェクトごと）
     Path draftsDir = configDir.resolve("drafts");
-    DraftStore drafts = DraftStore.open(draftsDir, base == null ? "" : base.toString());
+    DraftStore drafts = DraftStore.open(draftsDir, workspace.projectKey());
     System.out.println("編集中の mapper XML: " + draftsDir);
 
     String token = newToken();
@@ -122,7 +137,7 @@ public final class Main {
     System.out.println("保存したパスワード（暗号化）: " + secretsFile);
     // このアプリだけで使う mapper XML（プロジェクトごと）
     Path playgroundDir = configDir.resolve("playground");
-    server.usePlaygrounds(PlaygroundStore.open(playgroundDir, base == null ? "" : base.toString()));
+    server.usePlaygrounds(PlaygroundStore.open(playgroundDir, workspace.projectKey()));
     System.out.println("プレイグラウンド: " + playgroundDir);
     List<URI> urls = new ArrayList<>();
     for (String template : publicUrls) {
