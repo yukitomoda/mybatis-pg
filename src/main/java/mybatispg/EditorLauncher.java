@@ -35,16 +35,24 @@ public final class EditorLauncher {
 
   /** @param template 例: {@code code --goto {file}:{line}} */
   public static EditorLauncher of(String template) {
+    return of(template, System.getenv(), isWindows());
+  }
+
+  static EditorLauncher of(String template, Map<String, String> env, boolean windows) {
     List<String> argv = split(template);
     if (argv.isEmpty()) {
       throw new IllegalArgumentException("--editor のコマンドが空です");
+    }
+    // Windows では code の実体は code.cmd。拡張子のない名前では Java から起動できないので、PATHEXT の拡張子で探す
+    if (windows) {
+      argv.set(0, resolveWindows(argv.get(0), env));
     }
     return new EditorLauncher(argv);
   }
 
   /** 環境から VS Code のコマンドを探す。見つからなければ開けない状態にする */
   public static EditorLauncher detect(Map<String, String> env) {
-    String code = findCodeCommand(env);
+    String code = findCodeCommand(env, isWindows());
     return new EditorLauncher(code == null ? null : Arrays.asList(code, "--goto", "{file}:{line}"));
   }
 
@@ -115,11 +123,26 @@ public final class EditorLauncher {
    * </ol>
    */
   static String findCodeCommand(Map<String, String> env) {
-    String path = env.get("PATH");
+    return findCodeCommand(env, isWindows());
+  }
+
+  static String findCodeCommand(Map<String, String> env, boolean windows) {
+    String path = pathOf(env);
     if (path != null) {
       for (String name : new String[] {"code", "code-server"}) {
-        for (String dir : path.split(File.pathSeparator)) {
-          if (!dir.isEmpty() && Files.isExecutable(Paths.get(dir, name))) {
+        for (String dir : path.split(windows ? ";" : File.pathSeparator)) {
+          if (dir.isEmpty()) {
+            continue;
+          }
+          if (windows) {
+            // 拡張子のない code は Git Bash や WSL 向けのスクリプトで、Java からは起動できない。code.cmd などを探す
+            for (String ext : pathExt(env)) {
+              Path candidate = Paths.get(dir, name + ext);
+              if (Files.isRegularFile(candidate)) {
+                return candidate.toString();
+              }
+            }
+          } else if (Files.isExecutable(Paths.get(dir, name))) {
             return Paths.get(dir, name).toString();
           }
         }
@@ -140,6 +163,68 @@ public final class EditorLauncher {
       }
     }
     return null;
+  }
+
+  static boolean isWindows() {
+    return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+  }
+
+  /** PATH（Windows では Path と書かれていることがある） */
+  private static String pathOf(Map<String, String> env) {
+    for (Map.Entry<String, String> e : env.entrySet()) {
+      if (e.getKey().equalsIgnoreCase("PATH")) {
+        return e.getValue();
+      }
+    }
+    return null;
+  }
+
+  /** 実行できるファイルの拡張子（Windows の PATHEXT。なければ .COM;.EXE;.BAT;.CMD） */
+  private static List<String> pathExt(Map<String, String> env) {
+    String ext = null;
+    for (Map.Entry<String, String> e : env.entrySet()) {
+      if (e.getKey().equalsIgnoreCase("PATHEXT")) {
+        ext = e.getValue();
+      }
+    }
+    List<String> out = new ArrayList<>();
+    for (String x : (ext == null || ext.trim().isEmpty() ? ".COM;.EXE;.BAT;.CMD" : ext).split(";")) {
+      if (!x.trim().isEmpty()) {
+        out.add(x.trim().toLowerCase(java.util.Locale.ROOT));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Windows で、拡張子のないコマンド（code など）を、PATHEXT の拡張子を付けて探す（code.cmd など）。
+   * 拡張子があるか、見つからなければそのまま返す。
+   */
+  static String resolveWindows(String command, Map<String, String> env) {
+    String name = command.replace('/', '\\');
+    String base = name.substring(name.lastIndexOf('\\') + 1);
+    if (base.contains(".")) {
+      return command;
+    }
+    List<String> dirs = new ArrayList<>();
+    if (name.contains("\\")) {
+      // パスで書いてあれば、その場所だけを見る
+      dirs.add("");
+    } else {
+      String path = pathOf(env);
+      if (path != null) {
+        dirs.addAll(Arrays.asList(path.split(";")));
+      }
+    }
+    for (String dir : dirs) {
+      for (String ext : pathExt(env)) {
+        Path candidate = dir.isEmpty() ? Paths.get(name + ext) : Paths.get(dir, name + ext);
+        if (Files.isRegularFile(candidate)) {
+          return candidate.toString();
+        }
+      }
+    }
+    return command;
   }
 
   /** 空白で区切る。"..." と '...' の中の空白は区切らない */

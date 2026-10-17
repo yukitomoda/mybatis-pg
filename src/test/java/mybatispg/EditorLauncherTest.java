@@ -74,4 +74,25 @@ class EditorLauncherTest {
     assertEquals(code.toString(), EditorLauncher.findCodeCommand(env));
     assertEquals(code + " --goto {file}:{line}", EditorLauncher.detect(env).describe());
   }
+
+  @Test
+  void Windowsでは拡張子のないcodeではなくcode_cmdを使う() throws Exception {
+    // VS Code の bin には、Git Bash・WSL 向けの拡張子のない code と、code.cmd が並んでいる
+    Path bin = dir.resolve("vscode/bin");
+    Files.createDirectories(bin);
+    Files.write(bin.resolve("code"), new byte[0]);
+    Files.write(bin.resolve("code.cmd"), new byte[0]);
+    Map<String, String> env = new HashMap<>();
+    env.put("Path", "/no/such/dir;" + bin);
+    env.put("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+    assertEquals(bin.resolve("code.cmd").toString(), EditorLauncher.findCodeCommand(env, true));
+
+    // --editor に拡張子のない名前を書いても、code.cmd を起動する
+    assertEquals(bin.resolve("code.cmd") + " --goto {file}:{line}", EditorLauncher.of("code --goto {file}:{line}", env, true).describe());
+    // 拡張子があるもの・見つからないものはそのまま
+    assertEquals("code.exe --goto {file}", EditorLauncher.of("code.exe --goto {file}", env, true).describe());
+    assertEquals("subl {file}", EditorLauncher.of("subl {file}", env, true).describe());
+    // Windows でなければ変えない
+    assertEquals("code --goto {file}:{line}", EditorLauncher.of("code --goto {file}:{line}", env, false).describe());
+  }
 }
