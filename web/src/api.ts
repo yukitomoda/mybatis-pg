@@ -367,6 +367,9 @@ export function createApi(token: string) {
             `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
+    /** SQL の一部（サブクエリ・CTE など）を読み取り専用で実行する（必ずロールバックする） */
+    runPart: (connectionId: string, sql: string, maxRows = 200) =>
+      call<ResultTable & { total: number | null; elapsedMillis: number }>('api/part', post(JSON.stringify({ connectionId, sql, maxRows }))),
     tables: (connectionId: string, tables: string[]) =>
       call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */

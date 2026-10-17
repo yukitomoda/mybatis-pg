@@ -4,6 +4,7 @@ import { ApiError, createApi, takeToken } from './api';
 import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
+import { SubqueryPanel } from './Subquery';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
@@ -39,13 +40,13 @@ export function App() {
 
 // ---- 保存 ----
 
-type Tab = 'sql' | 'execute' | 'explain' | 'template';
+type Tab = 'sql' | 'execute' | 'explain' | 'subquery' | 'template';
 const TAB_KEY = 'mybatis-pg.tab';
 
 function loadTab(): Tab {
   try {
     const saved = localStorage.getItem(TAB_KEY);
-    return saved === 'execute' || saved === 'explain' || saved === 'template' ? saved : 'sql';
+    return saved === 'execute' || saved === 'explain' || saved === 'subquery' || saved === 'template' ? saved : 'sql';
   } catch {
     return 'sql';
   }
@@ -496,6 +497,7 @@ function Workspace({ api }: { api: Api }) {
               ['sql', 'SQL'],
               ['execute', '実行'],
               ['explain', 'EXPLAIN'],
+              ['subquery', 'サブクエリ'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -567,6 +569,15 @@ function Workspace({ api }: { api: Api }) {
             />
           ) : (
             <p className="hint">左の一覧から statement を選んでください。</p>
+          )}
+        </div>
+
+        {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
+        <div hidden={tab !== 'subquery'}>
+          {selected && result && !renderError ? (
+            <SubqueryPanel key={selected} conn={conn} sql={result.literalSql} onApiError={handleError} />
+          ) : (
+            <p className="hint">{selected ? 'SQL を組み立てると、サブクエリを調べられます。' : '左の一覧から statement を選んでください。'}</p>
           )}
         </div>
 

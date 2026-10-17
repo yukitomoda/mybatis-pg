@@ -316,7 +316,7 @@ function ExecuteResult({ result }: { result: ExecuteResponse }) {
   );
 }
 
-function ResultGrid({ table }: { table: ResultTable }) {
+export function ResultGrid({ table }: { table: ResultTable }) {
   return (
     <div className="result-grid">
       <p className="hint">
