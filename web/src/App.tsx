@@ -298,6 +298,7 @@ function Workspace({ api }: { api: Api }) {
               api={api}
               globals={globals}
               statements={statements}
+              target={target}
               generation={generation}
               gen={gen}
               renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}

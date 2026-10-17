@@ -1662,3 +1662,13 @@ dialog.bulk input[type='search'] {
   margin: 0 0 0.5rem;
   font-size: 12px;
 }
+
+.global-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 1rem;
+  margin-bottom: 0.3rem;
+  font-size: 13px;
+}

@@ -6,7 +6,8 @@ import type { GenContext } from './GenInput';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt } from './params';
-import type { GlobalSet, Scope } from './scope';
+import type { GlobalSet, Scope, Target } from './scope';
+import { specificity } from './scope';
 import type { StatementEntry, TreeNode } from './tree';
 import { buildTree, shortId } from './tree';
 
@@ -126,6 +127,7 @@ export function GlobalPanel({
   api,
   globals,
   statements,
+  target,
   generation,
   gen,
   renderJson,
@@ -133,19 +135,39 @@ export function GlobalPanel({
   api: Api;
   globals: Globals;
   statements: StatementEntry[];
+  /** 今表示している statement。一覧にはこれに関わる共通パラメータだけを出す（null ならすべて） */
+  target: Target | null;
   generation: number;
   gen: GenContext;
   /** 値の JSON 欄（App の JsonPanel を使う） */
   renderJson: (value: PValue | undefined, onApply: (v: PValue | undefined) => void) => ReactNode;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const { sets } = globals;
+  // 今の statement に範囲が当たるもの（オフのものも、オンにすれば効くので出す）
+  const relevant = target ? sets.filter((s) => specificity(s.scope, target) !== null) : sets;
+  const listed = showAll || !target ? sets : relevant;
   // 一覧で選ぶまでは、何も編集しない（意図しない共通パラメータを変えないように）
   const editing = sets.find((s) => s.id === editingId) ?? null;
 
   return (
     <div className="global-panel">
-      <ScopedList sets={sets} statements={statements} editingId={editing?.id ?? null} onEdit={setEditingId} globals={globals} />
+      {target && (
+        <div className="global-filter">
+          <span>
+            {showAll ? 'すべての共通パラメータ' : <><code>{shortId(target.id)}</code> に関わる共通パラメータ</>}
+          </span>
+          <label className="check">
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+            すべて表示（{sets.length}）
+          </label>
+        </div>
+      )}
+      <ScopedList sets={listed} allSets={sets} statements={statements} editingId={editing?.id ?? null} onEdit={setEditingId} globals={globals} />
+      {editing && !listed.includes(editing) && (
+        <p className="hint">編集中の「{editing.name}」は、{target ? shortId(target.id) : ''} には効いていません（範囲の外です）。</p>
+      )}
       <div className="global-actions">
         <button type="button" onClick={async () => setEditingId((await globals.create(null)) ?? editingId)}>
           新規
@@ -257,12 +279,16 @@ const SCOPE_ICONS: Record<ScopeNode['kind'], string> = { all: '◎', dir: '▤',
 /** 共通パラメータの一覧: 範囲のツリーの中に置く（内側・下にあるほど優先） */
 function ScopedList({
   sets,
+  allSets,
   statements,
   editingId,
   onEdit,
   globals,
 }: {
+  /** 表示するもの */
   sets: GlobalSet[];
+  /** すべて（並び替えの位置を決めるのに使う） */
+  allSets: GlobalSet[];
   statements: StatementEntry[];
   editingId: string | null;
   onEdit: (id: string) => void;
@@ -283,7 +309,6 @@ function ScopedList({
                 // 同じ位置で順番を入れ替えられる（下ほど優先）
                 const siblings = n.sets;
                 const i = siblings.indexOf(s);
-                const others = s.scope.all ? 0 : s.scope.items.length - 1;
                 return (
                   <li
                     key={s.id}
@@ -298,7 +323,6 @@ function ScopedList({
                       onChange={(e) => globals.setEnabled(s, e.target.checked)}
                     />
                     <span className="global-name">{s.name}</span>
-                    {others > 0 && <span className="badge muted" title={s.scope.items.join('\n')}>ほか {others} か所</span>}
                     {siblings.length > 1 && (
                       <span className="global-move">
                         <button
@@ -308,7 +332,7 @@ function ScopedList({
                           disabled={i === 0}
                           onClick={(e) => {
                             e.stopPropagation();
-                            moveWithin(globals, sets, siblings, s, -1);
+                            moveWithin(globals, allSets, siblings, s, -1);
                           }}
                         >
                           ↑
@@ -320,7 +344,7 @@ function ScopedList({
                           disabled={i === siblings.length - 1}
                           onClick={(e) => {
                             e.stopPropagation();
-                            moveWithin(globals, sets, siblings, s, 1);
+                            moveWithin(globals, allSets, siblings, s, 1);
                           }}
                         >
                           ↓
@@ -339,7 +363,11 @@ function ScopedList({
   );
   return (
     <div className="scoped-list">
-      {sets.length === 0 ? <p className="hint">共通パラメータはまだありません。「新規」で作ってください。</p> : render(tree)}
+      {sets.length === 0 ? (
+        <p className="hint">{allSets.length === 0 ? '共通パラメータはまだありません。「新規」で作ってください。' : 'この statement に関わる共通パラメータはありません。'}</p>
+      ) : (
+        render(tree)
+      )}
     </div>
   );
 }
