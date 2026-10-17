@@ -9,7 +9,7 @@ import { forget, resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
 import { AppliedGlobals, GlobalsScreen, useGlobals } from './Globals';
 import { ConnectionsScreen } from './Execution';
-import { applicable, combine, originAt } from './scope';
+import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
 import type { ParamSchema, PValue } from './params';
@@ -202,7 +202,7 @@ function Workspace({ api }: { api: Api }) {
   const globals = useGlobals(api, handleError);
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
   const target = statements.find((s) => s.id === selected) ?? null;
-  const applied = useMemo(() => applicable(globals.sets, globals.order, target), [globals.sets, globals.order, target]);
+  const applied = useMemo(() => (selected ? applicable(globals.sets, globals.statements[selected]) : []), [globals.sets, globals.statements, selected]);
   const base = useMemo(() => combine(applied), [applied]);
   // レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値）
   const effective = useMemo(() => effectiveValue(schema, base, value), [schema, base, value]);
@@ -326,7 +326,7 @@ function Workspace({ api }: { api: Api }) {
             {target && (
               <AppliedGlobals
                 globals={globals}
-                target={target}
+                statementId={target.id}
                 onSettings={(id) => {
                   setGlobalFocus(id);
                   go('globals');
@@ -457,7 +457,6 @@ function Workspace({ api }: { api: Api }) {
         <GlobalsScreen
           api={api}
           globals={globals}
-          statements={statements}
           generation={generation}
           gen={gen}
           renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
@@ -471,7 +470,7 @@ function Workspace({ api }: { api: Api }) {
           conn={conn}
           statements={statements}
           globalSets={globals.sets}
-          globalOrder={globals.order}
+          globalStatements={globals.statements}
           onOpen={(id) => {
             select(id);
             setTab('explain');

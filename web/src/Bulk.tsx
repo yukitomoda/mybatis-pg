@@ -8,8 +8,8 @@ import { resolveTemplates } from './gen';
 import { loadParams } from './paramStore';
 import { effectiveValue } from './params';
 import { flatten, parsePlan } from './plan';
-import type { GlobalSet, Order } from './scope';
-import { applicable, combine } from './scope';
+import type { GlobalSet, StatementsSettings } from './globalModel';
+import { applicable, combine } from './globalModel';
 import type { StatementEntry } from './tree';
 
 interface Row {
@@ -35,7 +35,7 @@ export function BulkCheck({
   conn,
   statements,
   globalSets,
-  globalOrder,
+  globalStatements,
   onOpen,
 }: {
   api: Api;
@@ -43,7 +43,8 @@ export function BulkCheck({
   statements: StatementEntry[];
   /** 共通パラメータ（statement ごとに、範囲に当たるものを重ねる） */
   globalSets: GlobalSet[];
-  globalOrder: Order;
+  /** statement ごとの共通パラメータの設定 */
+  globalStatements: StatementsSettings;
   /** statement を開いて EXPLAIN タブを出す */
   onOpen: (id: string) => void;
 }) {
@@ -73,7 +74,7 @@ export function BulkCheck({
       try {
         // 画面で開いたときと同じく、個別の値・共通パラメータ・既定の値・式から値を作る
         const schema = (await api.parameters(s.id)).tree;
-        const resolved = resolveTemplates(effectiveValue(schema, combine(applicable(globalSets, globalOrder, s)), loadParams(s.id)), new Map());
+        const resolved = resolveTemplates(effectiveValue(schema, combine(applicable(globalSets, globalStatements[s.id])), loadParams(s.id)), new Map());
         if (resolved.issues.length > 0) throw new Error(`式の誤り: ${resolved.issues.map((x) => `${x.path}: ${x.message}`).join('、')}`);
         const r = await api.explain(s.id, resolved.value, current.id, {
           analyze: analyze && !planOnly,

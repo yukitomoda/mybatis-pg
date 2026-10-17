@@ -1,15 +1,13 @@
-// 共通パラメータ（複数の statement で共有する値の集まり）: 状態、共通パラメータの画面、クエリ画面の一覧
+// 共通パラメータ（すべての statement に適用する値の集まり）: 状態、共通パラメータの画面、クエリ画面の一覧
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Api, GlobalsResponse, ParameterName } from './api';
 import type { GenContext } from './GenInput';
+import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
+import { entries } from './globalModel';
 import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt, toJson } from './params';
-import type { GlobalSet, Match, Order, Target } from './scope';
-import { ROOT, orderAt, placeLabel, related } from './scope';
-import type { StatementEntry } from './tree';
-import { shortId } from './tree';
 
 /** 共通パラメータの編集では XML の項目を使わない */
 const FREE_SCHEMA: ParamSchema = { name: null, usages: [], typeHints: [], properties: [], element: null };
@@ -24,8 +22,9 @@ function message(e: unknown): string {
 // ---- 状態 ----
 
 export interface Globals {
+  /** 一覧の順が既定の順番（下ほど優先） */
   sets: GlobalSet[];
-  order: Order;
+  statements: StatementsSettings;
   error: string | null;
   /** 値を変える（少し待ってから保存する） */
   setValues: (id: string, v: PValue | undefined) => void;
@@ -33,15 +32,14 @@ export interface Globals {
   create: (copyFrom: GlobalSet | null) => Promise<string | null>;
   rename: (set: GlobalSet) => void;
   remove: (set: GlobalSet) => Promise<boolean>;
-  setScope: (set: GlobalSet, places: string[]) => void;
-  /** statement で適用しないか */
-  setExcluded: (set: GlobalSet, statementId: string, excluded: boolean) => void;
-  /** 場所の適用順序（下ほど優先） */
-  setOrder: (place: string, ids: string[]) => void;
+  /** 既定の順番を変える */
+  move: (set: GlobalSet, offset: number) => void;
+  /** statement ごとの設定を変える（順番が undefined なら既定の順番） */
+  setStatement: (statementId: string, settings: StatementSettings) => void;
 }
 
 export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals {
-  const [state, setState] = useState<GlobalsResponse>({ sets: [], order: {} });
+  const [state, setState] = useState<GlobalsResponse>({ sets: [], statements: {} });
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ id: string; values: PValue; timer: number } | null>(null);
 
@@ -83,16 +81,14 @@ export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals 
         },
       );
 
-  // 画面にはすぐ反映し、保存は後から行う
-  const patch = (id: string, change: (set: GlobalSet) => GlobalSet) => setState((s) => ({ ...s, sets: s.sets.map((x) => (x.id === id ? change(x) : x)) }));
-
   return {
     sets: state.sets,
-    order: state.order,
+    statements: state.statements,
     error,
     setValues: (id, v) => {
       const values = v ?? EMPTY_ROOT;
-      patch(id, (x) => ({ ...x, values }));
+      // 画面にはすぐ反映し、保存は少し待ってから行う
+      setState((s) => ({ ...s, sets: s.sets.map((x) => (x.id === id ? { ...x, values } : x)) }));
       if (pending.current && pending.current.id !== id) flush();
       if (pending.current) window.clearTimeout(pending.current.timer);
       pending.current = { id, values, timer: window.setTimeout(flush, SAVE_DELAY) };
@@ -113,17 +109,12 @@ export function useGlobals(api: Api, onApiError: (e: unknown) => void): Globals 
       if (!window.confirm(`共通パラメータ「${set.name}」を削除しますか？`)) return false;
       return (await run(() => api.deleteGlobal(set.id))) !== null;
     },
-    setScope: (set, places) => {
-      patch(set.id, (x) => ({ ...x, scope: places }));
-      run(() => api.scopeGlobal(set.id, places));
+    move: (set, offset) => {
+      run(() => api.moveGlobal(set.id, offset));
     },
-    setExcluded: (set, statementId, excluded) => {
-      patch(set.id, (x) => ({ ...x, excludes: excluded ? [...x.excludes.filter((i) => i !== statementId), statementId] : x.excludes.filter((i) => i !== statementId) }));
-      run(() => api.excludeGlobal(set.id, statementId, excluded));
-    },
-    setOrder: (place, ids) => {
-      setState((s) => ({ ...s, order: { ...s.order, [place]: ids } }));
-      run(() => api.orderGlobal(place, ids));
+    setStatement: (statementId, settings) => {
+      setState((s) => ({ ...s, statements: { ...s.statements, [statementId]: settings } }));
+      run(() => api.statementGlobals(statementId, settings.disabled, settings.order ?? null));
     },
   };
 }
@@ -140,47 +131,68 @@ function summary(values: PValue): string {
   return values.fields.map(([k, v]) => `${k} = ${short(v)}`).join(', ');
 }
 
-// ---- クエリ画面: この statement がスコープに入っている共通パラメータ ----
+// ---- クエリ画面: この statement での共通パラメータ ----
 
 /**
- * statement がスコープに入っている共通パラメータを、優先順位の順（下ほど優先）に並べる。
- * チェックを外すと、この statement では適用しない（ほかの statement には影響しない）。
+ * 共通パラメータを、この statement での順番（下ほど優先）に並べる。
+ * チェックで有効・無効を切り替え、↑↓ で順番を入れ替える（この statement だけに効く）。
  */
-export function AppliedGlobals({ globals, target, onSettings }: { globals: Globals; target: Target; onSettings: (setId: string | null) => void }) {
-  const list = related(globals.sets, globals.order, target);
+export function AppliedGlobals({ globals, statementId, onSettings }: { globals: Globals; statementId: string; onSettings: (setId: string | null) => void }) {
+  const settings = globals.statements[statementId];
+  const list = entries(globals.sets, settings);
+  const disabled = settings?.disabled ?? [];
+  const toggle = (id: string, on: boolean) =>
+    globals.setStatement(statementId, { disabled: on ? disabled.filter((x) => x !== id) : [...disabled, id], order: settings?.order });
+  const move = (i: number, d: number) => {
+    const ids = list.map((e) => e.set.id);
+    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+    globals.setStatement(statementId, { disabled, order: ids });
+  };
   return (
     <section className="applied-globals">
       <header>
         <h3>共通パラメータ</h3>
-        <button type="button" className="link" onClick={() => onSettings(null)}>
-          設定
-        </button>
+        <span>
+          {settings?.order && (
+            <button type="button" className="link" onClick={() => globals.setStatement(statementId, { disabled, order: undefined })}>
+              既定の順番に戻す
+            </button>
+          )}
+          <button type="button" className="link" onClick={() => onSettings(null)}>
+            設定
+          </button>
+        </span>
       </header>
       {list.length === 0 ? (
-        <p className="hint">この statement をスコープに含む共通パラメータはありません。</p>
+        <p className="hint">共通パラメータはまだありません。「設定」から作れます。</p>
       ) : (
         <table>
           <tbody>
-            {list.map((m: Match) => (
-              <tr key={m.set.id} className={m.excluded ? 'off' : undefined}>
+            {list.map((e, i) => (
+              <tr key={e.set.id} className={e.disabled ? 'off' : undefined}>
                 <td>
                   <input
                     type="checkbox"
-                    aria-label={`${m.set.name} をこの statement で適用する`}
-                    checked={!m.excluded}
-                    onChange={(e) => globals.setExcluded(m.set, target.id, !e.target.checked)}
+                    aria-label={`${e.set.name} をこの statement で使う`}
+                    checked={!e.disabled}
+                    onChange={(ev) => toggle(e.set.id, ev.target.checked)}
                   />
                 </td>
                 <td className="global-name">
-                  <button type="button" className="link" onClick={() => onSettings(m.set.id)}>
-                    {m.set.name}
+                  <button type="button" className="link" onClick={() => onSettings(e.set.id)}>
+                    {e.set.name}
                   </button>
                 </td>
-                <td className="scope-of" title={m.place.key === ROOT ? '全体' : m.place.key}>
-                  {placeLabel(m.place)}
+                <td className="values" title={summary(e.set.values)}>
+                  {e.disabled ? '無効' : summary(e.set.values)}
                 </td>
-                <td className="values" title={summary(m.set.values)}>
-                  {m.excluded ? 'この statement では適用しない' : summary(m.set.values)}
+                <td className="global-move">
+                  <button type="button" className="icon" aria-label={`${e.set.name} を上へ`} disabled={i === 0} onClick={() => move(i, -1)}>
+                    ↑
+                  </button>
+                  <button type="button" className="icon" aria-label={`${e.set.name} を下へ`} disabled={i === list.length - 1} onClick={() => move(i, 1)}>
+                    ↓
+                  </button>
                 </td>
               </tr>
             ))}
@@ -196,7 +208,6 @@ export function AppliedGlobals({ globals, target, onSettings }: { globals: Globa
 export function GlobalsScreen({
   api,
   globals,
-  statements,
   generation,
   gen,
   renderJson,
@@ -204,7 +215,6 @@ export function GlobalsScreen({
 }: {
   api: Api;
   globals: Globals;
-  statements: StatementEntry[];
   generation: number;
   gen: GenContext;
   /** 値の JSON 欄（App の JsonPanel を使う） */
@@ -218,6 +228,13 @@ export function GlobalsScreen({
   }, [focusId]);
   const { sets } = globals;
   const selected = sets.find((s) => s.id === selectedId) ?? null;
+  // 選んだ共通パラメータを無効にしている statement
+  const disabledIn = selected
+    ? Object.entries(globals.statements)
+        .filter(([, st]) => st.disabled.includes(selected.id))
+        .map(([id]) => id)
+        .sort()
+    : [];
 
   return (
     <div className="globals-screen">
@@ -228,7 +245,24 @@ export function GlobalsScreen({
             ＋ 新規
           </button>
         </div>
-        <ScopeGroups globals={globals} statements={statements} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+        <ol>
+          {sets.map((s, i) => (
+            <li key={s.id} className={s.id === selected?.id ? 'selected' : undefined}>
+              <button type="button" className="global-item" onClick={() => setSelectedId(s.id)}>
+                {s.name}
+              </button>
+              <span className="global-move">
+                <button type="button" className="icon" aria-label={`${s.name} を上へ`} disabled={i === 0} onClick={() => globals.move(s, -1)}>
+                  ↑
+                </button>
+                <button type="button" className="icon" aria-label={`${s.name} を下へ`} disabled={i === sets.length - 1} onClick={() => globals.move(s, 1)}>
+                  ↓
+                </button>
+              </span>
+            </li>
+          ))}
+          {sets.length === 0 && <li className="hint">まだありません。「新規」で作ってください。</li>}
+        </ol>
         {globals.error && <p className="error-text">{globals.error}</p>}
       </aside>
 
@@ -259,28 +293,33 @@ export function GlobalsScreen({
             {renderJson(selected.values, (v) => globals.setValues(selected.id, v))}
           </section>
           <section className="globals-places">
-            <h3>スコープ</h3>
-            <ScopeEditor set={selected} statements={statements} onChange={(places) => globals.setScope(selected, places)} />
-            {selected.excludes.length > 0 && (
-              <>
-                <h3>適用しない statement</h3>
-                <ul className="excludes">
-                  {selected.excludes.map((id) => (
-                    <li key={id}>
-                      <code>{id}</code>
-                      <button type="button" className="link" onClick={() => globals.setExcluded(selected, id, false)}>
-                        適用に戻す
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
+            <h3>無効にしている statement</h3>
+            {disabledIn.length === 0 ? (
+              <p className="hint">すべての statement で有効です。</p>
+            ) : (
+              <ul className="excludes">
+                {disabledIn.map((id) => (
+                  <li key={id}>
+                    <code>{id}</code>
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => {
+                        const st = globals.statements[id];
+                        globals.setStatement(id, { disabled: st.disabled.filter((x) => x !== selected.id), order: st.order });
+                      }}
+                    >
+                      有効に戻す
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
         </>
       ) : (
         <section className="globals-values">
-          <p className="hint">{sets.length === 0 ? '共通パラメータを作ると、ここで値とスコープを設定できます。' : '左の一覧から共通パラメータを選んでください。'}</p>
+          <p className="hint">{sets.length === 0 ? '共通パラメータを作ると、ここで値を設定できます。' : '左の一覧から共通パラメータを選んでください。'}</p>
         </section>
       )}
     </div>
@@ -336,247 +375,5 @@ function GlobalValues({ api, set, globals, generation, gen }: { api: Api; set: G
         </div>
       )}
     </>
-  );
-}
-
-// ---- 場所のツリー ----
-
-/** 場所のツリーの節 */
-export interface PlaceNode {
-  key: string;
-  label: string;
-  kind: 'all' | 'dir' | 'file' | 'statement';
-  children: PlaceNode[];
-}
-
-/**
- * statement の一覧から、場所のツリーを作る（全体を一番上に置く）。
- * 子がフォルダ 1 つだけのフォルダは子とまとめて 1 行にするが、keep にある場所（スコープにしている場所）はまとめずに残す。
- */
-export function placeTree(statements: StatementEntry[], keep: Set<string>): PlaceNode {
-  interface Raw {
-    key: string;
-    label: string;
-    kind: PlaceNode['kind'];
-    children: Map<string, Raw>;
-  }
-  const root: Raw = { key: ROOT, label: '全体', kind: 'all', children: new Map() };
-  const child = (parent: Raw, key: string, label: string, kind: PlaceNode['kind']) => {
-    let c = parent.children.get(key);
-    if (!c) {
-      c = { key, label, kind, children: new Map() };
-      parent.children.set(key, c);
-    }
-    return c;
-  };
-  for (const st of statements) {
-    const parts = st.file.split('/');
-    let node = root;
-    let prefix = '';
-    for (const d of parts.slice(0, -1)) {
-      prefix += d + '/';
-      node = child(node, prefix, d, 'dir');
-    }
-    const file = child(node, st.file, parts[parts.length - 1], 'file');
-    child(file, st.id, shortId(st.id), 'statement');
-  }
-  const ORDER = { all: 0, dir: 0, file: 1, statement: 2 };
-  const finish = (r: Raw): PlaceNode => {
-    const kids = [...r.children.values()].sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.label.localeCompare(b.label)).map(finish);
-    // スコープにしていないフォルダで、子もフォルダ 1 つなら、まとめる（src/ main/ → src/main/）
-    if (r.kind === 'dir' && !keep.has(r.key) && kids.length === 1 && kids[0].kind === 'dir') {
-      return { ...kids[0], label: `${r.label}/${kids[0].label}` };
-    }
-    return { key: r.key, label: r.label, kind: r.kind, children: kids };
-  };
-  return finish(root);
-}
-
-/** 場所の表示名 */
-function nodeLabel(n: PlaceNode): string {
-  return n.kind === 'dir' ? `${n.label}/` : n.label;
-}
-
-/** 今の mapper にない場所（消えたり名前が変わったりしたフォルダ・ファイル・statement） */
-function missingPlaces(places: string[], tree: PlaceNode, statements: StatementEntry[]): string[] {
-  const known = new Set<string>();
-  const walk = (n: PlaceNode) => {
-    known.add(n.key);
-    n.children.forEach(walk);
-  };
-  walk(tree);
-  return places.filter((k) => !known.has(k) && !(k.endsWith('/') && statements.some((s) => s.file.startsWith(k))));
-}
-
-/**
- * 共通パラメータの一覧: スコープの場所ごとに並べる（全体を一番外に、狭いスコープほど内側に）。
- * 同じ場所に複数あるときは、その場所の適用順序で並べ、↑↓ で入れ替える（下ほど優先）。
- */
-function ScopeGroups({
-  globals,
-  statements,
-  selectedId,
-  onSelect,
-}: {
-  globals: Globals;
-  statements: StatementEntry[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const { sets, order } = globals;
-  const used = useMemo(() => new Set(sets.flatMap((s) => s.scope)), [sets]);
-  const tree = useMemo(() => placeTree(statements, used), [statements, used]);
-
-  const has = (n: PlaceNode): boolean => used.has(n.key) || n.children.some(has);
-
-  const group = (key: string) => {
-    const list = orderAt(sets, order, key);
-    if (list.length === 0) return null;
-    const move = (i: number, d: number) => {
-      const ids = list.map((s) => s.id);
-      [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
-      globals.setOrder(key, ids);
-    };
-    return (
-      <ol className="scope-sets">
-        {list.map((s, i) => (
-          <li key={s.id} className={s.id === selectedId ? 'selected' : undefined}>
-            <button type="button" className="global-item" onClick={() => onSelect(s.id)}>
-              {s.name}
-            </button>
-            {list.length > 1 && (
-              <span className="global-move">
-                <button type="button" className="icon" aria-label={`${s.name} を上へ`} disabled={i === 0} onClick={() => move(i, -1)}>
-                  ↑
-                </button>
-                <button type="button" className="icon" aria-label={`${s.name} を下へ`} disabled={i === list.length - 1} onClick={() => move(i, 1)}>
-                  ↓
-                </button>
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
-    );
-  };
-
-  const render = (n: PlaceNode): ReactNode => {
-    if (!has(n)) return null;
-    return (
-      <li key={n.key} className={`scope-node ${n.kind}`}>
-        <div className="scope-label" title={n.key === ROOT ? 'すべての statement' : n.key}>
-          {nodeLabel(n)}
-        </div>
-        {group(n.key)}
-        {n.children.some(has) && <ul>{n.children.map(render)}</ul>}
-      </li>
-    );
-  };
-
-  const missing = missingPlaces([...used], tree, statements);
-  const noScope = sets.filter((s) => s.scope.length === 0);
-  return (
-    <div className="scope-groups">
-      {sets.length === 0 ? (
-        <p className="hint">まだありません。「新規」で作ってください。</p>
-      ) : (
-        <ul>
-          {render(tree)}
-          {missing.map((k) => (
-            <li key={k} className="scope-node missing">
-              <div className="scope-label" title="今の mapper にない場所">
-                {k}
-              </div>
-              {group(k)}
-            </li>
-          ))}
-          {noScope.length > 0 && (
-            <li className="scope-node none">
-              <div className="scope-label">スコープなし</div>
-              <ol className="scope-sets">
-                {noScope.map((s) => (
-                  <li key={s.id} className={s.id === selectedId ? 'selected' : undefined}>
-                    <button type="button" className="global-item" onClick={() => onSelect(s.id)}>
-                      {s.name}
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </li>
-          )}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/** スコープの編集: 場所のツリーで、対象とする場所に印を付ける */
-function ScopeEditor({ set, statements, onChange }: { set: GlobalSet; statements: StatementEntry[]; onChange: (places: string[]) => void }) {
-  const chosen = useMemo(() => new Set(set.scope), [set.scope]);
-  const tree = useMemo(() => placeTree(statements, chosen), [statements, chosen]);
-  const [toggled, setToggled] = useState<Set<string>>(new Set());
-  const toggle = (key: string) => onChange(chosen.has(key) ? set.scope.filter((p) => p !== key) : [...set.scope, key]);
-  const contains = (n: PlaceNode): boolean => n.children.some((c) => chosen.has(c.key) || contains(c));
-
-  // covered: 外側の場所がスコープに入っていて、すでに対象になっている
-  const render = (n: PlaceNode, depth: number, covered: boolean): ReactNode => {
-    const on = chosen.has(n.key);
-    const collapsible = n.kind === 'dir' || n.kind === 'file';
-    // フォルダは最初から開く。ファイルは、中の statement をスコープにしていれば最初から開く
-    const defaultOpen = n.kind !== 'file' || contains(n);
-    const expanded = collapsible ? defaultOpen !== toggled.has(n.key) : true;
-    return (
-      <li key={n.key}>
-        <div className={`place-row ${n.kind}${on ? ' has-rule' : ''}`} style={{ paddingLeft: `${depth * 1.1 + 0.3}rem` }}>
-          {collapsible ? (
-            <button
-              type="button"
-              className="twisty"
-              aria-label={expanded ? '閉じる' : '開く'}
-              onClick={() =>
-                setToggled((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(n.key)) next.delete(n.key);
-                  else next.add(n.key);
-                  return next;
-                })
-              }
-            >
-              {expanded ? '▾' : '▸'}
-            </button>
-          ) : (
-            <span className="twisty" />
-          )}
-          <label className={covered && !on ? 'check covered' : 'check'} title={n.key === ROOT ? 'すべての statement' : n.key}>
-            <input type="checkbox" checked={on || covered} disabled={covered && !on} onChange={() => toggle(n.key)} />
-            <span className="place-label">{nodeLabel(n)}</span>
-          </label>
-        </div>
-        {expanded && n.children.length > 0 && <ul>{n.children.map((c) => render(c, depth + 1, covered || on))}</ul>}
-      </li>
-    );
-  };
-
-  const missing = missingPlaces(set.scope, tree, statements);
-  return (
-    <div className="place-tree">
-      <ul>{render(tree, 0, false)}</ul>
-      {set.scope.length === 0 && <p className="hint">スコープがないため、どの statement にも適用されません。</p>}
-      {missing.length > 0 && (
-        <div className="place-missing">
-          <p className="hint">今の mapper にない場所:</p>
-          <ul>
-            {missing.map((k) => (
-              <li key={k}>
-                <code>{k}</code>
-                <button type="button" className="link" onClick={() => onChange(set.scope.filter((p) => p !== k))}>
-                  外す
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
   );
 }
