@@ -219,4 +219,34 @@ class QueryExecutorPgTest {
     assertEquals("1", ((java.util.List<?>) list.get(1)).get(id));
     assertEquals(1, ((java.util.List<?>) rows.get("currentRows")).size());
   }
+
+  @Test
+  void 列の候補は主キーやUNIQUEの表を先にする() throws Exception {
+    try (java.sql.Connection c = DriverManager.getConnection(URL); java.sql.Statement st = c.createStatement()) {
+      st.execute("CREATE TEMP TABLE rk_lines (order_id int, line int, item_id int, PRIMARY KEY (order_id, line))");
+      st.execute("CREATE TEMP TABLE rk_tags (item_id int, tag text, extra int, PRIMARY KEY (item_id, tag, extra))");
+      st.execute("CREATE TEMP TABLE rk_pairs (item_id int, other int, PRIMARY KEY (item_id, other))");
+      st.execute("CREATE TEMP TABLE rk_items (item_id int PRIMARY KEY)");
+      st.execute("CREATE TEMP TABLE rk_codes (id int PRIMARY KEY, item_id int UNIQUE)");
+      st.execute("CREATE TEMP TABLE rk_upairs (item_id int, other int, UNIQUE (item_id, other))");
+      // 条件付きの一意インデックスは数えない
+      st.execute("CREATE TEMP TABLE rk_partial (item_id int)");
+      st.execute("CREATE UNIQUE INDEX ON rk_partial (item_id) WHERE item_id > 0");
+      String schema;
+      try (java.sql.ResultSet rs = st.executeQuery("SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()")) {
+        rs.next();
+        schema = rs.getString(1);
+      }
+      java.util.List<ParamSources.Source> list = new java.util.ArrayList<>();
+      for (String t : new String[] {"rk_partial", "rk_lines", "rk_upairs", "rk_tags", "rk_pairs", "rk_codes", "rk_items"}) {
+        list.add(new ParamSources.Source(schema, t, "item_id", "", true));
+      }
+      ParamSources.rank(list, c);
+      java.util.List<String> tables = new java.util.ArrayList<>();
+      for (ParamSources.Source src : list) {
+        tables.add(src.table);
+      }
+      assertEquals(java.util.Arrays.asList("rk_items", "rk_codes", "rk_pairs", "rk_upairs", "rk_tags", "rk_partial", "rk_lines"), tables);
+    }
+  }
 }

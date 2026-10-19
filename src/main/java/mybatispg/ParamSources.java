@@ -359,6 +359,39 @@ final class ParamSources {
     return out;
   }
 
+  /**
+   * 列の候補を、その値を最もよく表す表の順に並べ替える。
+   * 1. 列だけで一意になる表（主キー、UNIQUE の順）、2. 列を含む複数の列で一意になる表（列が少ないほど先。同じ数なら主キーが先）、
+   * 3. その他（元の順）。条件付き・式の一意インデックスは数えない。一意性を読めなければ、元の順のまま。
+   */
+  static void rank(List<Source> sources, Connection c) {
+    if (sources.size() < 2) {
+      return;
+    }
+    Map<Source, Integer> keys = new java.util.IdentityHashMap<>();
+    // 一意インデックスの列の数 × 2（主キーなら + 0、UNIQUE なら + 1）の小さい順
+    try (PreparedStatement ps = c.prepareStatement("SELECT min(i.indnkeyatts * 2 + CASE WHEN i.indisprimary THEN 0 ELSE 1 END)"
+        + " FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
+        + " JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = ?::name"
+        + " WHERE n.nspname = ?::name AND c.relname = ?::name AND i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL"
+        + " AND a.attnum = ANY (i.indkey[0:i.indnkeyatts - 1])")) {
+      for (Source src : sources) {
+        ps.setString(1, src.column);
+        ps.setString(2, src.schema);
+        ps.setString(3, src.table);
+        try (ResultSet rs = ps.executeQuery()) {
+          rs.next();
+          int rank = rs.getInt(1);
+          keys.put(src, rs.wasNull() ? Integer.MAX_VALUE : rank);
+        }
+      }
+    } catch (SQLException e) {
+      return;
+    }
+    // 安定な並べ替えなので、同じ順位なら元の順
+    sources.sort(java.util.Comparator.comparingInt(keys::get));
+  }
+
   // ---- if をすべて通す仮の値 ----
 
   /**

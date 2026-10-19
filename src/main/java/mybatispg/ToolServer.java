@@ -1433,6 +1433,12 @@ public final class ToolServer {
           firstError = firstError == null ? m : firstError + "\n" + m;
         }
       }
+      // 主キー・UNIQUE の表を先にする（categoryId なら categories.id を products.category_id より先に）
+      if (shared != null) {
+        for (List<ParamSources.Source> list : byProperty.values()) {
+          ParamSources.rank(list, shared);
+        }
+      }
     } finally {
       if (shared != null) {
         try {
