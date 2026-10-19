@@ -28,6 +28,11 @@ public final class TableInfo {
       + " AND (?::text IS NULL AND pg_table_is_visible(c.oid) OR n.nspname = ?::name)"
       + " ORDER BY n.nspname";
 
+  /** search_path から見えない表を、ほかのスキーマ（システムのスキーマを除く）から探す */
+  private static final String TABLE_IN_ANY_SCHEMA_SQL = TABLE_SQL
+      .replace(" AND (?::text IS NULL AND pg_table_is_visible(c.oid) OR n.nspname = ?::name)",
+          " AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'");
+
   private static final String INDEX_SQL = "SELECT i.relname, pg_get_indexdef(i.oid) AS definition,"
       + " pg_relation_size(i.oid) AS bytes, si.idx_scan, x.indisunique, x.indisprimary, x.indisvalid"
       + " FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid"
@@ -86,12 +91,26 @@ public final class TableInfo {
     }
   }
 
+  /**
+   * 表を探す。スキーマの指定がなければ search_path から見える表を探し、なければほかのスキーマからも探す
+   * （EXPLAIN の JSON には、VERBOSE を付けない限りスキーマが出ないため）。
+   */
   private static List<Map<String, Object>> readTable(Connection c, String schema, String table) throws SQLException {
+    List<Map<String, Object>> found = readTable(c, schema, table, false);
+    if (found.isEmpty() && schema == null) {
+      found = readTable(c, null, table, true);
+    }
+    return found;
+  }
+
+  private static List<Map<String, Object>> readTable(Connection c, String schema, String table, boolean anySchema) throws SQLException {
     List<Map<String, Object>> out = new ArrayList<>();
-    try (PreparedStatement ps = c.prepareStatement(TABLE_SQL)) {
+    try (PreparedStatement ps = c.prepareStatement(anySchema ? TABLE_IN_ANY_SCHEMA_SQL : TABLE_SQL)) {
       ps.setString(1, table);
-      ps.setString(2, schema);
-      ps.setString(3, schema);
+      if (!anySchema) {
+        ps.setString(2, schema);
+        ps.setString(3, schema);
+      }
       try (ResultSet rs = ps.executeQuery()) {
         while (rs.next()) {
           Map<String, Object> t = new LinkedHashMap<>();

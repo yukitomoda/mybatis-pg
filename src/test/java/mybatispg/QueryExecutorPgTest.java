@@ -153,4 +153,28 @@ class QueryExecutorPgTest {
     assertEquals(Long.valueOf(3), QueryExecutor.queryPart(whole.sql(), whole::setParameters, () -> DriverManager.getConnection(URL), 10, 30).total);
     assertThrows(IllegalArgumentException.class, () -> bound.part("SELECT $4"));
   }
+
+  @Test
+  void 表の情報はsearch_pathにないスキーマの表も探す() throws Exception {
+    try (Connection c = DriverManager.getConnection(URL); Statement s = c.createStatement()) {
+      s.execute("DROP SCHEMA IF EXISTS pgtest_other CASCADE");
+      s.execute("CREATE SCHEMA pgtest_other");
+      s.execute("CREATE TABLE pgtest_other.other_items (id bigint PRIMARY KEY)");
+    }
+    try {
+      Map<String, Object> r = TableInfo.read(() -> DriverManager.getConnection(URL), java.util.Arrays.asList("other_items", "items", "no_such"));
+      @SuppressWarnings("unchecked")
+      java.util.List<Map<String, Object>> tables = (java.util.List<Map<String, Object>>) r.get("tables");
+      assertEquals(2, tables.size(), tables.toString());
+      assertEquals("pgtest_other", tables.get(0).get("schema"));
+      assertEquals("other_items", tables.get(0).get("name"));
+      // search_path から見える表は、これまでどおりそれだけを返す
+      assertEquals("items", tables.get(1).get("name"));
+      assertEquals(java.util.Collections.singletonList("no_such"), r.get("notFound"));
+    } finally {
+      try (Connection c = DriverManager.getConnection(URL); Statement s = c.createStatement()) {
+        s.execute("DROP SCHEMA IF EXISTS pgtest_other CASCADE");
+      }
+    }
+  }
 }
