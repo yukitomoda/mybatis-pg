@@ -428,6 +428,115 @@ final class ParamSources {
     }
   }
 
+  /** 行の表示で、1 つの値の長さの上限（長い JSON などを切る） */
+  private static final int MAX_CELL = 200;
+
+  /**
+   * 候補の値ごとの行（値ごとに 1 行）と、入力中の値に当たる行。表のすべての列を返す。
+   *
+   * @param values 候補の値（文字列）
+   * @param current 入力中の値（文字列。なければ null）
+   */
+  static Map<String, Object> rows(String schema, String table, String column, List<String> values, String current,
+      QueryExecutor.ConnectionFactory connections) throws QueryExecutor.ExecutionException {
+    Connection c;
+    try {
+      c = connections.open();
+    } catch (SQLException | RuntimeException e) {
+      throw new QueryExecutor.ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+    try {
+      c.setAutoCommit(false);
+      try (Statement s = c.createStatement()) {
+        s.execute("SET TRANSACTION READ ONLY");
+      }
+      // 列の型（比べるときにその型にして、インデックスを使えるようにする）
+      String type;
+      try (PreparedStatement ps = c.prepareStatement("SELECT format_type(a.atttypid, a.atttypmod)"
+          + " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
+          + " WHERE n.nspname = ?::name AND c.relname = ?::name AND a.attname = ?::name AND a.attnum > 0 AND NOT a.attisdropped")) {
+        ps.setString(1, schema);
+        ps.setString(2, table);
+        ps.setString(3, column);
+        try (ResultSet rs = ps.executeQuery()) {
+          if (!rs.next()) {
+            throw new IllegalArgumentException("列がありません: " + schema + "." + table + "." + column);
+          }
+          type = rs.getString(1);
+        }
+      }
+      String q = quote(schema) + "." + quote(table);
+      String col = quote(column);
+      Map<String, Object> body = new LinkedHashMap<>();
+      List<List<String>> candidateRows = new ArrayList<>();
+      List<String> columns = new ArrayList<>();
+      if (!values.isEmpty()) {
+        try (PreparedStatement ps = c.prepareStatement("SELECT DISTINCT ON (" + col + ") * FROM " + q + " WHERE " + col
+            + " = ANY ((?::text[])::" + type + "[]) ORDER BY " + col)) {
+          ps.setQueryTimeout(10);
+          ps.setArray(1, c.createArrayOf("text", values.toArray()));
+          read(ps, columns, candidateRows, values.size());
+        }
+      }
+      List<List<String>> currentRows = new ArrayList<>();
+      String currentError = null;
+      if (current != null && !current.isEmpty()) {
+        try (Statement s = c.createStatement()) {
+          s.execute("SAVEPOINT current_rows");
+        }
+        try (PreparedStatement ps = c.prepareStatement("SELECT * FROM " + q + " WHERE " + col + " = (?::text)::" + type + " LIMIT 5")) {
+          ps.setQueryTimeout(10);
+          ps.setString(1, current);
+          read(ps, columns, currentRows, 5);
+        } catch (SQLException e) {
+          // 入力中の値が列の型として読めないなど
+          currentError = e.getMessage();
+          try (Statement s = c.createStatement()) {
+            s.execute("ROLLBACK TO SAVEPOINT current_rows");
+          }
+        }
+      }
+      body.put("columns", columns);
+      body.put("rows", candidateRows);
+      body.put("currentRows", currentRows);
+      body.put("currentError", currentError);
+      c.rollback();
+      return body;
+    } catch (SQLException | RuntimeException e) {
+      try {
+        c.rollback();
+      } catch (SQLException ignored) {
+        // 読むだけ
+      }
+      throw new QueryExecutor.ExecutionException(Errors.describe(e), e);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない
+      }
+    }
+  }
+
+  private static void read(PreparedStatement ps, List<String> columns, List<List<String>> out, int max) throws SQLException {
+    try (ResultSet rs = ps.executeQuery()) {
+      java.sql.ResultSetMetaData meta = rs.getMetaData();
+      if (columns.isEmpty()) {
+        for (int i = 1; i <= meta.getColumnCount(); i++) {
+          columns.add(meta.getColumnLabel(i));
+        }
+      }
+      while (rs.next() && out.size() < max) {
+        List<String> row = new ArrayList<>();
+        for (int i = 1; i <= meta.getColumnCount(); i++) {
+          String v = rs.getString(i);
+          row.add(v != null && v.length() > MAX_CELL ? v.substring(0, MAX_CELL) + "…" : v);
+        }
+        out.add(row);
+      }
+    }
+  }
+
   private static String quote(String ident) {
     return "\"" + ident.replace("\"", "\"\"") + "\"";
   }

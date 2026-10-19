@@ -390,6 +390,12 @@ export function createApi(token: string) {
         ...post(`{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"parameters":${toJson(parameters, '')}}`),
         signal,
       }),
+    /** 候補の値ごとの行（値ごとに 1 行）と、入力中の値に当たる行（表のすべての列） */
+    columnRows: (connectionId: string, c: { schema: string; table: string; column: string }, values: (string | null)[], current: string | null) =>
+      call<{ columns: string[]; rows: (string | null)[][]; currentRows: (string | null)[][]; currentError: string | null }>(
+        'api/column-rows',
+        post(JSON.stringify({ connectionId, schema: c.schema, table: c.table, column: c.column, values, current })),
+      ),
     /** 列の値の候補（多く出てくる順） */
     columnValues: (connectionId: string, c: { schema: string; table: string; column: string }) =>
       call<{ type: string; estimatedRows: number; method: 'stats' | 'scan' | 'sample'; values: { value: string | null; count: number }[] }>(

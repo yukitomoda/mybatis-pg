@@ -26,6 +26,28 @@ export function toParam(text: string | null, type: string): PValue {
   return { t: 'pg', type, v: text };
 }
 
+type Rows = { columns: string[]; rows: (string | null)[][]; currentRows: (string | null)[][]; currentError: string | null };
+
+/** 表に出す候補の数 */
+const MAX_ROWS = 15;
+
+/** 入力中の値を、列と比べる文字にする（なければ null） */
+function currentText(v: PValue | undefined): string | null {
+  if (!v) return null;
+  switch (v.t) {
+    case 'string':
+    case 'number':
+    case 'timestamp':
+    case 'date':
+    case 'pg':
+      return v.v.trim() === '' ? null : v.v;
+    case 'boolean':
+      return String(v.v);
+    default:
+      return null;
+  }
+}
+
 const METHOD_LABELS: Record<Values['method'], string> = {
   stats: '統計情報のよく出る値',
   scan: '表を読んで数えた',
@@ -73,6 +95,32 @@ export function SuggestPanel({
     };
   }, [connectionId, column.schema, column.table, column.column]);
 
+  // 候補の値ごとの行と、入力中の値に当たる行（表のすべての列）
+  const [rows, setRows] = useState<Rows | null>(null);
+  const top = values ? values.values.slice(0, MAX_ROWS) : [];
+  const now = list ? null : currentText(current);
+  useEffect(() => {
+    if (!connectionId || !values) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      conn.api
+        .columnRows(
+          connectionId,
+          column,
+          top.map((v) => v.value),
+          now,
+        )
+        .then(
+          (r) => active && setRows(r),
+          (e) => active && setError(message(e)),
+        );
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [connectionId, values, now]);
+
   const pick = (text: string | null) => {
     if (!values) return;
     const v = toParam(text, values.type);
@@ -104,20 +152,64 @@ export function SuggestPanel({
       {!values && !error && <p className="hint">読み込んでいます…</p>}
       {values && (
         <>
-          <div className="suggest-values">
-            {values.values.map((v, i) => (
-              <button key={i} type="button" className="candidate" title={`${v.count.toLocaleString('ja-JP')} 件`} onClick={() => pick(v.value)}>
-                {v.value ?? 'NULL'}
-                <span className="count">{v.count.toLocaleString('ja-JP')}</span>
-              </button>
-            ))}
-            {values.values.length === 0 && <span className="hint">値がありません</span>}
-          </div>
+          {rows ? (
+            <SuggestRows rows={rows} column={column.column} counts={new Map(top.map((v) => [v.value, v.count]))} onPick={pick} />
+          ) : (
+            <p className="hint">行を読み込んでいます…</p>
+          )}
           <p className="hint suggest-method">
             {METHOD_LABELS[values.method]}（全 {values.estimatedRows.toLocaleString('ja-JP')} 行ほど）
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+/** 候補の行の表。入力中の値の行を上に、色を変えて出す。行を押すと、比べている列の値を入れる */
+function SuggestRows({
+  rows,
+  column,
+  counts,
+  onPick,
+}: {
+  rows: Rows;
+  column: string;
+  counts: Map<string | null, number>;
+  onPick: (text: string | null) => void;
+}) {
+  const at = rows.columns.indexOf(column);
+  if (rows.columns.length === 0) return <p className="hint">行がありません</p>;
+  const row = (r: (string | null)[], i: number, isCurrent: boolean) => (
+    <tr key={`${isCurrent ? 'c' : 'v'}${i}`} className={isCurrent ? 'current' : undefined} onClick={() => onPick(r[at])} title="この値を入れる">
+      <td className="num">{isCurrent ? '入力中' : (counts.get(r[at])?.toLocaleString('ja-JP') ?? '')}</td>
+      {r.map((v, j) => (
+        <td key={j} className={j === at ? 'target' : undefined} title={v ?? 'NULL'}>
+          {v ?? <span className="null">NULL</span>}
+        </td>
+      ))}
+    </tr>
+  );
+  return (
+    <div className="suggest-table">
+      <table>
+        <thead>
+          <tr>
+            <th className="num">件数</th>
+            {rows.columns.map((c, j) => (
+              <th key={j} className={j === at ? 'target' : undefined}>
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.currentRows.map((r, i) => row(r, i, true))}
+          {/* 件数の多い順 */}
+          {[...rows.rows].sort((a, b) => (counts.get(b[at]) ?? 0) - (counts.get(a[at]) ?? 0)).map((r, i) => row(r, i, false))}
+        </tbody>
+      </table>
+      {rows.currentError && <p className="hint">入力中の値で探せません: {rows.currentError}</p>}
     </div>
   );
 }

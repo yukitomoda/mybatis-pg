@@ -361,6 +361,11 @@ public final class ToolServer {
           paramSources(ex);
         }
         break;
+      case "/api/column-rows":
+        if (requireMethod(ex, method, "POST")) {
+          columnRows(ex);
+        }
+        break;
       case "/api/column-values":
         if (requireMethod(ex, method, "POST")) {
           columnValues(ex);
@@ -1405,6 +1410,35 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("sources", sources);
     sendJson(ex, 200, body);
+  }
+
+  /**
+   * 候補の値ごとの行と、入力中の値に当たる行（試作）: {"connectionId", "schema", "table", "column", "values": [...], "current"?}。
+   * 応答: {"columns", "rows"（値ごとに 1 行）, "currentRows", "currentError"}
+   */
+  private void columnRows(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    List<String> values;
+    try {
+      values = strings(req, "values");
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    try {
+      sendJson(ex, 200, ParamSources.rows(string(req, "schema"), string(req, "table"), string(req, "column"),
+          values.subList(0, Math.min(values.size(), 30)), string(req, "current"), () -> connections.open(connectionId)));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+    }
   }
 
   /** 列の値の候補（試作）: {"connectionId", "schema", "table", "column"} → {"type", "estimatedRows", "method", "values": [{"value", "count"}]} */
