@@ -30,6 +30,17 @@ export interface StatementsResponse {
   loadErrors: LoadError[];
 }
 
+/** パラメータと比べられている列（推論） */
+export interface SourceColumn {
+  schema: string;
+  table: string;
+  column: string;
+  /** 見つけた条件（例: (o.customer_id = $3)） */
+  condition: string;
+  /** 列そのものと比べている（関数などで包んでいない） */
+  direct: boolean;
+}
+
 /** 保存していない mapper XML の内容（なければ null） */
 export type DraftParam = { file: string; content: string } | null;
 
@@ -372,6 +383,18 @@ export function createApi(token: string) {
             `"analyze":${options.analyze},"buffers":${options.buffers},"readOnly":${options.readOnly},` +
             `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
+      ),
+    /** パラメータがどの表のどの列と比べられているかを推論する（試作。SQL は実行しない） */
+    paramSources: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, signal?: AbortSignal) =>
+      call<{ sources: { index: number; property: string; columns: SourceColumn[] }[] }>('api/param-sources', {
+        ...post(`{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"parameters":${toJson(parameters, '')}}`),
+        signal,
+      }),
+    /** 列の値の候補（多く出てくる順） */
+    columnValues: (connectionId: string, c: { schema: string; table: string; column: string }) =>
+      call<{ type: string; estimatedRows: number; method: 'stats' | 'scan' | 'sample'; values: { value: string | null; count: number }[] }>(
+        'api/column-values',
+        post(JSON.stringify({ connectionId, schema: c.schema, table: c.table, column: c.column })),
       ),
     /**
      * statement の SQL の一部（サブクエリ・CTE など）を、本番と同じバインド変数で、読み取り専用で実行する（必ずロールバックする）。

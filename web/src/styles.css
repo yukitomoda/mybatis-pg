@@ -2210,3 +2210,52 @@ button.bulk-open {
   margin: 0.3rem 0;
   font-size: 13px;
 }
+
+/* ---- 値の候補（試作） ---- */
+
+.suggest-toggle {
+  margin-left: 0.3rem;
+  padding: 0 0.25rem;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.suggest-toggle.open,
+.suggest-toggle:hover {
+  opacity: 1;
+}
+
+.suggest-row {
+  padding: 0.3rem 0.5rem 0.5rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--code-bg);
+}
+
+.suggest-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+}
+
+.suggest-condition {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.suggest-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.35rem 0 0.2rem;
+  max-height: 9rem;
+  overflow: auto;
+}
+
+.suggest-method {
+  margin: 0;
+  font-size: 11px;
+}

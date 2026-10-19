@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, TemplateResponse } from './api';
+import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, SourceColumn, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
 import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
+import { SuggestPanel } from './Suggest';
 import { countParts, PartsPanel } from './Subquery';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
@@ -16,8 +17,8 @@ import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
-import type { ParamSchema, PValue } from './params';
-import { effectiveValue, fromJson, invalidNumbers, missingParams, toJson } from './params';
+import type { ParamSchema, Path, PValue } from './params';
+import { effectiveValue, fromJson, invalidNumbers, missingParams, pathLabel, toJson } from './params';
 import { loadParams, saveParams } from './paramStore';
 import { tidySql } from './sql';
 import { tokenize } from './template';
@@ -298,6 +299,47 @@ function Workspace({ api }: { api: Api }) {
   /** 表示するタブ。サブクエリのタブを選んでいても、サブクエリがなければ SQL タブを出す（選んだタブは覚えておく） */
   const shown: Tab = tab === 'subquery' && !hasParts ? 'sql' : tab;
 
+  // 値の候補（試作）: パラメータがどの列と比べられているかを、SQL の形が変わるたびに推論する（EXPLAIN だけで、SQL は実行しない）
+  const [sources, setSources] = useState<Map<string, { columns: SourceColumn[]; list: boolean }>>(new Map());
+  // 別の statement に移ったら消す（同じ statement で SQL の形が変わったときは、推論し直すまで前の結果を使う）
+  useEffect(() => setSources(new Map()), [selected]);
+  useEffect(() => {
+    const current = conn.current;
+    if (!selected || !schema || !result || renderError || !current) return;
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => {
+      api.paramSources(selected, sent, draftP, current.id, abort.signal).then(
+        (r) => setSources(sourceMap(r.sources, schema)),
+        () => setSources(new Map()),
+      );
+    }, 600);
+    return () => {
+      window.clearTimeout(timer);
+      abort.abort();
+    };
+  }, [api, selected, schema, result?.numberedSql, renderError, conn.current?.id, conn.current?.hasPassword, draftP?.content]);
+  const suggest = useMemo(
+    () => ({
+      has: (path: Path) => sources.has(pathLabel(path)),
+      render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => {
+        const s = sources.get(pathLabel(path))!;
+        return (
+          <SuggestPanel
+            conn={conn}
+            columns={s.columns}
+            list={s.list}
+            current={current}
+            onPick={(v) => {
+              set(v);
+              if (!s.list) close();
+            }}
+          />
+        );
+      },
+    }),
+    [sources, conn],
+  );
+
   // 入力や XML が変わるたびにレンダリングする
   useEffect(() => {
     if (!selected || !schema || numberIssues.length > 0) return;
@@ -510,7 +552,15 @@ function Workspace({ api }: { api: Api }) {
                   </div>
                 )}
                 {copying && value && applied.length > 0 && <CopyToGlobal key={selected} globals={globals} applied={applied} local={value} onClose={() => setCopying(false)} />}
-                <ParamTree schema={schema} value={value} onChange={changeValue} global={base} originOf={(path) => originAt(applied, path)} gen={gen} />
+                <ParamTree
+                  schema={schema}
+                  value={value}
+                  onChange={changeValue}
+                  global={base}
+                  originOf={(path) => originAt(applied, path)}
+                  gen={gen}
+                  suggest={suggest}
+                />
                 {warnings.length > 0 && (
                   <ul className="notes warn">
                     {warnings.map((w) => (
@@ -894,6 +944,34 @@ function StatementTree({
 }
 
 const SIDEBAR_KEY = 'mybatis-pg.sidebar';
+
+/**
+ * 推論の結果を、パラメータの項目（cond.status など）ごとにまとめる。foreach の要素（__frch_...）は、
+ * foreach で回すリストが 1 つだけなら、そのリストに付ける（候補を選ぶと要素として足す）
+ */
+function sourceMap(sources: { property: string; columns: SourceColumn[] }[], schema: ParamSchema): Map<string, { columns: SourceColumn[]; list: boolean }> {
+  const lists: string[] = [];
+  const walk = (node: ParamSchema, path: Path) => {
+    for (const child of node.properties) {
+      const p = [...path, child.name as string];
+      if (child.usages.includes('ITERATE') && child.element && child.element.properties.length === 0) lists.push(pathLabel(p));
+      walk(child, p);
+    }
+  };
+  walk(schema, []);
+  const out = new Map<string, { columns: SourceColumn[]; list: boolean }>();
+  for (const s of sources) {
+    const foreach = s.property.startsWith('__frch_');
+    if (foreach && (lists.length !== 1 || s.property.includes('.'))) continue;
+    const key = foreach ? lists[0] : s.property;
+    const entry = out.get(key) ?? { columns: [], list: foreach };
+    for (const c of s.columns) {
+      if (!entry.columns.some((x) => x.schema === c.schema && x.table === c.table && x.column === c.column)) entry.columns.push(c);
+    }
+    out.set(key, entry);
+  }
+  return out;
+}
 
 /** statement が見つからないことを表す印（説明は表示するときに決める） */
 const NOT_FOUND = '\u0000not-found';
