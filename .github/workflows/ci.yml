@@ -9,7 +9,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # param-candidates: 値の候補の試作。リリースせずに jar を作って試す（成果物の mybatis-pg を落とす）
+    branches: [main, param-candidates]
   pull_request:
   # リリース（release.yml）から呼ばれる。タグの push ではこのワークフローは直接動かない
   workflow_call:
