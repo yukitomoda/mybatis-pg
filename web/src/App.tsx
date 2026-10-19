@@ -618,7 +618,7 @@ function Workspace({ api }: { api: Api }) {
         {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
         <div hidden={shown !== 'subquery'}>
           {hasParts && selected && result && (
-            <PartsPanel key={selected} conn={conn} statementId={selected} value={sent} draft={draftP} rendered={result} gen={gen} onApiError={handleError} />
+            <PartsPanel key={selected} conn={conn} statementId={selected} value={sent} draft={draftP} rendered={result} gen={gen} missing={missing} onApiError={handleError} />
           )}
         </div>
 

@@ -9,7 +9,7 @@ import { ParamTree } from './ParamTree';
 import type { ParamSchema, PValue } from './params';
 import { getAt, invalidNumbers, isValidNumber } from './params';
 import type { Part } from './subquery';
-import { analyze, partLabel, partSql } from './subquery';
+import { analyze, missingIn, partLabel, partSql } from './subquery';
 
 type RunResult = { ok: true; table: ResultTable; total: number | null; elapsedMillis: number } | { ok: false; error: string };
 
@@ -85,6 +85,7 @@ export function PartsPanel({
   draft,
   rendered,
   gen,
+  missing,
   onApiError,
 }: {
   conn: Connections;
@@ -93,6 +94,8 @@ export function PartsPanel({
   draft: DraftParam;
   rendered: RenderResponse;
   gen: GenContext;
+  /** 値が未設定の項目（パラメータ欄の未設定と同じ） */
+  missing: string[];
   onApiError: (e: unknown) => void;
 }) {
   // 実行はバインド変数を番号にした SQL で、位置の表示は値を埋め込んだ SQL で行う（どちらも同じ形に分かれる）
@@ -138,6 +141,11 @@ export function PartsPanel({
 
   const selected = parts.find((p) => p.key === selectedKey) ?? numbered.root;
   const runnable = (p: Part) => !p.writes && p.outerRefs.every((r) => (values[r] ?? '') !== '');
+  // 部分ごとの、その部分で使っているのに未設定のパラメータ（全体では空けておくことはあっても、部分の中で未設定なのはミスのことが多い）
+  const missingByPart = useMemo(() => {
+    const props = rendered.bindings.map((b) => b.property);
+    return new Map(parts.map((p) => [p.key, missingIn(partSql(numbered, p, values), props, missing)]));
+  }, [parts, numbered, values, rendered.bindings, missing]);
 
   const run = async (p: Part) => {
     const current = conn.current;
@@ -188,6 +196,11 @@ export function PartsPanel({
             </span>
           )}
           {p.writes && <span className="badge muted">書き換え</span>}
+          {(missingByPart.get(p.key)?.length ?? 0) > 0 && (
+            <span className="warn-mark" title={`未設定: ${missingByPart.get(p.key)!.join(', ')}`} aria-label="未設定のパラメータがある">
+              ⚠
+            </span>
+          )}
           <span className="part-count">{r ? (r.ok ? `${r.total ?? '?'} 件` : 'エラー') : ''}</span>
         </button>
         {p.children.length > 0 && <ul>{p.children.map((c) => tree(c, depth + 1))}</ul>}
@@ -230,6 +243,9 @@ export function PartsPanel({
                       </p>
                     ))}
                 </div>
+              )}
+              {(missingByPart.get(selected.key)?.length ?? 0) > 0 && (
+                <p className="warn-text part-missing">⚠ 未設定: {missingByPart.get(selected.key)!.join(', ')}</p>
               )}
               <div className="execute-bar">
                 <button type="button" className="run" disabled={!conn.current || !runnable(selected) || running !== null} onClick={() => run(selected)}>

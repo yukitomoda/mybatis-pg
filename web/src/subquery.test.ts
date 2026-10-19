@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Part } from './subquery';
-import { analyze, partLabel, partSql } from './subquery';
+import { analyze, bindNumbers, missingIn, partLabel, partSql } from './subquery';
 
 const SQL = `WITH paid AS (
   SELECT * FROM orders WHERE status = 'paid' -- (SELECT はコメント)
@@ -114,5 +114,23 @@ describe('sqlLiteral', () => {
     expect(sqlLiteral({ t: 'null' })).toBe('NULL');
     expect(() => sqlLiteral({ t: 'number', v: 'abc' })).toThrow();
     expect(() => sqlLiteral({ t: 'list', items: [] })).toThrow();
+  });
+});
+
+describe('部分の未設定のパラメータ', () => {
+  it('部分で使うバインド変数のうち、未設定のものを返す', () => {
+    const sql = `WITH t AS (SELECT * FROM a WHERE x = $1)
+SELECT * FROM t WHERE y = $2 AND z IN (SELECT id FROM b WHERE w = $3 AND s = '$4' -- $5
+)`;
+    expect(bindNumbers(sql)).toEqual([1, 2, 3]);
+    const a = analyze(sql);
+    const [cte, inPart] = a.root.children;
+    const props = ['tenantId', 'cond.name', 'cond.status', 'x'];
+    // 親（cond）が未設定なら、その下の項目も未設定
+    expect(missingIn(partSql(a, inPart), props, ['cond'])).toEqual(['cond']);
+    // CTE を付けて実行するので、CTE の中のものも見る
+    expect(missingIn(partSql(a, inPart), props, ['tenantId'])).toEqual(['tenantId']);
+    expect(missingIn(partSql(a, cte), props, ['cond'])).toEqual([]);
+    expect(missingIn(partSql(a, a.root), props, ['tenantId', 'cond'])).toEqual(['tenantId', 'cond']);
   });
 });

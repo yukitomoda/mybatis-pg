@@ -2205,3 +2205,8 @@ button.bulk-open {
   color: var(--muted);
   background: var(--code-bg);
 }
+
+.part-missing {
+  margin: 0.3rem 0;
+  font-size: 13px;
+}

@@ -416,3 +416,33 @@ export function partLabel(part: Part): string {
       return '(…)';
   }
 }
+
+/** SQL で使っているバインド変数の番号（$1, $2, ...。文字列・コメントの中は除く） */
+export function bindNumbers(sql: string): number[] {
+  const tokens = tokenize(sql);
+  const out: number[] = [];
+  tokens.forEach((t, i) => {
+    const next = tokens[i + 1];
+    if (t.text === '$' && next && next.start === t.end && /^\d+$/.test(next.text)) {
+      const n = Number(next.text);
+      if (!out.includes(n)) out.push(n);
+    }
+  });
+  return out;
+}
+
+/**
+ * 部分で使っているバインド変数のうち、値が未設定のもの（項目の名前）。
+ * @param properties バインド変数の番号順の項目（render の bindings の property）
+ * @param missing 値が未設定の項目（cond.name など。親が未設定なら親だけ）
+ */
+export function missingIn(sql: string, properties: string[], missing: string[]): string[] {
+  const out: string[] = [];
+  for (const n of bindNumbers(sql)) {
+    const prop = properties[n - 1];
+    if (prop === undefined) continue;
+    const m = missing.find((x) => prop === x || prop.startsWith(`${x}.`) || prop.startsWith(`${x}[`));
+    if (m && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
