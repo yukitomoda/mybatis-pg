@@ -185,6 +185,11 @@ public class SqlRenderer {
     return configuration.getMappedStatement(statementId, false).getResource();
   }
 
+  /** statement の元の記述の文字（タグを除き、include は展開済み）。${} の前後を見るのに使う */
+  public String scriptText(String statementId) {
+    return tracingSqlSource(statementId).getScript().getTextContent();
+  }
+
   /** statement が参照しているパラメータを抜き出す */
   public ParameterExtractor.Result parameters(String statementId) {
     return ParameterExtractor.extract(tracingSqlSource(statementId).getScript());

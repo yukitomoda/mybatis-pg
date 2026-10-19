@@ -301,15 +301,23 @@ function Workspace({ api }: { api: Api }) {
 
   // 値の候補（試作）: パラメータがどの列と比べられているかを、SQL の形が変わるたびに推論する（EXPLAIN だけで、SQL は実行しない）
   const [sources, setSources] = useState<Map<string, { columns: SourceColumn[]; list: boolean }>>(new Map());
+  /** 推論するには値を入れる必要がある ${} の項目 */
+  const [sourceNeeds, setSourceNeeds] = useState<string[]>([]);
   // 別の statement に移ったら消す（同じ statement で SQL の形が変わったときは、推論し直すまで前の結果を使う）
-  useEffect(() => setSources(new Map()), [selected]);
+  useEffect(() => {
+    setSources(new Map());
+    setSourceNeeds([]);
+  }, [selected]);
   useEffect(() => {
     const current = conn.current;
     if (!selected || !schema || !result || renderError || !current) return;
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
       api.paramSources(selected, sent, draftP, current.id, abort.signal).then(
-        (r) => setSources(sourceMap(r.sources, schema)),
+        (r) => {
+          setSources(sourceMap(r.sources, schema));
+          setSourceNeeds(r.needs);
+        },
         () => setSources(new Map()),
       );
     }, 600);
@@ -552,6 +560,11 @@ function Workspace({ api }: { api: Api }) {
                   </div>
                 )}
                 {copying && value && applied.length > 0 && <CopyToGlobal key={selected} globals={globals} applied={applied} local={value} onClose={() => setCopying(false)} />}
+                {sourceNeeds.length > 0 && (
+                  <p className="hint source-needs">
+                    値の候補を出すには、{sourceNeeds.map((n) => `\${${n}}`).join('・')} に値を入れてください
+                  </p>
+                )}
                 <ParamTree
                   schema={schema}
                   value={value}

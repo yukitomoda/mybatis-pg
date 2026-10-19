@@ -2317,3 +2317,8 @@ button.bulk-open {
 .suggest-table .null {
   color: var(--muted);
 }
+
+.source-needs {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 12px;
+}

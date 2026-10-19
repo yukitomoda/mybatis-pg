@@ -57,7 +57,7 @@ class ParamSourcesTest {
     java.util.Map<String, Object> cond = new java.util.HashMap<>();
     cond.put("name", "taro");
     actual.put("cond", cond);
-    Object probe = ParamSources.probe(r.parameters("sample.UserMapper.search").root, actual);
+    Object probe = ParamSources.probe(r.parameters("sample.UserMapper.search").root, actual, path -> "1");
     java.util.Map<String, Object> p = (java.util.Map<String, Object>) probe;
     assertEquals("taro", ((java.util.Map<String, Object>) p.get("cond")).get("name"));
     // 仮の値なら、if の中の条件もすべて SQL に出る
@@ -65,6 +65,26 @@ class ParamSourcesTest {
     String withActual = r.render("sample.UserMapper.search", actual).placeholderSql;
     assertTrue(withProbe.length() > withActual.length(), withProbe);
     assertTrue(withProbe.chars().filter(ch -> ch == '?').count() > withActual.chars().filter(ch -> ch == '?').count(), withProbe);
+  }
+
+  @Test
+  void 仮の値の推し量り() {
+    assertEquals("1", ParamSources.rawGuess("SELECT * FROM t ORDER BY ${orderBy} LIMIT 50", "orderBy"));
+    assertEquals("1", ParamSources.rawGuess("SELECT * FROM t ORDER BY a, ${second}", "second"));
+    assertEquals("ASC", ParamSources.rawGuess("SELECT * FROM t ORDER BY name ${dir}, id", "dir"));
+    assertEquals("ASC", ParamSources.rawGuess("SELECT * FROM t ORDER BY lower(name) ${dir}", "dir"));
+    assertNull(ParamSources.rawGuess("SELECT * FROM ${table} WHERE id = #{id}", "table"));
+    assertNull(ParamSources.rawGuess("SELECT * FROM a JOIN ${other} b ON a.id = b.id", "other"));
+    assertEquals("public", ParamSources.rawGuess("SELECT * FROM ${schema}.orders", "schema"));
+    assertEquals("1", ParamSources.rawGuess("SELECT * FROM t WHERE x = ${v} LIMIT ${n}", "v"));
+    assertEquals("1", ParamSources.rawGuess("SELECT * FROM t LIMIT ${n}", "n"));
+    assertNull(ParamSources.rawGuess("SELECT * FROM t WHERE ${col} = #{v}", "col"));
+    assertNull(ParamSources.rawGuess("SELECT * FROM t WHERE a = 1 AND ${cond}", "cond"));
+    assertNull(ParamSources.rawGuess("SELECT * FROM t WHERE x = 1 AND (${col} LIKE #{v})", "col"));
+    // 何か所かで違う値が要るなら、推し量れない
+    assertNull(ParamSources.rawGuess("SELECT * FROM ${s}.t ORDER BY ${s}", "s"));
+    // 前後の文は見ない（ORDER BY の後に LIMIT があれば、ORDER BY の中ではない）
+    assertEquals("1", ParamSources.rawGuess("SELECT * FROM t ORDER BY id LIMIT ${n}", "n"));
   }
 
   private static String name(ParamSources.Source s) {

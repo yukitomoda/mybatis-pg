@@ -386,7 +386,13 @@ export function createApi(token: string) {
       ),
     /** パラメータがどの表のどの列と比べられているかを推論する（試作。SQL は実行しない） */
     paramSources: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, signal?: AbortSignal) =>
-      call<{ sources: { index: number; property: string; columns: SourceColumn[] }[] }>('api/param-sources', {
+      call<{
+        sources: { index: number; property: string; columns: SourceColumn[] }[];
+        /** 推論するには値を入れる必要がある ${} の項目 */
+        needs: string[];
+        /** 推論できなかった理由 */
+        error: string | null;
+      }>('api/param-sources', {
         ...post(`{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"parameters":${toJson(parameters, '')}}`),
         signal,
       }),

@@ -1370,7 +1370,12 @@ public final class ToolServer {
     }
     // 今の値で組み立てた SQL と、未設定の項目に仮の値を入れて if をすべて通した SQL の両方で推論し、項目ごとにまとめる
     // （今の値では if で条件がなくなっている項目や、${} が空で SQL が壊れているときも推論できるように）
-    Object probe = ParamSources.probe(renderer.parameters(statementId).root, parameters);
+    ParamNode schema = renderer.parameters(statementId).root;
+    String script = renderer.scriptText(statementId);
+    Object probe = ParamSources.probe(schema, parameters, path -> ParamSources.rawGuess(script, path));
+    // 値の入っていない ${} の項目。推し量れないもの（表の名前など）や、推し量った値で SQL が壊れたときは、値を入れるよう知らせる
+    List<String> rawMissing = ParamSources.rawPaths(schema, parameters);
+    boolean probeOk = false;
     Map<String, List<ParamSources.Source>> byProperty = new LinkedHashMap<>();
     Map<String, Integer> indexOf = new LinkedHashMap<>();
     String firstError = null;
@@ -1388,6 +1393,7 @@ public final class ToolServer {
         Map<Integer, List<ParamSources.Source>> inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(),
             fallbackTypes, actualValues, () -> connections.open(connectionId));
         anyOk = true;
+        probeOk |= params == probe;
         for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
           String property = rendered.bindings.get(e.getKey() - 1).property;
           List<ParamSources.Source> list = byProperty.computeIfAbsent(property, k -> new ArrayList<>());
@@ -1403,10 +1409,17 @@ public final class ToolServer {
         firstError = firstError == null ? m : firstError + "\n" + m;
       }
     }
-    // どちらでも推論できなかったときだけエラーにする（比較のない INSERT などは、候補なしとして返す）
-    if (!anyOk && firstError != null) {
-      sendJson(ex, 422, error(firstError));
-      return;
+    // 仮の値の SQL で推論できなかったら、値の入っていない ${} の項目のうち、推し量れなかったもの（なければすべて）に値を入れるよう知らせる
+    List<String> needs = new ArrayList<>();
+    if (!probeOk) {
+      for (String p : rawMissing) {
+        if (ParamSources.rawGuess(script, p) == null) {
+          needs.add(p);
+        }
+      }
+      if (needs.isEmpty()) {
+        needs.addAll(rawMissing);
+      }
     }
     List<Map<String, Object>> sources = new ArrayList<>();
     for (Map.Entry<String, List<ParamSources.Source>> e : byProperty.entrySet()) {
@@ -1428,6 +1441,9 @@ public final class ToolServer {
     }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("sources", sources);
+    body.put("needs", needs);
+    // どちらでも推論できなかったときの理由（比較のない INSERT などは、候補なしとしてエラーにしない）
+    body.put("error", anyOk ? null : firstError);
     sendJson(ex, 200, body);
   }
 

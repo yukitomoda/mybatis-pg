@@ -340,17 +340,22 @@ final class ParamSources {
 
   /**
    * 推論のための仮の値。今の値はそのまま使い、未設定の項目には、XML から推し量った型の仮の値を入れる
-   * （if test="x != null" などをすべて通し、条件を SQL に出すため）。${} の項目は "1"（ORDER BY ${...} などで SQL が壊れないように）。
-   * 値は if を通すためだけに使い、列を探すときは目印に置き換える。
+   * （if test="x != null" などをすべて通し、条件を SQL に出すため）。値は if を通すためだけに使い、列を探すときは目印に置き換える。
+   *
+   * @param rawGuess ${} の項目（パス）の仮の値。推し量れなければ null（値を入れないので、SQL が壊れることがある）
    */
+  static Object probe(ParamNode node, Object actual, java.util.function.Function<String, String> rawGuess) {
+    return probe(node, actual, "", rawGuess);
+  }
+
   @SuppressWarnings("unchecked")
-  static Object probe(ParamNode node, Object actual) {
+  private static Object probe(ParamNode node, Object actual, String path, java.util.function.Function<String, String> rawGuess) {
     if (node.getUsages().contains(ParamNode.Usage.ITERATE)) {
       if (actual instanceof java.util.Collection && !((java.util.Collection<?>) actual).isEmpty()) {
         return actual;
       }
       List<Object> list = new ArrayList<>();
-      list.add(node.getElement() == null ? 1 : probe(node.getElement(), null));
+      list.add(node.getElement() == null ? 1 : probe(node.getElement(), null, path + "[0]", rawGuess));
       return list;
     }
     if (!node.getProperties().isEmpty()) {
@@ -359,7 +364,10 @@ final class ParamSources {
         out.putAll((Map<String, Object>) actual);
       }
       for (ParamNode child : node.getProperties().values()) {
-        out.put(child.getName(), probe(child, out.get(child.getName())));
+        Object v = probe(child, out.get(child.getName()), path.isEmpty() ? child.getName() : path + "." + child.getName(), rawGuess);
+        if (v != null) {
+          out.put(child.getName(), v);
+        }
       }
       return out;
     }
@@ -367,7 +375,7 @@ final class ParamSources {
       return actual;
     }
     if (node.getUsages().contains(ParamNode.Usage.RAW)) {
-      return "1";
+      return rawGuess.apply(path);
     }
     if (node.getTypeHints().contains(ParamNode.TypeHint.BOOLEAN)) {
       return Boolean.TRUE;
@@ -383,6 +391,77 @@ final class ParamSources {
     }
     // 型が分からなければ数にする（!= null、> 0、!= '' の判定を通る）
     return 1;
+  }
+
+  private static final Pattern TABLE_BEFORE = Pattern.compile("(?i)\\b(from|join|update|into|table|using)\\s*$");
+  /** 条件の始まり（ここには列や式が入る） */
+  private static final Pattern COLUMN_BEFORE = Pattern.compile("(?i)(\\b(where|and|or|on|not|having)|\\()\\s*$");
+  /** 比べる演算子が続く（左側には列や式が入る） */
+  private static final Pattern COMPARE_AFTER = Pattern.compile("(?i)^\\s*(=|<|>|!=|\\b(in|like|ilike|is|between)\\b)");
+  /** ORDER BY の直後や、並べる項目の区切りの直後（ここには項目が入る） */
+  private static final Pattern AFTER_BY_OR_COMMA = Pattern.compile("(?i)(\\bby|,)\\s*$");
+  private static final Pattern ORDER_ITEM_BEFORE = Pattern.compile("(?is)\\border\\s+by\\b(?:(?!\\b(?:limit|offset|fetch|for|union|intersect|except)\\b)[^;])*[\\w)\"]\\s+$");
+
+  /**
+   * ${name} の前後から、SQL が壊れない仮の値を推し量る。推し量れなければ null。
+   * <ul>
+   * <li>FROM・JOIN・UPDATE・INTO などの後（表の名前が要る）: null</li>
+   * <li>${name}. の形（スキーマや表の名前が要る）: public</li>
+   * <li>ORDER BY の中で、列などの直後（並べる向きが要る）: ASC</li>
+   * <li>それ以外（ORDER BY の直後、LIMIT、比較の右側、SELECT の列など）: 1</li>
+   * </ul>
+   * 何か所かで使われていれば、すべてで壊れない値にする（どこかで推し量れなければ null）。
+   */
+  static String rawGuess(String script, String name) {
+    Matcher m = Pattern.compile("\\$\\{\\s*" + Pattern.quote(name) + "\\s*(?:,[^}]*)?\\}").matcher(script);
+    String guess = null;
+    boolean found = false;
+    while (m.find()) {
+      found = true;
+      String before = script.substring(Math.max(0, m.start() - 300), m.start());
+      String rest = script.substring(m.end(), Math.min(script.length(), m.end() + 40));
+      String after = rest.isEmpty() ? "" : rest.substring(0, 1);
+      String g;
+      if (after.equals(".")) {
+        // スキーマの名前（FROM ${schema}.orders など）
+        g = "public";
+      } else if (TABLE_BEFORE.matcher(before).find()) {
+        return null;
+      } else if (COLUMN_BEFORE.matcher(before).find() || COMPARE_AFTER.matcher(rest).find()) {
+        // 列や式が要る（WHERE ${column} = #{v} など）。1 にすると比べる相手が分からなくなるうえ、計画ごと消えることがある
+        return null;
+      } else if (ORDER_ITEM_BEFORE.matcher(before).find() && !AFTER_BY_OR_COMMA.matcher(before).find()) {
+        g = "ASC";
+      } else {
+        g = "1";
+      }
+      if (guess != null && !guess.equals(g)) {
+        return null;
+      }
+      guess = g;
+    }
+    return found ? guess : "1";
+  }
+
+  /** ${} の項目のうち、値が入っていない項目（パス） */
+  static List<String> rawPaths(ParamNode node, Object actual) {
+    List<String> out = new ArrayList<>();
+    rawPaths(node, actual, "", out);
+    return out;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void rawPaths(ParamNode node, Object actual, String path, List<String> out) {
+    for (ParamNode child : node.getProperties().values()) {
+      String p = path.isEmpty() ? child.getName() : path + "." + child.getName();
+      Object v = actual instanceof Map ? ((Map<String, Object>) actual).get(child.getName()) : null;
+      if (child.getUsages().contains(ParamNode.Usage.RAW) && v == null) {
+        out.add(p);
+      }
+      if (!child.getProperties().isEmpty()) {
+        rawPaths(child, v, p, out);
+      }
+    }
   }
 
   // ---- 値の候補 ----
