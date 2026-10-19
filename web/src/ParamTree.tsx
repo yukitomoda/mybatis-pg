@@ -144,8 +144,8 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
               onClick={() => setSuggesting(!suggesting)}
             >
               <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
-                <line x1="10" y1="10" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                <line x1="10.3" y1="10.3" x2="14" y2="14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </button>
           )}

@@ -2214,10 +2214,19 @@ button.bulk-open {
 /* ---- 値の候補（試作） ---- */
 
 .suggest-toggle {
+  /* SVG を文字のベースラインに乗せず、ボタンの中央に置く */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
   margin-left: 0.3rem;
-  padding: 0 0.25rem;
-  font-size: 11px;
+  padding: 0.15rem 0.3rem;
+  line-height: 1;
   opacity: 0.6;
+}
+
+.suggest-toggle svg {
+  display: block;
 }
 
 .suggest-toggle.open,
