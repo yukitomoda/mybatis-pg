@@ -177,4 +177,18 @@ class QueryExecutorPgTest {
       }
     }
   }
+
+  @Test
+  void パラメータと比べている列を推論し_値の候補を出す() throws Exception {
+    Map<Integer, java.util.List<ParamSources.Source>> r = ParamSources.infer(
+        // $2 は型を決められない（IS NULL）ので、text として作り直す
+        "SELECT * FROM items WHERE id = $1 AND ($2 IS NULL OR $2 = name)", 2, java.util.Arrays.asList("int4", "unknown"),
+        java.util.Arrays.asList("1", "NULL"), () -> DriverManager.getConnection(URL));
+    assertEquals("items.id", r.get(1).get(0).table + "." + r.get(1).get(0).column);
+    assertEquals("items.name", r.get(2).get(0).table + "." + r.get(2).get(0).column);
+    Map<String, Object> v = ParamSources.values(r.get(1).get(0).schema, "items", "name", () -> DriverManager.getConnection(URL));
+    assertEquals("text", v.get("type"));
+    assertTrue(!((java.util.List<?>) v.get("values")).isEmpty(), v.toString());
+    assertEquals(1000, count());
+  }
 }

@@ -356,6 +356,16 @@ public final class ToolServer {
           runPart(ex);
         }
         break;
+      case "/api/param-sources":
+        if (requireMethod(ex, method, "POST")) {
+          paramSources(ex);
+        }
+        break;
+      case "/api/column-values":
+        if (requireMethod(ex, method, "POST")) {
+          columnValues(ex);
+        }
+        break;
       case "/api/explain":
         if (requireMethod(ex, method, "POST")) {
           explain(ex);
@@ -1325,6 +1335,95 @@ public final class ToolServer {
     body.put("total", r.total);
     body.put("elapsedMillis", r.elapsedMillis);
     sendJson(ex, 200, body);
+  }
+
+  /**
+   * パラメータがどの表のどの列と比べられているかを推論する（試作）: {"statementId", "parameters", "draft"?, "connectionId"}。
+   * 応答: {"sources": [{"index", "property", "columns": [{"schema", "table", "column", "condition"}]}]}（推論できたものだけ）。
+   */
+  private void paramSources(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String statementId = string(req, "statementId");
+    String connectionId = string(req, "connectionId");
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
+      return;
+    }
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    SqlRenderer.Result rendered;
+    try {
+      rendered = renderer.render(statementId, parameters);
+    } catch (RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    List<String> fallbackTypes = new ArrayList<>();
+    List<String> actualLiterals = new ArrayList<>();
+    for (SqlRenderer.Binding b : rendered.bindings) {
+      fallbackTypes.add(QueryExecutor.pgType(b.value, true));
+      actualLiterals.add(SqlLiteral.of(b.value));
+    }
+    Map<Integer, List<ParamSources.Source>> inferred;
+    try {
+      inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(), fallbackTypes, actualLiterals,
+          () -> connections.open(connectionId));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+      return;
+    }
+    List<Map<String, Object>> sources = new ArrayList<>();
+    for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("index", e.getKey());
+      m.put("property", rendered.bindings.get(e.getKey() - 1).property);
+      List<Map<String, Object>> cols = new ArrayList<>();
+      for (ParamSources.Source s : e.getValue()) {
+        Map<String, Object> col = new LinkedHashMap<>();
+        col.put("schema", s.schema);
+        col.put("table", s.table);
+        col.put("column", s.column);
+        col.put("condition", s.condition);
+        col.put("direct", s.direct);
+        cols.add(col);
+      }
+      m.put("columns", cols);
+      sources.add(m);
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sources", sources);
+    sendJson(ex, 200, body);
+  }
+
+  /** 列の値の候補（試作）: {"connectionId", "schema", "table", "column"} → {"type", "estimatedRows", "method", "values": [{"value", "count"}]} */
+  private void columnValues(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    try {
+      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"),
+          () -> connections.open(connectionId)));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+    }
   }
 
   /** 基準ディレクトリからの相対パスを / 区切りで返す。基準の外なら絶対パスのまま */
