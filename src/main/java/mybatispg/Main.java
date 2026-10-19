@@ -122,6 +122,10 @@ public final class Main {
     // 接続先の設定（パスワードは保存しない）
     Path connectionsFile = configDir.resolve("connections.json");
     ConnectionStore connections = ConnectionStore.load(connectionsFile);
+    if (project != null) {
+      // application.yml などの spring.datasource も接続先にする
+      connections.useProject(project);
+    }
     System.out.println("接続先の設定: " + connectionsFile);
 
     // 共通パラメータ（プロジェクトごと）

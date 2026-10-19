@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.regex.Matcher;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -39,6 +40,12 @@ public final class ConnectionStore {
     public String user;
     /** JDBC URL に付ける接続パラメータ（例: stringtype=unspecified&sslmode=require） */
     public String params;
+    /** プロジェクトの設定（application.yml など）から読んだ接続先なら、そのファイル。ファイルには保存しない */
+    public transient String source;
+    /** プロジェクトの設定から読んだ接続先が使えない理由 */
+    public transient String error;
+    /** プロジェクトの設定から読んだ JDBC URL（そのまま使う） */
+    transient String url;
 
     Profile copy() {
       Profile p = new Profile();
@@ -49,7 +56,15 @@ public final class ConnectionStore {
       p.database = database;
       p.user = user;
       p.params = params;
+      p.source = source;
+      p.error = error;
+      p.url = url;
       return p;
+    }
+
+    /** プロジェクトの設定から読んだ接続先（画面では変えられない） */
+    public boolean isFromProject() {
+      return source != null;
     }
   }
 
@@ -62,9 +77,58 @@ public final class ConnectionStore {
   private final Map<String, Profile> profiles = new LinkedHashMap<>();
   private final Map<String, String> passwords = new ConcurrentHashMap<>();
 
+  /** プロジェクトの設定（application.yml など）のデータソース。使うたびに読み直す */
+  private volatile java.util.function.Supplier<List<ProjectDataSources.Source>> projectSources = java.util.Collections::emptyList;
+
   private ConnectionStore(Path file) {
     this.file = file;
   }
+
+  /** プロジェクトの設定（src/main/resources の application.yml など）のデータソースも接続先にする */
+  public void useProject(Path projectDir) {
+    this.projectSources = () -> ProjectDataSources.read(projectDir, System.getenv(), System.getProperties());
+  }
+
+  /** テスト用 */
+  void useProjectSources(java.util.function.Supplier<List<ProjectDataSources.Source>> sources) {
+    this.projectSources = sources;
+  }
+
+  private ProjectDataSources.Source projectSource(String id) {
+    if (id == null || !id.startsWith(ProjectDataSources.PREFIX)) {
+      return null;
+    }
+    for (ProjectDataSources.Source s : projectSources.get()) {
+      if (s.id.equals(id)) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  private static Profile toProfile(ProjectDataSources.Source s) {
+    Profile p = new Profile();
+    p.id = s.id;
+    p.name = s.name;
+    p.source = s.file;
+    p.error = s.error;
+    p.url = s.url;
+    p.user = s.user == null ? "" : s.user;
+    p.params = "";
+    p.host = "";
+    p.database = "";
+    // 画面に出すため、URL からホスト・ポート・データベースを読み取る（接続には URL をそのまま使う）
+    Matcher m = URL.matcher(s.url == null ? "" : s.url);
+    if (m.matches()) {
+      p.host = m.group(1);
+      p.port = m.group(2) == null ? 5432 : Integer.parseInt(m.group(2));
+      p.database = m.group(3);
+      p.params = m.group(4) == null ? "" : m.group(4);
+    }
+    return p;
+  }
+
+  private static final java.util.regex.Pattern URL = java.util.regex.Pattern.compile("jdbc:postgresql://([^:/?]*)(?::(\\d+))?/([^?]*)(?:\\?(.*))?");
 
   /** ファイルから読み込む。ファイルがなければ空で始め、保存時に作る */
   public static ConnectionStore load(Path file) throws IOException {
@@ -91,20 +155,32 @@ public final class ConnectionStore {
     return new ConnectionStore(null);
   }
 
+  /** 保存した接続先と、プロジェクトの設定から読んだ接続先 */
   public synchronized List<Profile> list() {
     List<Profile> result = new ArrayList<>();
     for (Profile p : profiles.values()) {
       result.add(p.copy());
     }
+    for (ProjectDataSources.Source s : projectSources.get()) {
+      result.add(toProfile(s));
+    }
     return result;
   }
 
   public synchronized Profile get(String id) {
+    ProjectDataSources.Source s = projectSource(id);
+    if (s != null) {
+      return toProfile(s);
+    }
     Profile p = profiles.get(id);
     return p == null ? null : p.copy();
   }
 
   public boolean hasPassword(String id) {
+    ProjectDataSources.Source s = projectSource(id);
+    if (s != null) {
+      return s.password != null && !s.password.isEmpty();
+    }
     return passwords.containsKey(id);
   }
 
@@ -128,6 +204,9 @@ public final class ConnectionStore {
    * @param password null なら今のパスワードのまま。空文字ならパスワードを消す
    */
   public synchronized Profile save(Profile profile, String password) throws IOException {
+    if (profile.id != null && profile.id.startsWith(ProjectDataSources.PREFIX)) {
+      throw new IllegalArgumentException("プロジェクトの設定から読んだ接続先は、ここでは変えられません（設定ファイルを直してください）");
+    }
     validate(profile);
     Profile p = profile.copy();
     if (p.id == null || p.id.isEmpty()) {
@@ -153,6 +232,9 @@ public final class ConnectionStore {
   }
 
   public synchronized boolean delete(String id) throws IOException {
+    if (id != null && id.startsWith(ProjectDataSources.PREFIX)) {
+      throw new IllegalArgumentException("プロジェクトの設定から読んだ接続先は、消せません");
+    }
     if (profiles.remove(id) == null) {
       return false;
     }
@@ -171,14 +253,19 @@ public final class ConnectionStore {
     if (!p.user.isEmpty()) {
       props.setProperty("user", p.user);
     }
-    String password = passwords.get(id);
+    ProjectDataSources.Source s = projectSource(id);
+    if (s != null && s.error != null) {
+      throw new SQLException(s.name + " の接続先を使えません: " + s.error);
+    }
+    String password = s != null ? s.password : passwords.get(id);
     if (password != null) {
       props.setProperty("password", password);
     }
     props.setProperty("connectTimeout", "10");
     props.setProperty("ApplicationName", "mybatis-pg");
     // シェードした jar では DriverManager のドライバ探索に頼らず、直接使う
-    Connection c = new org.postgresql.Driver().connect(jdbcUrl(p), props);
+    String url = s != null ? s.url : jdbcUrl(p);
+    Connection c = new org.postgresql.Driver().connect(url, props);
     if (c == null) {
       throw new SQLException("JDBC URL を解釈できません: " + jdbcUrl(p));
     }

@@ -757,8 +757,13 @@ public final class ToolServer {
     if (req == null) {
       return;
     }
-    if (!connections.delete(string(req, "id"))) {
-      sendJson(ex, 404, error("接続先がありません"));
+    try {
+      if (!connections.delete(string(req, "id"))) {
+        sendJson(ex, 404, error("接続先がありません"));
+        return;
+      }
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
       return;
     }
     vault.remove(string(req, "id"));
@@ -797,6 +802,9 @@ public final class ToolServer {
     m.put("params", p.params);
     m.put("hasPassword", connections.hasPassword(p.id));
     m.put("passwordSaved", vault.has(p.id));
+    // プロジェクトの設定（application.yml など）から読んだ接続先: そのファイルと、使えない理由
+    m.put("source", p.source);
+    m.put("error", p.error);
     return m;
   }
 
