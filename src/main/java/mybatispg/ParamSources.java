@@ -66,15 +66,34 @@ final class ParamSources {
    */
   static Map<Integer, List<Source>> infer(String numberedSql, int count, List<String> fallbackTypes, List<String> actualValues,
       QueryExecutor.ConnectionFactory connections) throws QueryExecutor.ExecutionException {
-    Map<Integer, List<Source>> out = new LinkedHashMap<>();
     if (count == 0) {
-      return out;
+      return new LinkedHashMap<>();
     }
-    Connection c;
+    Connection c = open(connections);
     try {
-      c = connections.open();
+      return infer(numberedSql, count, fallbackTypes, actualValues, c);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない
+      }
+    }
+  }
+
+  static Connection open(QueryExecutor.ConnectionFactory connections) throws QueryExecutor.ExecutionException {
+    try {
+      return connections.open();
     } catch (SQLException | RuntimeException e) {
       throw new QueryExecutor.ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+  }
+
+  /** 開いている接続で推論する（接続は閉じない。続けて何回か推論できる） */
+  static Map<Integer, List<Source>> infer(String numberedSql, int count, List<String> fallbackTypes, List<String> actualValues,
+      Connection c) throws QueryExecutor.ExecutionException {
+    if (count == 0) {
+      return new LinkedHashMap<>();
     }
     try {
       c.setAutoCommit(false);
@@ -136,17 +155,21 @@ final class ParamSources {
       c.rollback();
       return fromPlan(plan, markers);
     } catch (SQLException | RuntimeException e) {
+      throw new QueryExecutor.ExecutionException(Errors.describe(e), e);
+    } finally {
+      // PREPARE はロールバックしても残るので、続けて推論できるように消す
+      try {
+        c.rollback();
+        try (Statement s = c.createStatement()) {
+          s.execute("DEALLOCATE " + PREPARED);
+        }
+      } catch (SQLException ignored) {
+        // PREPARE の前に失敗したなど
+      }
       try {
         c.rollback();
       } catch (SQLException ignored) {
         // 読むだけなので、ロールバックできなくても変更は残らない
-      }
-      throw new QueryExecutor.ExecutionException(Errors.describe(e), e);
-    } finally {
-      try {
-        c.close();
-      } catch (SQLException ignored) {
-        // 閉じられなくても結果は変わらない
       }
     }
   }
@@ -467,7 +490,10 @@ final class ParamSources {
   // ---- 値の候補 ----
 
   /** 列の値の候補。多く出てくる順 */
-  static Map<String, Object> values(String schema, String table, String column, QueryExecutor.ConnectionFactory connections)
+  /**
+   * @param scan 統計情報に「よく出る値」がないときに、表を読んで数えるか（読まなければ候補なしで返す。共有の DB に負担をかけないように、押したときだけ）
+   */
+  static Map<String, Object> values(String schema, String table, String column, boolean scan, QueryExecutor.ConnectionFactory connections)
       throws QueryExecutor.ExecutionException {
     Connection c;
     try {
@@ -483,7 +509,10 @@ final class ParamSources {
       Map<String, Object> body = new LinkedHashMap<>();
       String type;
       double reltuples;
-      try (PreparedStatement ps = c.prepareStatement("SELECT format_type(a.atttypid, a.atttypmod), c.reltuples"
+      boolean indexed;
+      // 列から始まるインデックスがあるか（あれば、入力中の値の行を自動で探しても軽い）
+      try (PreparedStatement ps = c.prepareStatement("SELECT format_type(a.atttypid, a.atttypmod), c.reltuples,"
+          + " EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.oid AND i.indkey[0] = a.attnum)"
           + " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
           + " WHERE n.nspname = ?::name AND c.relname = ?::name AND a.attname = ?::name AND a.attnum > 0 AND NOT a.attisdropped")) {
         ps.setString(1, schema);
@@ -495,9 +524,11 @@ final class ParamSources {
           }
           type = rs.getString(1);
           reltuples = rs.getDouble(2);
+          indexed = rs.getBoolean(3);
         }
       }
       body.put("type", type);
+      body.put("indexed", indexed);
       body.put("estimatedRows", Math.max(0, Math.round(reltuples)));
       List<Map<String, Object>> values = new ArrayList<>();
       // まず統計情報の「よく出る値」（表を読まない）
@@ -520,7 +551,9 @@ final class ParamSources {
         }
       }
       String method = "stats";
-      if (values.isEmpty()) {
+      if (values.isEmpty() && !scan) {
+        method = "none";
+      } else if (values.isEmpty()) {
         // 統計情報に「よく出る値」がない（ほぼ一意の列など）: 表を読んで数える。大きな表は一部だけを読む
         String q = quote(schema) + "." + quote(table);
         String col = quote(column);
@@ -603,8 +636,9 @@ final class ParamSources {
       List<List<String>> candidateRows = new ArrayList<>();
       List<String> columns = new ArrayList<>();
       if (!values.isEmpty()) {
-        try (PreparedStatement ps = c.prepareStatement("SELECT DISTINCT ON (" + col + ") * FROM " + q + " WHERE " + col
-            + " = ANY ((?::text[])::" + type + "[]) ORDER BY " + col)) {
+        // 値ごとに LIMIT 1 で取る（1 行見つかれば止まるので、行の多い値やインデックスのない列でも、その値の行をすべて読まない）
+        try (PreparedStatement ps = c.prepareStatement("SELECT r.* FROM unnest((?::text[])::" + type + "[]) WITH ORDINALITY AS v(val, i)"
+            + " CROSS JOIN LATERAL (SELECT * FROM " + q + " WHERE " + col + " = v.val LIMIT 1) r ORDER BY v.i")) {
           ps.setQueryTimeout(10);
           ps.setArray(1, c.createArrayOf("text", values.toArray()));
           read(ps, columns, candidateRows, values.size());

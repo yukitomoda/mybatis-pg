@@ -2322,3 +2322,11 @@ button.bulk-open {
   margin: 0.2rem 0 0.4rem;
   font-size: 12px;
 }
+
+.suggest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.8rem;
+  margin-top: 0.3rem;
+}

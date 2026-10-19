@@ -1380,33 +1380,66 @@ public final class ToolServer {
     Map<String, Integer> indexOf = new LinkedHashMap<>();
     String firstError = null;
     boolean anyOk = false;
-    for (Object params : new Object[] {parameters, probe}) {
+    // 先に両方を組み立てる（DB は使わない）。仮の値で新しい項目が出ないなら、仮の値の推論は省く（DB への負担を減らす）
+    SqlRenderer.Result[] renders = new SqlRenderer.Result[2];
+    Object[] all = {parameters, probe};
+    for (int i = 0; i < 2; i++) {
       try {
-        SqlRenderer.Result rendered = renderer.render(statementId, params);
-        List<String> fallbackTypes = new ArrayList<>();
-        List<String> actualValues = new ArrayList<>();
-        for (SqlRenderer.Binding b : rendered.bindings) {
-          fallbackTypes.add(QueryExecutor.pgType(b.value, true));
-          actualValues.add(b.value == null ? null : b.value instanceof org.postgresql.util.PGobject
-              ? ((org.postgresql.util.PGobject) b.value).getValue() : b.value.toString());
+        renders[i] = renderer.render(statementId, all[i]);
+      } catch (RuntimeException e) {
+        String m = (i == 1 ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
+        firstError = firstError == null ? m : firstError + "\n" + m;
+      }
+    }
+    if (renders[0] != null && renders[1] != null && properties(renders[0]).containsAll(properties(renders[1]))) {
+      renders[1] = null;
+      probeOk = true;
+    }
+    java.sql.Connection shared = null;
+    try {
+      for (int ri = 0; ri < 2; ri++) {
+        SqlRenderer.Result rendered = renders[ri];
+        Object params = all[ri];
+        if (rendered == null) {
+          continue;
         }
-        Map<Integer, List<ParamSources.Source>> inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(),
-            fallbackTypes, actualValues, () -> connections.open(connectionId));
-        anyOk = true;
-        probeOk |= params == probe;
-        for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
-          String property = rendered.bindings.get(e.getKey() - 1).property;
-          List<ParamSources.Source> list = byProperty.computeIfAbsent(property, k -> new ArrayList<>());
-          indexOf.putIfAbsent(property, e.getKey());
-          for (ParamSources.Source src : e.getValue()) {
-            if (list.stream().noneMatch(x -> x.schema.equals(src.schema) && x.table.equals(src.table) && x.column.equals(src.column))) {
-              list.add(src);
+        try {
+          if (shared == null && !rendered.bindings.isEmpty()) {
+            shared = ParamSources.open(() -> connections.open(connectionId));
+          }
+          List<String> fallbackTypes = new ArrayList<>();
+          List<String> actualValues = new ArrayList<>();
+          for (SqlRenderer.Binding b : rendered.bindings) {
+            fallbackTypes.add(QueryExecutor.pgType(b.value, true));
+            actualValues.add(b.value == null ? null : b.value instanceof org.postgresql.util.PGobject
+                ? ((org.postgresql.util.PGobject) b.value).getValue() : b.value.toString());
+          }
+          Map<Integer, List<ParamSources.Source>> inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(),
+              fallbackTypes, actualValues, shared);
+          anyOk = true;
+          probeOk |= params == probe;
+          for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
+            String property = rendered.bindings.get(e.getKey() - 1).property;
+            List<ParamSources.Source> list = byProperty.computeIfAbsent(property, k -> new ArrayList<>());
+            indexOf.putIfAbsent(property, e.getKey());
+            for (ParamSources.Source src : e.getValue()) {
+              if (list.stream().noneMatch(x -> x.schema.equals(src.schema) && x.table.equals(src.table) && x.column.equals(src.column))) {
+                list.add(src);
+              }
             }
           }
+        } catch (QueryExecutor.ExecutionException | RuntimeException e) {
+          String m = (params == probe ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
+          firstError = firstError == null ? m : firstError + "\n" + m;
         }
-      } catch (QueryExecutor.ExecutionException | RuntimeException e) {
-        String m = (params == probe ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
-        firstError = firstError == null ? m : firstError + "\n" + m;
+      }
+    } finally {
+      if (shared != null) {
+        try {
+          shared.close();
+        } catch (java.sql.SQLException ignored) {
+          // 閉じられなくても結果は変わらない
+        }
       }
     }
     // 仮の値の SQL で推論できなかったら、値の入っていない ${} の項目のうち、推し量れなかったもの（なければすべて）に値を入れるよう知らせる
@@ -1477,6 +1510,15 @@ public final class ToolServer {
   }
 
   /** 列の値の候補（試作）: {"connectionId", "schema", "table", "column"} → {"type", "estimatedRows", "method", "values": [{"value", "count"}]} */
+  /** SQL に出ている項目（バインド変数の元の式） */
+  private static java.util.Set<String> properties(SqlRenderer.Result r) {
+    java.util.Set<String> out = new java.util.HashSet<>();
+    for (SqlRenderer.Binding b : r.bindings) {
+      out.add(b.property);
+    }
+    return out;
+  }
+
   private void columnValues(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
     if (req == null) {
@@ -1488,7 +1530,8 @@ public final class ToolServer {
       return;
     }
     try {
-      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"),
+      boolean scan = req.has("scan") && req.get("scan").getAsBoolean();
+      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"), scan,
           () -> connections.open(connectionId)));
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
