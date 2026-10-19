@@ -48,6 +48,25 @@ class ParamSourcesTest {
     assertNull(ParamSources.marker(3, "boolean", 0));
   }
 
+  @Test
+  @SuppressWarnings("unchecked")
+  void 推論のための仮の値はifをすべて通す_今の値はそのまま() {
+    SqlRenderer r = SqlRenderer.load(java.util.Arrays.asList(java.nio.file.Paths.get("src/test/resources/mappers/Common.xml"),
+        java.nio.file.Paths.get("src/test/resources/mappers/UserMapper.xml")));
+    java.util.Map<String, Object> actual = new java.util.HashMap<>();
+    java.util.Map<String, Object> cond = new java.util.HashMap<>();
+    cond.put("name", "taro");
+    actual.put("cond", cond);
+    Object probe = ParamSources.probe(r.parameters("sample.UserMapper.search").root, actual);
+    java.util.Map<String, Object> p = (java.util.Map<String, Object>) probe;
+    assertEquals("taro", ((java.util.Map<String, Object>) p.get("cond")).get("name"));
+    // 仮の値なら、if の中の条件もすべて SQL に出る
+    String withProbe = r.render("sample.UserMapper.search", probe).placeholderSql;
+    String withActual = r.render("sample.UserMapper.search", actual).placeholderSql;
+    assertTrue(withProbe.length() > withActual.length(), withProbe);
+    assertTrue(withProbe.chars().filter(ch -> ch == '?').count() > withActual.chars().filter(ch -> ch == '?').count(), withProbe);
+  }
+
   private static String name(ParamSources.Source s) {
     return s.schema + "." + s.table + "." + s.column;
   }

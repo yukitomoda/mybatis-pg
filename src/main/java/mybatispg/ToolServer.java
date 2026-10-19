@@ -1368,40 +1368,59 @@ public final class ToolServer {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
-    SqlRenderer.Result rendered;
-    try {
-      rendered = renderer.render(statementId, parameters);
-    } catch (RuntimeException e) {
-      sendJson(ex, 422, error(Errors.describe(e)));
-      return;
+    // 今の値で組み立てた SQL と、未設定の項目に仮の値を入れて if をすべて通した SQL の両方で推論し、項目ごとにまとめる
+    // （今の値では if で条件がなくなっている項目や、${} が空で SQL が壊れているときも推論できるように）
+    Object probe = ParamSources.probe(renderer.parameters(statementId).root, parameters);
+    Map<String, List<ParamSources.Source>> byProperty = new LinkedHashMap<>();
+    Map<String, Integer> indexOf = new LinkedHashMap<>();
+    String firstError = null;
+    boolean anyOk = false;
+    for (Object params : new Object[] {parameters, probe}) {
+      try {
+        SqlRenderer.Result rendered = renderer.render(statementId, params);
+        List<String> fallbackTypes = new ArrayList<>();
+        List<String> actualValues = new ArrayList<>();
+        for (SqlRenderer.Binding b : rendered.bindings) {
+          fallbackTypes.add(QueryExecutor.pgType(b.value, true));
+          actualValues.add(b.value == null ? null : b.value instanceof org.postgresql.util.PGobject
+              ? ((org.postgresql.util.PGobject) b.value).getValue() : b.value.toString());
+        }
+        Map<Integer, List<ParamSources.Source>> inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(),
+            fallbackTypes, actualValues, () -> connections.open(connectionId));
+        anyOk = true;
+        for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
+          String property = rendered.bindings.get(e.getKey() - 1).property;
+          List<ParamSources.Source> list = byProperty.computeIfAbsent(property, k -> new ArrayList<>());
+          indexOf.putIfAbsent(property, e.getKey());
+          for (ParamSources.Source src : e.getValue()) {
+            if (list.stream().noneMatch(x -> x.schema.equals(src.schema) && x.table.equals(src.table) && x.column.equals(src.column))) {
+              list.add(src);
+            }
+          }
+        }
+      } catch (QueryExecutor.ExecutionException | RuntimeException e) {
+        String m = (params == probe ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
+        firstError = firstError == null ? m : firstError + "\n" + m;
+      }
     }
-    List<String> fallbackTypes = new ArrayList<>();
-    List<String> actualLiterals = new ArrayList<>();
-    for (SqlRenderer.Binding b : rendered.bindings) {
-      fallbackTypes.add(QueryExecutor.pgType(b.value, true));
-      actualLiterals.add(SqlLiteral.of(b.value));
-    }
-    Map<Integer, List<ParamSources.Source>> inferred;
-    try {
-      inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(), fallbackTypes, actualLiterals,
-          () -> connections.open(connectionId));
-    } catch (QueryExecutor.ExecutionException e) {
-      sendJson(ex, 422, error(e.getMessage()));
+    // どちらでも推論できなかったときだけエラーにする（比較のない INSERT などは、候補なしとして返す）
+    if (!anyOk && firstError != null) {
+      sendJson(ex, 422, error(firstError));
       return;
     }
     List<Map<String, Object>> sources = new ArrayList<>();
-    for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
+    for (Map.Entry<String, List<ParamSources.Source>> e : byProperty.entrySet()) {
       Map<String, Object> m = new LinkedHashMap<>();
-      m.put("index", e.getKey());
-      m.put("property", rendered.bindings.get(e.getKey() - 1).property);
+      m.put("index", indexOf.get(e.getKey()));
+      m.put("property", e.getKey());
       List<Map<String, Object>> cols = new ArrayList<>();
-      for (ParamSources.Source s : e.getValue()) {
+      for (ParamSources.Source src : e.getValue()) {
         Map<String, Object> col = new LinkedHashMap<>();
-        col.put("schema", s.schema);
-        col.put("table", s.table);
-        col.put("column", s.column);
-        col.put("condition", s.condition);
-        col.put("direct", s.direct);
+        col.put("schema", src.schema);
+        col.put("table", src.table);
+        col.put("column", src.column);
+        col.put("condition", src.condition);
+        col.put("direct", src.direct);
         cols.add(col);
       }
       m.put("columns", cols);

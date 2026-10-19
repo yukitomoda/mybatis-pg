@@ -62,9 +62,9 @@ final class ParamSources {
    * @return バインド変数の番号（1 始まり）ごとの、推論した列
    */
   /**
-   * @param actualLiterals 今の値の SQL のリテラル（目印を作れないパラメータに使う。NULL だと条件がまとめて消えることがあるため）
+   * @param actualValues 今の値の文字（目印を作れないパラメータに使う。NULL だと条件がまとめて消えることがあるため。値がなければ null）
    */
-  static Map<Integer, List<Source>> infer(String numberedSql, int count, List<String> fallbackTypes, List<String> actualLiterals,
+  static Map<Integer, List<Source>> infer(String numberedSql, int count, List<String> fallbackTypes, List<String> actualValues,
       QueryExecutor.ConnectionFactory connections) throws QueryExecutor.ExecutionException {
     Map<Integer, List<Source>> out = new LinkedHashMap<>();
     if (count == 0) {
@@ -115,7 +115,7 @@ final class ParamSources {
             String type = i <= types.size() ? types.get(i - 1) : "unknown";
             String marker = marker(i, type, level);
             markers.add(marker);
-            literals.add(marker != null ? "'" + marker + "'" : nonNull(s, type, i <= actualLiterals.size() ? actualLiterals.get(i - 1) : "NULL"));
+            literals.add(marker != null ? "'" + marker + "'" : nonNull(s, type, i <= actualValues.size() ? actualValues.get(i - 1) : null));
           }
           s.execute("SAVEPOINT explain");
           try (ResultSet rs = s.executeQuery("EXPLAIN (VERBOSE, FORMAT JSON) EXECUTE " + PREPARED + "(" + String.join(", ", literals) + ")")) {
@@ -156,19 +156,22 @@ final class ParamSources {
    * 今の値、なければ列挙型の最初の値や true を入れる
    */
   private static String nonNull(Statement s, String type, String actual) throws SQLException {
-    if (!"NULL".equals(actual)) {
-      return actual;
-    }
-    if (type.equalsIgnoreCase("boolean")) {
-      return "true";
-    }
+    // 列挙型は、今の値が型に合わないこともある（仮の値など）ので、最初の値を使う
     try (ResultSet rs = s.executeQuery("SELECT e.enumlabel FROM pg_enum e WHERE e.enumtypid = '" + type.replace("'", "''")
         + "'::regtype ORDER BY e.enumsortorder LIMIT 1")) {
       if (rs.next()) {
         return "'" + rs.getString(1).replace("'", "''") + "'";
       }
     }
-    return "NULL";
+    if (type.equalsIgnoreCase("boolean")) {
+      return "true".equalsIgnoreCase(actual) || "false".equalsIgnoreCase(actual) ? actual : "true";
+    }
+    if (type.endsWith("[]")) {
+      // 配列の型: 今の値が配列の形でなければ空の配列
+      return actual != null && actual.startsWith("{") ? "'" + actual.replace("'", "''") + "'" : "'{}'";
+    }
+    // 型を付けない文字のリテラルにして、パラメータの型に読み替えさせる
+    return actual == null ? "NULL" : "'" + actual.replace("'", "''") + "'";
   }
 
   /**
@@ -249,7 +252,8 @@ final class ParamSources {
     String c = condition.replaceAll("::[A-Za-z_][A-Za-z0-9_ ]*(\\[\\])?", "").replaceAll("\\((\\w+\\.\\w+)\\)", "$1");
     String colRe = "(?:\"?" + Pattern.quote(col[0]) + "\"?)\\.(?:\"?" + Pattern.quote(col[1]) + "\"?)";
     String op = "(?:=|<>|!=|<=|>=|<|>|~~\\*?|!~~\\*?)";
-    String param = "(?:'?\\$\\d+'?|ANY \\(.*\\))";
+    // 目印は、時刻帯（+00）などを付けて出ることがある
+    String param = "(?:'\\$\\d+[^']*'|\\$\\d+|ANY \\(.*\\))";
     return c.matches("\\(\\s*" + colRe + "\\s*" + op + "\\s*" + param + "\\s*\\)")
         || c.matches("\\(\\s*" + param + "\\s*" + op + "\\s*" + colRe + "\\s*\\)");
   }
@@ -330,6 +334,55 @@ final class ParamSources {
       out.add(new String[] {alias, col});
     }
     return out;
+  }
+
+  // ---- if をすべて通す仮の値 ----
+
+  /**
+   * 推論のための仮の値。今の値はそのまま使い、未設定の項目には、XML から推し量った型の仮の値を入れる
+   * （if test="x != null" などをすべて通し、条件を SQL に出すため）。${} の項目は "1"（ORDER BY ${...} などで SQL が壊れないように）。
+   * 値は if を通すためだけに使い、列を探すときは目印に置き換える。
+   */
+  @SuppressWarnings("unchecked")
+  static Object probe(ParamNode node, Object actual) {
+    if (node.getUsages().contains(ParamNode.Usage.ITERATE)) {
+      if (actual instanceof java.util.Collection && !((java.util.Collection<?>) actual).isEmpty()) {
+        return actual;
+      }
+      List<Object> list = new ArrayList<>();
+      list.add(node.getElement() == null ? 1 : probe(node.getElement(), null));
+      return list;
+    }
+    if (!node.getProperties().isEmpty()) {
+      Map<String, Object> out = new LinkedHashMap<>();
+      if (actual instanceof Map) {
+        out.putAll((Map<String, Object>) actual);
+      }
+      for (ParamNode child : node.getProperties().values()) {
+        out.put(child.getName(), probe(child, out.get(child.getName())));
+      }
+      return out;
+    }
+    if (actual != null) {
+      return actual;
+    }
+    if (node.getUsages().contains(ParamNode.Usage.RAW)) {
+      return "1";
+    }
+    if (node.getTypeHints().contains(ParamNode.TypeHint.BOOLEAN)) {
+      return Boolean.TRUE;
+    }
+    if (node.getTypeHints().contains(ParamNode.TypeHint.TIMESTAMP)) {
+      return java.sql.Timestamp.valueOf("2000-01-01 00:00:00");
+    }
+    if (node.getTypeHints().contains(ParamNode.TypeHint.DATE)) {
+      return java.sql.Date.valueOf("2000-01-01");
+    }
+    if (node.getTypeHints().contains(ParamNode.TypeHint.STRING)) {
+      return "x";
+    }
+    // 型が分からなければ数にする（!= null、> 0、!= '' の判定を通る）
+    return 1;
   }
 
   // ---- 値の候補 ----
