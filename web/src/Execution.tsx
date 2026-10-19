@@ -164,7 +164,14 @@ function VaultPanel({ conn }: { conn: Connections }) {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <input type="password" aria-label="確認のため、もう一度" placeholder="確認のため、もう一度" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      <input
+        type="password"
+        aria-label="確認のため、もう一度"
+        placeholder="確認のため、もう一度"
+        autoComplete="new-password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
       {mismatch && <span className="error-text">一致しません</span>}
     </>
   );
@@ -178,7 +185,9 @@ function VaultPanel({ conn }: { conn: Connections }) {
             run(() => api.vaultSetup(password), 'マスターパスワードを設定しました');
           }}
         >
-          <p className="hint">マスターパスワードを設定すると、接続先のパスワードを暗号化して保存できます。起動するたびに、マスターパスワードを 1 回入れて開きます。</p>
+          <p className="hint">
+            マスターパスワードを設定すると、接続先のパスワードを暗号化して保存できます。起動するたびに、マスターパスワードを 1 回入れて開きます。
+          </p>
           {newPassword}
           <button type="submit" disabled={password.length < vault.minLength || password !== confirm}>
             設定
@@ -205,7 +214,14 @@ function VaultPanel({ conn }: { conn: Connections }) {
             run(() => api.vaultChange(current, password), 'マスターパスワードを変えました');
           }}
         >
-          <input type="password" aria-label="今のマスターパスワード" placeholder="今のマスターパスワード" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          <input
+            type="password"
+            aria-label="今のマスターパスワード"
+            placeholder="今のマスターパスワード"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
           {newPassword}
           <button type="submit" disabled={current === '' || password.length < vault.minLength || password !== confirm}>
             変更
@@ -290,7 +306,6 @@ export function ExecutePanel({
 
       {error && <pre className="render-error">{error}</pre>}
       {result && !error && <ExecuteResult result={result} />}
-
     </div>
   );
 }
@@ -340,7 +355,15 @@ export function ResultGrid({ table }: { table: ResultTable }) {
             {table.rows.map((row, r) => (
               <tr key={r}>
                 <td className="rownum">{r + 1}</td>
-                {row.map((v, c) => (v === null ? <td key={c} className="null">NULL</td> : <td key={c}>{v}</td>))}
+                {row.map((v, c) =>
+                  v === null ? (
+                    <td key={c} className="null">
+                      NULL
+                    </td>
+                  ) : (
+                    <td key={c}>{v}</td>
+                  ),
+                )}
               </tr>
             ))}
           </tbody>
@@ -377,6 +400,8 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
   const [busy, setBusy] = useState(false);
 
   const saved = connections.find((c) => c.id === form.id) ?? null;
+  /** プロジェクトの設定から読んだ接続先（変えられない） */
+  const fromProject = !!saved?.source;
 
   const edit = (p: ConnectionProfile | null) => {
     setForm(p ? toInput(p) : { ...EMPTY });
@@ -423,6 +448,17 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
     try {
       const r = await api.testConnection(p.id);
       setStatus({ ok: true, text: `保存しました。接続できました（${r.server}）` });
+    } catch (e) {
+      setStatus({ ok: false, text: message(e) });
+    }
+  });
+
+  /** 設定ファイルから読んだ接続先は、保存せずに接続テストだけをする */
+  const testOnly = wrap(async () => {
+    if (!form.id) return;
+    try {
+      const r = await api.testConnection(form.id);
+      setStatus({ ok: true, text: `接続できました（${r.server}）` });
     } catch (e) {
       setStatus({ ok: false, text: message(e) });
     }
@@ -479,75 +515,106 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
         </ul>
 
         <form
-          className="connection-form"
+          className={fromProject ? 'connection-form from-project' : 'connection-form'}
           onSubmit={(e) => {
             e.preventDefault();
-            saveAndTest();
+            if (fromProject) testOnly();
+            else saveAndTest();
           }}
         >
-          <label>
-            名前
-            <input type="text" required value={form.name} placeholder="例: 開発 DB" onChange={(e) => set('name', e.target.value)} />
-          </label>
-          <div className="host-port">
+          {fromProject && (
+            <p className="hint from-project-note">
+              <code>{saved!.source}</code> から読み込み
+            </p>
+          )}
+          {saved?.error && <p className="error-text">{saved.error}</p>}
+          <fieldset className="connection-fields" disabled={fromProject}>
             <label>
-              ホスト
-              <input type="text" required value={form.host} onChange={(e) => set('host', e.target.value)} />
+              名前
+              <input type="text" required value={form.name} placeholder="例: 開発 DB" onChange={(e) => set('name', e.target.value)} />
+            </label>
+            <div className="host-port">
+              <label>
+                ホスト
+                <input type="text" required value={form.host} onChange={(e) => set('host', e.target.value)} />
+              </label>
+              <label>
+                ポート
+                <input type="number" required min={1} max={65535} value={form.port} onChange={(e) => set('port', Number(e.target.value))} />
+              </label>
+            </div>
+            <label>
+              データベース
+              <input type="text" required value={form.database} onChange={(e) => set('database', e.target.value)} />
             </label>
             <label>
-              ポート
-              <input type="number" required min={1} max={65535} value={form.port} onChange={(e) => set('port', Number(e.target.value))} />
+              ユーザー
+              <input type="text" value={form.user} autoComplete="off" onChange={(e) => set('user', e.target.value)} />
             </label>
-          </div>
-          <label>
-            データベース
-            <input type="text" required value={form.database} onChange={(e) => set('database', e.target.value)} />
-          </label>
-          <label>
-            ユーザー
-            <input type="text" value={form.user} autoComplete="off" onChange={(e) => set('user', e.target.value)} />
-          </label>
-          <label>
-            パスワード
-            <input
-              type="password"
-              value={password}
-              autoComplete="new-password"
-              placeholder={saved?.hasPassword ? '入力済み（変える場合だけ入力）' : saved?.passwordSaved ? '保存済み（マスターパスワードで開くと使えます）' : '未入力'}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          <label className="check" title={conn.vault?.unlocked ? undefined : '上でマスターパスワードを設定するか、開くと選べます'}>
-            <input type="checkbox" checked={conn.vault?.unlocked ? remember : !!saved?.passwordSaved} disabled={!conn.vault?.unlocked} onChange={(e) => setRemember(e.target.checked)} />
-            パスワードを保存する（暗号化）
-          </label>
-          <label>
-            接続パラメータ
-            <input type="text" value={form.params} placeholder="例: sslmode=require&stringtype=unspecified" onChange={(e) => set('params', e.target.value)} />
-          </label>
-          <p className="hint">
-            保存しないパスワードは、ツールを再起動すると消えます。
-            {saved?.hasPassword && (
-              <button type="button" className="link" disabled={busy} onClick={clearPassword}>
-                パスワードを消す
-              </button>
+            {!fromProject && (
+              <label>
+                パスワード
+                <input
+                  type="password"
+                  value={password}
+                  autoComplete="new-password"
+                  placeholder={
+                    saved?.hasPassword ? '入力済み（変える場合だけ入力）' : saved?.passwordSaved ? '保存済み（マスターパスワードで開くと使えます）' : '未入力'
+                  }
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
             )}
-          </p>
+            {!fromProject && (
+              <label className="check" title={conn.vault?.unlocked ? undefined : '上でマスターパスワードを設定するか、開くと選べます'}>
+                <input
+                  type="checkbox"
+                  checked={conn.vault?.unlocked ? remember : !!saved?.passwordSaved}
+                  disabled={!conn.vault?.unlocked}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                パスワードを保存する（暗号化）
+              </label>
+            )}
+            <label>
+              接続パラメータ
+              <input type="text" value={form.params} placeholder="例: sslmode=require&stringtype=unspecified" onChange={(e) => set('params', e.target.value)} />
+            </label>
+          </fieldset>
+          {!fromProject && (
+            <p className="hint">
+              保存しないパスワードは、ツールを再起動すると消えます。
+              {saved?.hasPassword && (
+                <button type="button" className="link" disabled={busy} onClick={clearPassword}>
+                  パスワードを消す
+                </button>
+              )}
+            </p>
+          )}
           {status && <pre className={status.ok ? 'status ok' : 'status render-error'}>{status.text}</pre>}
-          <div className="actions">
-            {form.id && (
-              <button type="button" disabled={busy} onClick={remove}>
-                削除
+          {fromProject ? (
+            <div className="actions">
+              <span className="spacer" />
+              <button type="button" disabled={busy || !!saved?.error} onClick={testOnly}>
+                接続テスト
               </button>
-            )}
-            <span className="spacer" />
-            <button type="button" disabled={busy} onClick={saveOnly}>
-              保存
-            </button>
-            <button type="submit" disabled={busy}>
-              保存して接続テスト
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="actions">
+              {form.id && (
+                <button type="button" disabled={busy} onClick={remove}>
+                  削除
+                </button>
+              )}
+              <span className="spacer" />
+              <button type="button" disabled={busy} onClick={saveOnly}>
+                保存
+              </button>
+              <button type="submit" disabled={busy}>
+                保存して接続テスト
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

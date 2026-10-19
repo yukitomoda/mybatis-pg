@@ -105,6 +105,10 @@ export interface ConnectionProfile {
   hasPassword: boolean;
   /** パスワードを暗号化して保存している */
   passwordSaved: boolean;
+  /** プロジェクトの設定（application.yml など）から読んだ接続先なら、そのファイル（画面では変えられない） */
+  source: string | null;
+  /** プロジェクトの設定から読んだ接続先が使えない理由 */
+  error: string | null;
 }
 
 /** パスワードの保存（マスターパスワードで暗号化）の状態 */

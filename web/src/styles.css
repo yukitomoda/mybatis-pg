@@ -2188,3 +2188,20 @@ button.bulk-open {
 .sidebar-toggle {
   flex-shrink: 0;
 }
+
+/* プロジェクトの設定から読んだ接続先（変えられない） */
+.connection-fields {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: contents;
+}
+
+.from-project-note code {
+  font-size: 12px;
+}
+
+.connection-form.from-project input {
+  color: var(--muted);
+  background: var(--code-bg);
+}
