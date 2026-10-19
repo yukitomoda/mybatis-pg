@@ -18,8 +18,8 @@ type Values = {
 /** 列の値の候補は、開いている間は覚えておく（同じ列を何度も読まない） */
 const cache = new Map<string, Promise<Values>>();
 
-const keyOf = (connectionId: string, c: SourceColumn, scan: boolean) =>
-  `${connectionId}\u0000${c.schema}.${c.table}.${c.column}\u0000${scan}`;
+const keyOf = (connectionId: string, c: SourceColumn) =>
+  `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
 
 const NUMBER_TYPES =
   /^(smallint|integer|bigint|numeric|real|double precision|decimal)/;
@@ -94,20 +94,18 @@ export function SuggestPanel({
   const column = columns[Math.min(index, columns.length - 1)];
   const [values, setValues] = useState<Values | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** 統計情報に値がないときに、表を読んで数えるか（押したときだけ。共有の DB に負担をかけないように） */
-  const [scan, setScan] = useState(false);
   const connectionId = conn.current?.id;
-  useEffect(() => setScan(false), [column.schema, column.table, column.column]);
 
   useEffect(() => {
     if (!connectionId) return;
     let active = true;
     setValues(null);
     setError(null);
-    const key = keyOf(connectionId, column, scan);
+    const key = keyOf(connectionId, column);
     let p = cache.get(key);
     if (!p) {
-      p = conn.api.columnValues(connectionId, column, scan);
+      // 統計情報に値がなければ、表を読んで数える（虫眼鏡を押したときは、候補が出ることを期待しているので）
+      p = conn.api.columnValues(connectionId, column, true);
       cache.set(key, p);
       p.catch(() => cache.delete(key));
     }
@@ -118,7 +116,7 @@ export function SuggestPanel({
     return () => {
       active = false;
     };
-  }, [connectionId, column.schema, column.table, column.column, scan]);
+  }, [connectionId, column.schema, column.table, column.column]);
 
   // 候補の値ごとの行（表のすべての列）。候補が決まったら 1 回だけ読む
   const [rows, setRows] = useState<{
@@ -257,16 +255,6 @@ export function SuggestPanel({
                 title="列にインデックスがないので、押したときだけ探します"
               >
                 入力中の値の行を探す
-              </button>
-            )}
-            {values.method === "none" && (
-              <button
-                type="button"
-                className="link"
-                onClick={() => setScan(true)}
-                title="表を最大 20 万行読んで数えます"
-              >
-                表を読んで候補を出す
               </button>
             )}
             <span className="hint suggest-method">
