@@ -16,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -602,6 +603,10 @@ final class Relations {
     /** parent: b が親、child: a が親（b が子）、one-to-one: どちらも一意、sibling: どちらも一意でない */
     final String kind;
     final Set<String> statements = new LinkedHashSet<>();
+    /** 手で追加したリレーション（a が子、b が親） */
+    boolean manual;
+    /** 手で無効にした（源流を探すときに使わない） */
+    boolean disabled;
 
     Link(String a, String b, String kind) {
       this.a = a;
@@ -613,6 +618,36 @@ final class Relations {
   static boolean unique(Store store, String col) {
     Integer r = store.keys.get(col);
     return r != null && r <= SINGLE_UNIQUE;
+  }
+
+  /**
+   * 解析で推し量ったつながりに、手で設定したものを重ねる。無効にしたつながりには印を付け、手で追加したリレーションを足す
+   * （同じ列の組を推し量っていれば、根拠の statement を引き継いで、手で追加したものに置き換える）。
+   */
+  static List<Link> links(Store store, ManualRelations manual) {
+    List<Link> out = store == null ? new ArrayList<>() : links(store);
+    if (manual == null) {
+      return out;
+    }
+    synchronized (manual) {
+      for (Link l : out) {
+        l.disabled = manual.isDisabled(l.a, l.b);
+      }
+      for (ManualRelations.Relation r : manual.relations) {
+        Link m = new Link(r.child, r.parent, "parent");
+        m.manual = true;
+        java.util.Iterator<Link> it = out.iterator();
+        while (it.hasNext()) {
+          Link l = it.next();
+          if (l.a.equals(r.child) && l.b.equals(r.parent) || l.a.equals(r.parent) && l.b.equals(r.child)) {
+            m.statements.addAll(l.statements);
+            it.remove();
+          }
+        }
+        out.add(m);
+      }
+    }
+    return out;
   }
 
   /** 列の組ごとにまとめる。a が子（または名前の順で前）になるように向きをそろえる */
@@ -671,8 +706,21 @@ final class Relations {
     /** パラメータの名前ごとの、ほかの statement で源流と判断した列と、その statement の数 */
     private final Map<String, Map<String, Integer>> byName = new HashMap<>();
 
+    /** 手で設定したリレーション（なければ null） */
+    private final ManualRelations manual;
+
     /** store のロックを持って呼ぶ */
     Graph(Store store, List<Link> links) {
+      this(store, links, null);
+    }
+
+    /**
+     * store のロックを持って呼ぶ。
+     *
+     * @param links {@link Relations#links(Store, ManualRelations)} で、手で設定したものを入れたもの
+     */
+    Graph(Store store, List<Link> links, ManualRelations manual) {
+      this.manual = manual;
       for (String col : store.keys.keySet()) {
         if (Relations.unique(store, col)) {
           unique.add(col);
@@ -694,7 +742,8 @@ final class Relations {
     }
 
     List<Origin> origins(String column) {
-      return Relations.origins(unique::contains, links, column);
+      return Relations.origins(unique::contains, links, column,
+          manual == null ? col -> new ArrayList<String>() : manual::parentsOf);
     }
 
     /** 比べている列から、源流と判断する列（たどった源流、なければ一意の列。どちらもなければ null） */
@@ -750,7 +799,7 @@ final class Relations {
       for (Relations.Origin o : found) {
         String[] p = Relations.split(o.column);
         ParamSources.Source src = new ParamSources.Source(p[0], p[1], p[2], shortPath(withLast(o.path, o.column)), true, "origin",
-            o.path, o.count);
+            o.path, o.count, o.manual);
         if (origins.stream().anyMatch(src::same)) {
           continue;
         }
@@ -804,11 +853,18 @@ final class Relations {
     final List<String> path;
     /** 根拠の statement の数（たどったつながりのうち、最も少ないもの） */
     final int count;
+    /** 手で設定したリレーションで見つけた */
+    final boolean manual;
 
     Origin(String column, List<String> path, int count) {
+      this(column, path, count, false);
+    }
+
+    Origin(String column, List<String> path, int count, boolean manual) {
       this.column = column;
       this.path = path;
       this.count = count;
+      this.manual = manual;
     }
   }
 
@@ -821,7 +877,23 @@ final class Relations {
   }
 
   static List<Origin> origins(java.util.function.Predicate<String> isUnique, List<Link> links, String column) {
+    return origins(isUnique, links, column, col -> new ArrayList<String>());
+  }
+
+  /**
+   * @param manualParents 列に手で設定した親。あれば、その列の源流は手で設定したものだけにする（解析で推し量ったものより優先する）。
+   *     兄弟をたどった先の列に手で設定した親があれば、それも源流にする
+   */
+  static List<Origin> origins(java.util.function.Predicate<String> isUnique, List<Link> links, String column,
+      java.util.function.Function<String, List<String>> manualParents) {
     List<Origin> out = new ArrayList<>();
+    List<String> mine = manualParents.apply(column);
+    if (!mine.isEmpty()) {
+      for (String p : mine) {
+        out.add(new Origin(p, new ArrayList<>(Collections.singletonList(column)), 0, true));
+      }
+      return out;
+    }
     if (isUnique.test(column)) {
       return out;
     }
@@ -845,10 +917,26 @@ final class Relations {
       // 同じ段では、根拠の多いつながりから
       ls.sort((x, y) -> y.statements.size() - x.statements.size());
       for (Link l : ls) {
+        // 無効にしたつながりは使わない。手で追加したものは manualParents で扱う
+        if (l.disabled || l.manual) {
+          continue;
+        }
         String other = l.a.equals(col) ? l.b : l.a;
         int c = Math.min(count, l.statements.size());
         List<String> next = new ArrayList<>(path);
         next.add(col);
+        if (l.kind.equals("sibling") && next.size() < MAX_HOPS && !visited.contains(other) && !manualParents.apply(other).isEmpty()) {
+          // 兄弟に手で設定した親がある
+          visited.add(other);
+          List<String> via = new ArrayList<>(next);
+          via.add(other);
+          for (String p : manualParents.apply(other)) {
+            if (found.add(p)) {
+              out.add(new Origin(p, via, c, true));
+            }
+          }
+          continue;
+        }
         if (l.kind.equals("parent") && l.a.equals(col)) {
           if (found.add(other)) {
             out.add(new Origin(other, next, c));

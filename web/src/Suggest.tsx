@@ -86,6 +86,7 @@ export function SuggestPanel({
   conn,
   columns,
   relations,
+  onOpenRelation,
   list,
   current,
   onPick,
@@ -94,6 +95,8 @@ export function SuggestPanel({
   columns: SourceColumn[];
   /** リレーションを解析してあるか */
   relations: boolean;
+  /** リレーションの画面で、列（schema.table.column）を開く */
+  onOpenRelation: (column: string) => void;
   /** リストの項目（foreach）。選んだ値を要素として足す */
   list: boolean;
   current: PValue | undefined;
@@ -210,6 +213,7 @@ export function SuggestPanel({
         }
       : null;
 
+  const hasOrigin = columns.some((x) => x.role === "origin");
   return (
     <div className="suggest-panel">
       <div className="suggest-head">
@@ -236,7 +240,8 @@ export function SuggestPanel({
             className="suggest-condition"
             title="リレーションでたどった経路"
           >
-            リレーション: {column.condition}（{column.count} 件の SQL）
+            リレーション: {column.condition}（
+            {column.manual ? "手動" : `${column.count} 件の SQL`}）
           </span>
         ) : column.role === "name" ? (
           <span
@@ -250,6 +255,46 @@ export function SuggestPanel({
             {column.condition}
           </code>
         )}
+        {/* 比べている列のリレーション（なければ、その列を子にして追加する） */}
+        <button
+          type="button"
+          className="icon suggest-relation"
+          title={hasOrigin ? "リレーションを見る" : "リレーションを追加"}
+          aria-label={hasOrigin ? "リレーションを見る" : "リレーションを追加"}
+          onClick={() => {
+            const c = columns.find((x) => x.role === "compared") ?? column;
+            onOpenRelation(`${c.schema}.${c.table}.${c.column}`);
+          }}
+        >
+          <svg width="13" height="11" viewBox="0 0 18 14" aria-hidden="true">
+            <rect
+              x="1"
+              y="1"
+              width="6"
+              height="5"
+              rx="1"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            />
+            <rect
+              x="11"
+              y="8"
+              width="6"
+              height="5"
+              rx="1"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            />
+            <path
+              d="M7 3.5h3a1.5 1.5 0 0 1 1.5 1.5v3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            />
+          </svg>
+        </button>
       </div>
       {!relations && (
         <p className="hint">

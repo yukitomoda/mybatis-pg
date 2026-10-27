@@ -52,6 +52,8 @@ export interface SourceColumn {
   via: string[];
   /** 源流のとき、根拠の SQL の数。name のとき、その列と判断した statement の数 */
   count: number;
+  /** 源流を、手で設定したリレーションで見つけた */
+  manual: boolean;
 }
 
 /** 保存していない mapper XML の内容（なければ null） */
@@ -546,6 +548,28 @@ export function createApi(token: string) {
           }),
         ),
       ),
+    /** 手で設定したリレーションを変える（列は schema.table.column） */
+    changeManualRelation: (
+      change:
+        | { action: "add" | "remove"; child: string; parent: string }
+        | { action: "disable" | "enable"; a: string; b: string },
+    ) =>
+      call<{ ok: boolean }>(
+        "api/relations/manual",
+        post(JSON.stringify(change)),
+      ),
+    /** DB の表（schema.table）の一覧 */
+    dbTables: (connectionId: string) =>
+      call<{ tables: string[] }>(
+        "api/db-columns",
+        post(JSON.stringify({ connectionId })),
+      ),
+    /** 表（schema.table）の列の一覧 */
+    dbColumns: (connectionId: string, table: string) =>
+      call<{ columns: string[] }>(
+        "api/db-columns",
+        post(JSON.stringify({ connectionId, table })),
+      ),
     /** リレーション（試作）の解析の結果。解析中なら進み具合だけ */
     relations: (connectionId: string) =>
       call<RelationsResult>(
@@ -630,6 +654,10 @@ export interface RelationLink {
   kind: "parent" | "one-to-one" | "sibling";
   /** 根拠の statement */
   statements: string[];
+  /** 手で追加したリレーション（a が子、b が親） */
+  manual: boolean;
+  /** 手で無効にした */
+  disabled: boolean;
 }
 
 export interface RelationsResult {
@@ -652,7 +680,12 @@ export interface RelationsResult {
   /** 一意でない列ごとの源流（path はたどった列） */
   origins?: {
     column: string;
-    origins: { column: string; path: string[]; count: number }[];
+    origins: {
+      column: string;
+      path: string[];
+      count: number;
+      manual: boolean;
+    }[];
   }[];
   /** 1 列で一意の列 */
   unique?: string[];

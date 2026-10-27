@@ -106,15 +106,22 @@ const SCREENS: [Screen, string][] = [
  * URL の # の後ろを読む。#/query/statement の id、#/globals、#/bulk、#/connections。
  * 以前の形（#statement の id）はクエリ画面として読む。
  */
-function parseHash(): { screen: Screen; statement: string | null } {
+function parseHash(): {
+  screen: Screen;
+  statement: string | null;
+  /** #/relations/schema.table.column の列 */
+  column: string | null;
+} {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  if (!hash) return { screen: "query", statement: null };
-  if (!hash.startsWith("/")) return { screen: "query", statement: hash };
+  if (!hash) return { screen: "query", statement: null, column: null };
+  if (!hash.startsWith("/"))
+    return { screen: "query", statement: hash, column: null };
   const [, screen, ...rest] = hash.split("/");
   const known = SCREENS.some(([s]) => s === screen);
   return {
     screen: known ? (screen as Screen) : "query",
     statement: screen === "query" && rest.length ? rest.join("/") : null,
+    column: screen === "relations" && rest.length ? rest.join("/") : null,
   };
 }
 
@@ -203,6 +210,19 @@ function Workspace({ api }: { api: Api }) {
   const [copying, setCopying] = useState(false);
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
+  /** リレーションの画面で見る列（クエリの画面のパラメータから飛んだとき） */
+  const [relationFocus, setRelationFocus] = useState<string | null>(
+    () => parseHash().column,
+  );
+  const openRelation = (column: string) => {
+    setRelationFocus(column);
+    setScreen("relations");
+    window.history.pushState(
+      null,
+      "",
+      `#/relations/${encodeURIComponent(column)}`,
+    );
+  };
   /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
   const [globalFocus, setGlobalFocus] = useState<string | null>(null);
   /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
@@ -431,6 +451,7 @@ function Workspace({ api }: { api: Api }) {
             conn={conn}
             columns={s.columns}
             relations={sourceRelations}
+            onOpenRelation={openRelation}
             list={s.list}
             current={current}
             onPick={(v) => {
@@ -500,6 +521,7 @@ function Workspace({ api }: { api: Api }) {
     const onPop = () => {
       const h = parseHash();
       setScreen(h.screen);
+      if (h.screen === "relations") setRelationFocus(h.column);
       if (h.statement && h.statement !== selectedRef.current)
         select(h.statement);
     };
@@ -987,6 +1009,7 @@ function Workspace({ api }: { api: Api }) {
           api={api}
           conn={conn}
           globalSets={globals.sets}
+          focus={relationFocus}
           active={screen === "relations"}
           onOpen={(id) => {
             select(id);

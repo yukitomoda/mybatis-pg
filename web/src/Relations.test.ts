@@ -14,19 +14,28 @@ describe("リレーションのテキスト", () => {
             b: "app.users.id",
             kind: "parent",
             statements: ["m.a", "m.b"],
+            manual: false,
+            disabled: false,
           },
           {
             a: "app.post_histories.user_id",
             b: "app.posts.user_id",
             kind: "sibling",
             statements: ["m.c"],
+            manual: false,
+            disabled: false,
           },
         ],
         origins: [
           {
             column: "app.posts.user_id",
             origins: [
-              { column: "app.users.id", path: ["app.posts.user_id"], count: 2 },
+              {
+                column: "app.users.id",
+                path: ["app.posts.user_id"],
+                count: 2,
+                manual: false,
+              },
             ],
           },
           {
@@ -36,6 +45,7 @@ describe("リレーションのテキスト", () => {
                 column: "app.users.id",
                 path: ["app.post_histories.user_id", "app.posts.user_id"],
                 count: 1,
+                manual: false,
               },
             ],
           },

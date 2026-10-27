@@ -54,12 +54,20 @@ final class ParamSources {
     final List<String> via;
     /** 源流のとき、根拠の SQL の数（たどったつながりのうち、最も少ないもの） */
     final int count;
+    /** 源流を、手で設定したリレーションで見つけた */
+    final boolean manual;
 
     Source(String schema, String table, String column, String condition, boolean direct) {
       this(schema, table, column, condition, direct, "compared", new ArrayList<String>(), 0);
     }
 
     Source(String schema, String table, String column, String condition, boolean direct, String role, List<String> via, int count) {
+      this(schema, table, column, condition, direct, role, via, count, false);
+    }
+
+    Source(String schema, String table, String column, String condition, boolean direct, String role, List<String> via, int count,
+        boolean manual) {
+      this.manual = manual;
       this.schema = schema;
       this.table = table;
       this.column = column;

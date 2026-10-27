@@ -2452,3 +2452,60 @@ button.icon.suggest-toggle {
     grid-template-columns: 1fr;
   }
 }
+
+.relations-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+
+.relations-add .arrow {
+  color: var(--muted);
+}
+
+.relation-column {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.relation-column input {
+  width: 16rem;
+  max-width: 60vw;
+}
+
+.relations-table tr.disabled code {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.relations-table tr.focus td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.relations-table .badge {
+  margin-left: 0.4rem;
+}
+
+.relations-actions {
+  white-space: nowrap;
+}
+
+/* 値の候補のパネルの、リレーションへのボタン（見出しの行の右端に、目立たせずに置く） */
+button.icon.suggest-relation {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 1px 0.35rem;
+  line-height: 1;
+  opacity: 0.55;
+}
+
+button.icon.suggest-relation:hover {
+  opacity: 1;
+}
+
+.suggest-relation svg {
+  display: block;
+}

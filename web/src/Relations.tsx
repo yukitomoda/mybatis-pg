@@ -49,6 +49,7 @@ export function RelationsScreen({
   globalSets,
   active,
   onOpen,
+  focus,
 }: {
   api: Api;
   conn: Connections;
@@ -56,12 +57,23 @@ export function RelationsScreen({
   globalSets: GlobalSet[];
   active: boolean;
   onOpen: (id: string) => void;
+  /** 開いたときに見る列（schema.table.column。クエリの画面のパラメータから飛んできたとき） */
+  focus: string | null;
 }) {
   const connectionId = conn.current?.id;
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [table, setTable] = useState<string | null>(null);
+  // パラメータから飛んできたら、その列の表を開く
+  useEffect(() => {
+    if (focus) setTable(tableOf(focus));
+  }, [focus]);
+  /** 手で設定したリレーションを変えて、読み直す */
+  const change = (
+    c: Parameters<Api["changeManualRelation"]>[0],
+  ): Promise<void> =>
+    api.changeManualRelation(c).then(load, (e) => setError(message(e)));
 
   const load = () => {
     if (!connectionId) return;
@@ -121,16 +133,28 @@ export function RelationsScreen({
     [links],
   );
   const s = (col: string) => shorten(col, oneSchema);
+  // DB の表（リレーションがまだない表にも、追加できるように）
+  const [allTables, setAllTables] = useState<string[]>([]);
+  useEffect(() => {
+    if (!active || !connectionId) return;
+    api.dbTables(connectionId).then(
+      (r) => setAllTables(r.tables),
+      () => setAllTables([]),
+    );
+  }, [active, connectionId]);
   const tables = useMemo(() => {
     const count = new Map<string, number>();
     for (const l of links) {
       for (const t of new Set([tableOf(l.a), tableOf(l.b)]))
         count.set(t, (count.get(t) ?? 0) + 1);
     }
+    if (focus && !count.has(tableOf(focus))) count.set(tableOf(focus), 0);
+    // リレーションのある表を先に、ほかの表を後に
+    for (const t of allTables) if (!count.has(t)) count.set(t, 0);
     return [...count.entries()].sort(
       (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     );
-  }, [links]);
+  }, [links, focus, allTables]);
   const shown = tables.filter(([t]) =>
     t.toLowerCase().includes(filter.trim().toLowerCase()),
   );
@@ -206,7 +230,7 @@ export function RelationsScreen({
       {result && !running && (
         <p className="hint">
           {result.updatedAt
-            ? `${new Date(result.updatedAt).toLocaleString("ja-JP")} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ""}　つながり ${links.length} 組　表 ${tables.length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ""}`
+            ? `${new Date(result.updatedAt).toLocaleString("ja-JP")} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ""}　つながり ${links.length} 組　表 ${tables.filter(([, n]) => n > 0).length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ""}`
             : "まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。"}
         </p>
       )}
@@ -231,7 +255,7 @@ export function RelationsScreen({
           </ul>
         </details>
       )}
-      {links.length > 0 && !running && (
+      {connectionId && !running && (
         <div className="relations-body">
           <div className="relations-tables">
             <input
@@ -249,7 +273,7 @@ export function RelationsScreen({
                     onClick={() => setTable(t)}
                   >
                     <span>{oneSchema ? t.slice(t.indexOf(".") + 1) : t}</span>
-                    <span className="count">{n}</span>
+                    <span className="count">{n || ""}</span>
                   </button>
                 </li>
               ))}
@@ -263,6 +287,11 @@ export function RelationsScreen({
                 origins={origins}
                 s={s}
                 onOpen={onOpen}
+                focus={focus}
+                onChange={change}
+                api={api}
+                connectionId={connectionId}
+                allTables={allTables}
               />
             ) : (
               <p className="hint">表を選んでください</p>
@@ -280,12 +309,27 @@ function TableRelations({
   origins,
   s,
   onOpen,
+  focus,
+  onChange,
+  api,
+  connectionId,
+  allTables,
 }: {
+  api: Api;
+  connectionId: string;
+  /** DB の表（追加するときに選ぶ） */
+  allTables: string[];
   table: string;
   links: RelationLink[];
-  origins: Map<string, { column: string; path: string[]; count: number }[]>;
+  origins: Map<
+    string,
+    { column: string; path: string[]; count: number; manual: boolean }[]
+  >;
   s: (col: string) => string;
   onOpen: (id: string) => void;
+  /** 強調する列 */
+  focus: string | null;
+  onChange: (c: Parameters<Api["changeManualRelation"]>[0]) => Promise<void>;
 }) {
   const mine = links.filter(
     (l) => tableOf(l.a) === table || tableOf(l.b) === table,
@@ -313,29 +357,84 @@ function TableRelations({
   );
 
   const row = (l: RelationLink, left: string, right: string, arrow: string) => (
-    <tr key={`${l.a} ${l.b}`}>
+    <tr
+      key={`${l.a} ${l.b}`}
+      className={
+        [
+          l.disabled ? "disabled" : "",
+          focus && (l.a === focus || l.b === focus) ? "focus" : "",
+        ]
+          .filter(Boolean)
+          .join(" ") || undefined
+      }
+    >
       <td>
         <code>{s(left)}</code>
       </td>
       <td className="arrow">{arrow}</td>
       <td>
         <code>{s(right)}</code>
+        {l.manual && <span className="badge">手動</span>}
       </td>
       <td>
-        <Evidence ids={l.statements} onOpen={onOpen} />
+        {l.statements.length > 0 && (
+          <Evidence ids={l.statements} onOpen={onOpen} />
+        )}
+      </td>
+      <td className="relations-actions">
+        {l.manual ? (
+          <button
+            type="button"
+            className="link"
+            onClick={() =>
+              onChange({ action: "remove", child: l.a, parent: l.b })
+            }
+          >
+            削除
+          </button>
+        ) : l.disabled ? (
+          <button
+            type="button"
+            className="link"
+            onClick={() => onChange({ action: "enable", a: l.a, b: l.b })}
+          >
+            有効に戻す
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="link"
+            title="誤ったリレーションを、源流を探すときに使わないようにします"
+            onClick={() => onChange({ action: "disable", a: l.a, b: l.b })}
+          >
+            無効にする
+          </button>
+        )}
       </td>
     </tr>
   );
   return (
     <>
       <h3>親（この表の列が指している表）</h3>
-      {parents.length ? (
+      {parents.length > 0 && (
         <table className="relations-table">
           <tbody>{parents.map((l) => row(l, l.a, l.b, "→"))}</tbody>
         </table>
-      ) : (
-        <p className="hint">なし</p>
       )}
+      <AddLink
+        key={`parent ${table} ${focus}`}
+        side="parent"
+        api={api}
+        connectionId={connectionId}
+        allTables={allTables}
+        table={table}
+        initialColumn={
+          focus && tableOf(focus) === table
+            ? focus.slice(focus.lastIndexOf(".") + 1)
+            : null
+        }
+        onAdd={(child, parent) => onChange({ action: "add", child, parent })}
+      />
       {farOrigins.length > 0 && (
         <>
           <h3>兄弟をたどった源流</h3>
@@ -355,7 +454,7 @@ function TableRelations({
                       .slice(1)
                       .map((p) => s(p))
                       .join(" → ")}{" "}
-                    経由（{o.count} 件の SQL）
+                    経由（{o.manual ? "手動" : `${o.count} 件の SQL`}）
                   </td>
                 </tr>
               ))}
@@ -364,13 +463,21 @@ function TableRelations({
         </>
       )}
       <h3>子（この表を指している表）</h3>
-      {children.length ? (
+      {children.length > 0 && (
         <table className="relations-table">
           <tbody>{children.map((l) => row(l, l.b, l.a, "←"))}</tbody>
         </table>
-      ) : (
-        <p className="hint">なし</p>
       )}
+      <AddLink
+        key={`child ${table}`}
+        side="child"
+        api={api}
+        connectionId={connectionId}
+        allTables={allTables}
+        table={table}
+        initialColumn={null}
+        onAdd={(child, parent) => onChange({ action: "add", child, parent })}
+      />
       {others.length > 0 && (
         <>
           <h3>兄弟・1 対 1（どちらが親か決められないもの）</h3>
@@ -386,6 +493,195 @@ function TableRelations({
         </>
       )}
     </>
+  );
+}
+
+/** 表の列を選ぶ（表は DB の一覧から入力欄の候補で、列は表を選んだら一覧から） */
+function ColumnPicker({
+  api,
+  connectionId,
+  tables,
+  label,
+  value,
+  onChange,
+}: {
+  api: Api;
+  connectionId: string;
+  tables: string[];
+  label: string;
+  /** schema.table.column（選びかけなら schema.table.） */
+  value: { table: string; column: string };
+  onChange: (v: { table: string; column: string }) => void;
+}) {
+  const [columns, setColumns] = useState<string[]>([]);
+  const known = tables.includes(value.table);
+  useEffect(() => {
+    setColumns([]);
+    if (!known) return;
+    let active = true;
+    api.dbColumns(connectionId, value.table).then(
+      (r) => active && setColumns(r.columns),
+      () => active && setColumns([]),
+    );
+    return () => {
+      active = false;
+    };
+  }, [connectionId, value.table, known]);
+  const listId = `relation-tables-${label}`;
+  return (
+    <span className="relation-column">
+      <input
+        aria-label={`${label}の表`}
+        placeholder="schema.table"
+        list={listId}
+        value={value.table}
+        onChange={(e) => onChange({ table: e.target.value, column: "" })}
+      />
+      <datalist id={listId}>
+        {tables.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+      <select
+        aria-label={`${label}の列`}
+        value={value.column}
+        disabled={!known}
+        onChange={(e) => onChange({ ...value, column: e.target.value })}
+      >
+        <option value="">列</option>
+        {columns.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/** 表の列を選ぶ（表は決まっている） */
+function OwnColumn({
+  api,
+  connectionId,
+  table,
+  label,
+  value,
+  onChange,
+}: {
+  api: Api;
+  connectionId: string;
+  table: string;
+  label: string;
+  value: string;
+  onChange: (column: string) => void;
+}) {
+  const [columns, setColumns] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    api.dbColumns(connectionId, table).then(
+      (r) => active && setColumns(r.columns),
+      () => active && setColumns([]),
+    );
+    return () => {
+      active = false;
+    };
+  }, [connectionId, table]);
+  return (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">列</option>
+      {columns.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * 選んだ表のリレーションを手で追加する。parent: この表の列 → 親の列、child: 子の列 → この表の列
+ */
+function AddLink({
+  side,
+  api,
+  connectionId,
+  allTables,
+  table,
+  initialColumn,
+  onAdd,
+}: {
+  side: "parent" | "child";
+  api: Api;
+  connectionId: string;
+  allTables: string[];
+  /** 選んだ表（schema.table） */
+  table: string;
+  /** この表の列（パラメータから飛んできたとき） */
+  initialColumn: string | null;
+  onAdd: (child: string, parent: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(!!initialColumn);
+  const [own, setOwn] = useState(initialColumn ?? "");
+  const [other, setOther] = useState({ table: "", column: "" });
+  if (!open) {
+    return (
+      <p className="relations-add-open">
+        <button type="button" className="link" onClick={() => setOpen(true)}>
+          {side === "parent" ? "＋ 親を追加" : "＋ 子を追加"}
+        </button>
+      </p>
+    );
+  }
+  const ownColumn = (
+    <OwnColumn
+      api={api}
+      connectionId={connectionId}
+      table={table}
+      label={side === "parent" ? "この表の列（子）" : "この表の列（親）"}
+      value={own}
+      onChange={setOwn}
+    />
+  );
+  const otherColumn = (
+    <ColumnPicker
+      api={api}
+      connectionId={connectionId}
+      tables={allTables}
+      label={side === "parent" ? "親" : "子"}
+      value={other}
+      onChange={setOther}
+    />
+  );
+  const ready = own !== "" && other.column !== "";
+  const mine = `${table}.${own}`;
+  const theirs = `${other.table}.${other.column}`;
+  return (
+    <div className="relations-add">
+      {side === "parent" ? ownColumn : otherColumn}
+      <span className="arrow">→</span>
+      {side === "parent" ? otherColumn : ownColumn}
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={() =>
+          (side === "parent" ? onAdd(mine, theirs) : onAdd(theirs, mine)).then(
+            () => {
+              setOther({ table: "", column: "" });
+              setOpen(false);
+            },
+          )
+        }
+      >
+        追加
+      </button>
+      <button type="button" className="link" onClick={() => setOpen(false)}>
+        閉じる
+      </button>
+    </div>
   );
 }
 
@@ -431,7 +727,7 @@ export function toText(r: RelationsResult, oneSchema: boolean): string {
     lines.push("", `## ${title}（${list.length} 組）`, "");
     for (const l of list)
       lines.push(
-        `${fmt(l)}　[${l.statements.length} 件] ${l.statements.join(", ")}`,
+        `${fmt(l)}${l.manual ? "（手動）" : ""}${l.disabled ? "（無効）" : ""}　[${l.statements.length} 件] ${l.statements.join(", ")}`,
       );
   };
   const byName = (x: RelationLink, y: RelationLink) =>

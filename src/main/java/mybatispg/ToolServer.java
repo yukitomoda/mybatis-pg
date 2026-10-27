@@ -152,6 +152,16 @@ public final class ToolServer {
     this.relationsDir = dir;
   }
 
+  /** 手で設定したリレーション（プロジェクトごと。接続先をまたいで使う） */
+  private ManualRelations manualRelations;
+
+  private synchronized ManualRelations manualRelations() throws IOException {
+    if (manualRelations == null) {
+      manualRelations = ManualRelations.open(relationsDir, workspace.projectKey());
+    }
+    return manualRelations;
+  }
+
   private Relations.Store relationStore(String connectionId) throws IOException {
     Relations.Store s = relationStores.get(connectionId);
     if (s == null) {
@@ -381,6 +391,16 @@ public final class ToolServer {
       case "/api/relations":
         if (requireMethod(ex, method, "POST")) {
           relations(ex);
+        }
+        break;
+      case "/api/relations/manual":
+        if (requireMethod(ex, method, "POST")) {
+          changeManualRelation(ex);
+        }
+        break;
+      case "/api/db-columns":
+        if (requireMethod(ex, method, "POST")) {
+          dbColumns(ex);
         }
         break;
       case "/api/relations/stop":
@@ -1538,6 +1558,7 @@ public final class ToolServer {
         }
         col.put("via", via);
         col.put("count", src.count);
+        col.put("manual", src.manual);
         cols.add(col);
       }
       m.put("columns", cols);
@@ -1547,7 +1568,7 @@ public final class ToolServer {
     body.put("sources", sources);
     body.put("needs", needs);
     // リレーションを解析してあるか（していなければ、比べている列だけを出す）
-    body.put("relations", graph != null);
+    body.put("relations", relationsAnalyzed(connectionId));
     // どちらでも推論できなかったときの理由（比較のない INSERT などは、候補なしとしてエラーにしない）
     body.put("error", anyOk ? null : firstError);
     sendJson(ex, 200, body);
@@ -1629,6 +1650,100 @@ public final class ToolServer {
     sendJson(ex, 200, body);
   }
 
+  /** リレーションを解析してあるか */
+  private boolean relationsAnalyzed(String connectionId) throws IOException {
+    if (relationsDir == null && !relationStores.containsKey(connectionId)) {
+      return false;
+    }
+    Relations.Store store = relationStore(connectionId);
+    synchronized (store) {
+      return !store.statements.isEmpty();
+    }
+  }
+
+  /**
+   * 手で設定したリレーションを変える。{"action": "add" | "remove", "child", "parent"} か {"action": "disable" | "enable", "a", "b"}。
+   * 列は schema.table.column
+   */
+  private void changeManualRelation(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    ManualRelations manual = manualRelations();
+    String action = string(req, "action");
+    try {
+      if ("add".equals(action)) {
+        manual.add(string(req, "child"), string(req, "parent"));
+      } else if ("remove".equals(action)) {
+        manual.remove(string(req, "child"), string(req, "parent"));
+      } else if ("disable".equals(action)) {
+        manual.disable(string(req, "a"), string(req, "b"));
+      } else if ("enable".equals(action)) {
+        manual.enable(string(req, "a"), string(req, "b"));
+      } else {
+        sendJson(ex, 400, error("action は add・remove・disable・enable のどれかにしてください"));
+        return;
+      }
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    DbLog.event("relations", "手で設定したリレーションを変えた: " + action + " " + req);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ok", true);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * DB の表と列（リレーションを手で追加するときに選ぶ）。{"connectionId"} なら表（schema.table）の一覧、
+   * {"connectionId", "table": "schema.table"} ならその表の列の一覧
+   */
+  private void dbColumns(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    String table = string(req, "table");
+    List<String> out = new ArrayList<>();
+    try (java.sql.Connection c = connections.open(connectionId)) {
+      if (table == null) {
+        try (java.sql.Statement s = c.createStatement(); java.sql.ResultSet rs = s.executeQuery(
+            "SELECT n.nspname || '.' || c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                + " WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
+                + " AND n.nspname NOT LIKE 'pg\\_%' ORDER BY 1")) {
+          while (rs.next()) {
+            out.add(rs.getString(1));
+          }
+        }
+      } else {
+        int dot = table.indexOf('.');
+        try (java.sql.PreparedStatement ps = c.prepareStatement("SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid"
+            + " JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ?::name AND c.relname = ?::name AND a.attnum > 0"
+            + " AND NOT a.attisdropped ORDER BY a.attnum")) {
+          ps.setString(1, dot < 0 ? "public" : table.substring(0, dot));
+          ps.setString(2, dot < 0 ? table : table.substring(dot + 1));
+          try (java.sql.ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+              out.add(rs.getString(1));
+            }
+          }
+        }
+      }
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put(table == null ? "tables" : "columns", out);
+    sendJson(ex, 200, body);
+  }
+
   /** リレーションの解析を一時停止する（そこまでの結果は保存する。次の「解析する」で続きから） */
   private void stopRelations(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
@@ -1698,18 +1813,23 @@ public final class ToolServer {
         }
       }
       body.put("errors", errors);
+      // 解析で推し量ったものに、手で設定したもの（追加・無効）を重ねる
+      ManualRelations manual = manualRelations();
+      List<Relations.Link> all = Relations.links(store, manual);
+      Relations.Graph graph = new Relations.Graph(store, all, manual);
       List<Map<String, Object>> links = new ArrayList<>();
-      for (Relations.Link l : Relations.links(store)) {
+      for (Relations.Link l : all) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("a", l.a);
         m.put("b", l.b);
         m.put("kind", l.kind);
         m.put("statements", new ArrayList<>(l.statements));
+        m.put("manual", l.manual);
+        m.put("disabled", l.disabled);
         links.add(m);
       }
       body.put("links", links);
       // 一意でない列ごとの源流（兄弟をたどって見つけたものも）
-      List<Relations.Link> all = Relations.links(store);
       java.util.Set<String> cols = new java.util.TreeSet<>();
       for (Relations.Link l : all) {
         cols.add(l.a);
@@ -1717,7 +1837,7 @@ public final class ToolServer {
       }
       List<Map<String, Object>> origins = new ArrayList<>();
       for (String col : cols) {
-        List<Relations.Origin> os = Relations.origins(store, all, col);
+        List<Relations.Origin> os = graph.origins(col);
         if (os.isEmpty()) {
           continue;
         }
@@ -1727,6 +1847,7 @@ public final class ToolServer {
           m.put("column", o.column);
           m.put("path", o.path);
           m.put("count", o.count);
+          m.put("manual", o.manual);
           list.add(m);
         }
         Map<String, Object> m = new LinkedHashMap<>();
@@ -1771,17 +1892,19 @@ public final class ToolServer {
       return null;
     }
     Relations.Store store = relationStore(connectionId);
+    ManualRelations manual = manualRelations();
     synchronized (store) {
-      if (store.statements.isEmpty()) {
+      if (store.statements.isEmpty() && manual.isEmpty()) {
         return null;
       }
       // 保存が変わっていなければ、前にまとめたものを使う（statement が多いと、まとめるのに時間がかかる）
       Object[] cached = relationGraphs.get(connectionId);
-      if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()) {
+      if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()
+          && (Long) cached[3] == manual.version) {
         return (Relations.Graph) cached[2];
       }
-      Relations.Graph g = new Relations.Graph(store, Relations.links(store));
-      relationGraphs.put(connectionId, new Object[] {store.updatedAt, store.statements.size(), g});
+      Relations.Graph g = new Relations.Graph(store, Relations.links(store, manual), manual);
+      relationGraphs.put(connectionId, new Object[] {store.updatedAt, store.statements.size(), g, manual.version});
       return g;
     }
   }
