@@ -177,4 +177,47 @@ class QueryExecutorPgTest {
       }
     }
   }
+
+  @Test
+  void パラメータと比べている列を推論し_値の候補を出す() throws Exception {
+    Map<Integer, java.util.List<ParamSources.Source>> r = ParamSources.infer(
+        // $2 は型を決められない（IS NULL）ので、text として作り直す
+        "SELECT * FROM items WHERE id = $1 AND ($2 IS NULL OR $2 = name)", 2, java.util.Arrays.asList("int4", "unknown"),
+        java.util.Arrays.asList("1", null), () -> DriverManager.getConnection(URL));
+    assertEquals("items.id", r.get(1).get(0).table + "." + r.get(1).get(0).column);
+    assertEquals("items.name", r.get(2).get(0).table + "." + r.get(2).get(0).column);
+    Map<String, Object> v = ParamSources.values(r.get(1).get(0).schema, "items", "name", true, () -> DriverManager.getConnection(URL));
+    assertEquals("text", v.get("type"));
+    assertTrue(!((java.util.List<?>) v.get("values")).isEmpty(), v.toString());
+    assertEquals(1000, count());
+  }
+
+  @Test
+  void 推論は同じ接続で続けてでき_表を読むのは指定したときだけ() throws Exception {
+    try (java.sql.Connection c = DriverManager.getConnection(URL)) {
+      for (int i = 0; i < 2; i++) {
+        Map<Integer, java.util.List<ParamSources.Source>> r = ParamSources.infer("SELECT * FROM items WHERE id = $1", 1,
+            java.util.Arrays.asList("int4"), java.util.Arrays.asList("1"), c);
+        assertEquals("id", r.get(1).get(0).column);
+      }
+    }
+    String schema = ParamSources.infer("SELECT * FROM items WHERE id = $1", 1, java.util.Arrays.asList("int4"),
+        java.util.Arrays.asList("1"), () -> DriverManager.getConnection(URL)).get(1).get(0).schema;
+    // 作ったばかりの表には統計情報がないので、指定しなければ表を読まずに候補なし
+    Map<String, Object> none = ParamSources.values(schema, "items", "id", false, () -> DriverManager.getConnection(URL));
+    assertEquals("none", none.get("method"));
+    assertTrue(((java.util.List<?>) none.get("values")).isEmpty());
+    assertEquals(Boolean.TRUE, none.get("indexed"));
+    // 行は候補の値の順に、値ごとに 1 行
+    Map<String, Object> rows = ParamSources.rows(schema, "items", "id", java.util.Arrays.asList("3", "1", "99999"), "2",
+        () -> DriverManager.getConnection(URL));
+    java.util.List<?> list = (java.util.List<?>) rows.get("rows");
+    assertEquals(2, list.size(), rows.toString());
+    java.util.List<?> columns = (java.util.List<?>) rows.get("columns");
+    int id = columns.indexOf("id");
+    assertEquals("3", ((java.util.List<?>) list.get(0)).get(id));
+    assertEquals("1", ((java.util.List<?>) list.get(1)).get(id));
+    assertEquals(1, ((java.util.List<?>) rows.get("currentRows")).size());
+  }
+
 }

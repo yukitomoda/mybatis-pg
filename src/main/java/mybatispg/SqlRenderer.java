@@ -3,6 +3,7 @@ package mybatispg;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.PreparedStatement;
@@ -44,6 +45,10 @@ public class SqlRenderer {
 
   private final Configuration configuration;
   private final List<LoadError> loadErrors = new ArrayList<>();
+  /** 読み込んだ mapper XML（すべての条件を true にした renderer を作るため） */
+  private final List<Path> files = new ArrayList<>();
+  /** if・when の条件をすべて true にして読み込む（リレーションの解析で、条件の式を評価できないときに使う） */
+  private boolean allConditionsTrue;
 
   private SqlRenderer() {
     configuration = new Configuration();
@@ -67,6 +72,24 @@ public class SqlRenderer {
     renderer.resolveIncompleteStatements();
     return renderer;
   }
+
+  /**
+   * 同じ mapper XML を、&lt;if&gt;・&lt;when&gt; の条件（test）をすべて true にして読み込んだものを作る。この renderer は変えない。
+   * 条件の式を仮の値で評価できない（数と文字の取り違え、.size() など）statement でも、条件の中の SQL を組み立てられる。
+   * &lt;choose&gt; では最初の &lt;when&gt; を使う。
+   */
+  public SqlRenderer withAllConditionsTrue() {
+    SqlRenderer r = new SqlRenderer();
+    r.allConditionsTrue = true;
+    for (Path file : files) {
+      r.loadFile(file);
+    }
+    r.resolveIncompleteStatements();
+    return r;
+  }
+
+  private static final java.util.regex.Pattern CONDITION = java.util.regex.Pattern.compile(
+      "(<(?:if|when)\\s+(?:[^>]*?\\s)?test\\s*=\\s*)(\"[^\"]*\"|'[^']*')");
 
   /**
    * 1 つのファイルを、保存していない内容（下書き）で読み込み直したものを作る。この renderer は変えない。
@@ -98,6 +121,7 @@ public class SqlRenderer {
   }
 
   private void loadFile(Path file) {
+    files.add(file);
     try (InputStream in = Files.newInputStream(file)) {
       loadFile(file, in);
     } catch (java.io.IOException e) {
@@ -108,6 +132,10 @@ public class SqlRenderer {
   private void loadFile(Path file, InputStream in) {
     try {
       byte[] xml = MapperPreprocessor.preprocess(in, file.toUri().toString());
+      if (allConditionsTrue) {
+        String text = new String(xml, StandardCharsets.UTF_8);
+        xml = CONDITION.matcher(text).replaceAll("$1\"true\"").getBytes(StandardCharsets.UTF_8);
+      }
       new XMLMapperBuilder(new ByteArrayInputStream(xml), configuration, file.toString(),
           configuration.getSqlFragments()).parse();
     } catch (SAXParseException e) {
@@ -183,6 +211,11 @@ public class SqlRenderer {
   /** statement を定義したファイルのパス（読み込み時に resource として渡したもの） */
   public String statementSource(String statementId) {
     return configuration.getMappedStatement(statementId, false).getResource();
+  }
+
+  /** statement の元の記述の文字（タグを除き、include は展開済み）。${} の前後を見るのに使う */
+  public String scriptText(String statementId) {
+    return tracingSqlSource(statementId).getScript().getTextContent();
   }
 
   /** statement が参照しているパラメータを抜き出す */

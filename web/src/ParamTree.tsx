@@ -1,4 +1,5 @@
 // パラメータのツリー入力。XML から抜き出した項目を並べ、値の入力・型の選択・手での追加ができる
+import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { hasTemplate } from './gen';
 import type { GenContext } from './GenInput';
@@ -23,6 +24,14 @@ interface Props {
   gen: GenContext;
   /** 共通から来ている値の、出どころの共通パラメータの名前 */
   originOf?: (path: Path) => string | null;
+  /** 値の候補（試作）。項目ごとに出せるか、出すときの中身 */
+  suggest?: Suggest;
+}
+
+/** 値の候補を出す（パラメータが比べられている列から、値を選んで入れる） */
+export interface Suggest {
+  has: (path: Path) => boolean;
+  render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => ReactNode;
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -45,9 +54,10 @@ interface Context {
   free: boolean;
   gen: GenContext;
   update: (path: Path, v: PValue | undefined) => void;
+  suggest?: Suggest;
 }
 
-export function ParamTree({ schema, value, onChange, global, free = false, gen, originOf = () => null }: Props) {
+export function ParamTree({ schema, value, onChange, global, free = false, gen, originOf = () => null, suggest }: Props) {
   const layered = !free;
   const effective = layered ? effectiveValue(schema, global, value) : value;
   const inherited = layered ? effectiveValue(schema, global, undefined) : undefined;
@@ -55,7 +65,7 @@ export function ParamTree({ schema, value, onChange, global, free = false, gen, 
     const next = layered ? overrideAt(value, effective, path, v) : overrideAt(value, value, path, v);
     onChange(next && next.t === 'object' && next.fields.length === 0 ? undefined : next);
   };
-  const ctx: Context = { local: value, effective, inherited, global, originOf, layered, free, gen, update };
+  const ctx: Context = { local: value, effective, inherited, global, originOf, layered, free, gen, update, suggest };
   return (
     <div className="tree" role="tree">
       <Children ctx={ctx} schema={free ? null : schema} path={[]} depth={0} />
@@ -104,6 +114,8 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const origin = local === undefined && shown !== undefined ? (fromGlobal ? (ctx.originOf(path) ?? '共通') : '既定') : null;
   const type = shown?.t;
   const set = (v: PValue | undefined) => ctx.update(path, v);
+  const [suggesting, setSuggesting] = useState(false);
+  const canSuggest = !!ctx.suggest?.has(path);
   // XML で参照されているのに値がない（多くは入力のし忘れ）
   const missing =
     !ctx.free && shown === undefined && schema !== null && (schema.usages.length > 0 || schema.properties.length > 0 || schema.element !== null);
@@ -122,6 +134,21 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
             </span>
           )}
           {name}
+          {canSuggest && (
+            <button
+              type="button"
+              className={suggesting ? 'icon suggest-toggle open' : 'icon suggest-toggle'}
+              title="値の候補（この項目と比べている列の値）"
+              aria-label={`${name} の値の候補`}
+              aria-expanded={suggesting}
+              onClick={() => setSuggesting(!suggesting)}
+            >
+              <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                <line x1="10.3" y1="10.3" x2="14" y2="14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </span>
         <span className="usages">
           {origin && (
@@ -165,6 +192,7 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
           )
         )}
       </div>
+      {suggesting && canSuggest && <div className="suggest-row">{ctx.suggest!.render(path, shown, set, () => setSuggesting(false))}</div>}
       {(type === 'object' || (type === undefined && schema && schema.properties.length > 0)) && (
         <>
           <Children ctx={ctx} schema={schema} path={path} depth={depth + 1} />

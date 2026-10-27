@@ -119,6 +119,11 @@ public final class Main {
     Path configDir = Paths.get(System.getProperty("user.home"), CONFIG_DIR);
     migrateConfig(Paths.get(System.getProperty("user.home"), OLD_CONFIG_DIR), configDir);
 
+    // DB への操作のログ（日ごとのファイル。7 日より古いものは消す）
+    Path logDir = configDir.resolve("logs");
+    DbLog.start(logDir, 7);
+    System.out.println("DB の操作のログ: " + logDir);
+
     // 接続先の設定（パスワードは保存しない）
     Path connectionsFile = configDir.resolve("connections.json");
     ConnectionStore connections = ConnectionStore.load(connectionsFile);
@@ -149,6 +154,10 @@ public final class Main {
     Path playgroundDir = configDir.resolve("playground");
     server.usePlaygrounds(PlaygroundStore.open(playgroundDir, workspace.projectKey()));
     System.out.println("プレイグラウンド: " + playgroundDir);
+    // リレーションの解析の結果（プロジェクトと接続先ごと）
+    Path relationsDir = configDir.resolve("relations");
+    server.useRelations(relationsDir);
+    System.out.println("リレーション: " + relationsDir);
     List<URI> urls = new ArrayList<>();
     for (String template : publicUrls) {
       URI url = publicUrl(resolvePort(template, server.getPort()));

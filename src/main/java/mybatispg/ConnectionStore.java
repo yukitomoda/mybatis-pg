@@ -265,11 +265,19 @@ public final class ConnectionStore {
     props.setProperty("ApplicationName", "mybatis-pg");
     // シェードした jar では DriverManager のドライバ探索に頼らず、直接使う
     String url = s != null ? s.url : jdbcUrl(p);
-    Connection c = new org.postgresql.Driver().connect(url, props);
+    long t0 = System.currentTimeMillis();
+    Connection c;
+    try {
+      c = new org.postgresql.Driver().connect(url, props);
+    } catch (SQLException | RuntimeException e) {
+      DbLog.connectFailed(id, System.currentTimeMillis() - t0, e);
+      throw e;
+    }
     if (c == null) {
       throw new SQLException("JDBC URL を解釈できません: " + jdbcUrl(p));
     }
-    return c;
+    // DB への操作をログに書く（ログを書いていなければ、そのまま）
+    return DbLog.wrap(c, id, System.currentTimeMillis() - t0);
   }
 
   static String jdbcUrl(Profile p) {

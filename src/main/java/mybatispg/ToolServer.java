@@ -139,6 +139,28 @@ public final class ToolServer {
     this.playgrounds = store;
   }
 
+  /** リレーション（試作）の保存先（~/.mybatis-pg/relations）。null なら保存しない */
+  private Path relationsDir;
+  /** 接続先ごとの、リレーションの解析の結果 */
+  private final Map<String, Relations.Store> relationStores = new java.util.concurrent.ConcurrentHashMap<>();
+  /** 接続先ごとの、解析中の進み具合 */
+  private final Map<String, Relations.Progress> relationRuns = new java.util.concurrent.ConcurrentHashMap<>();
+  /** 接続先ごとの、最後に終えた（一時停止を含む）解析の進み具合（かかった時間を見せる） */
+  private final Map<String, Relations.Progress> relationLast = new java.util.concurrent.ConcurrentHashMap<>();
+
+  public void useRelations(Path dir) {
+    this.relationsDir = dir;
+  }
+
+  private Relations.Store relationStore(String connectionId) throws IOException {
+    Relations.Store s = relationStores.get(connectionId);
+    if (s == null) {
+      s = Relations.Store.open(relationsDir, workspace.projectKey(), connectionId);
+      relationStores.put(connectionId, s);
+    }
+    return s;
+  }
+
   /**
    * リバースプロキシ（code-server の /proxy/{port}/ など）経由で公開する URL を足す。
    * そのホスト名と Origin からのアクセスも許可する（プロキシ経由では外部のホスト名と Origin のまま届く）。
@@ -354,6 +376,36 @@ public final class ToolServer {
       case "/api/part":
         if (requireMethod(ex, method, "POST")) {
           runPart(ex);
+        }
+        break;
+      case "/api/relations":
+        if (requireMethod(ex, method, "POST")) {
+          relations(ex);
+        }
+        break;
+      case "/api/relations/stop":
+        if (requireMethod(ex, method, "POST")) {
+          stopRelations(ex);
+        }
+        break;
+      case "/api/relations/analyze":
+        if (requireMethod(ex, method, "POST")) {
+          analyzeRelations(ex);
+        }
+        break;
+      case "/api/param-sources":
+        if (requireMethod(ex, method, "POST")) {
+          paramSources(ex);
+        }
+        break;
+      case "/api/column-rows":
+        if (requireMethod(ex, method, "POST")) {
+          columnRows(ex);
+        }
+        break;
+      case "/api/column-values":
+        if (requireMethod(ex, method, "POST")) {
+          columnValues(ex);
         }
         break;
       case "/api/explain":
@@ -1325,6 +1377,446 @@ public final class ToolServer {
     body.put("total", r.total);
     body.put("elapsedMillis", r.elapsedMillis);
     sendJson(ex, 200, body);
+  }
+
+  /**
+   * パラメータがどの表のどの列と比べられているかを推論する（試作）: {"statementId", "parameters", "draft"?, "connectionId"}。
+   * 応答: {"sources": [{"index", "property", "columns": [{"schema", "table", "column", "condition"}]}]}（推論できたものだけ）。
+   */
+  private void paramSources(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String statementId = string(req, "statementId");
+    String connectionId = string(req, "connectionId");
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    SqlRenderer renderer = rendererFor(ex, req, statementId);
+    if (renderer == null) {
+      return;
+    }
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    // 今の値で組み立てた SQL と、未設定の項目に仮の値を入れて if をすべて通した SQL の両方で推論し、項目ごとにまとめる
+    // （今の値では if で条件がなくなっている項目や、${} が空で SQL が壊れているときも推論できるように）
+    ParamNode schema = renderer.parameters(statementId).root;
+    String script = renderer.scriptText(statementId);
+    // ${schema}.表 のスキーマは、表を持つスキーマを DB に聞く（そういう形があるときだけ接続する）
+    Object probe = ParamSources.probe(schema, parameters, path -> ParamSources.rawGuess(script, path, tables -> {
+      try (java.sql.Connection c = connections.open(connectionId)) {
+        return ParamSources.schemaOf(c, tables);
+      } catch (java.sql.SQLException | RuntimeException e) {
+        return null;
+      }
+    }));
+    // 値の入っていない ${} の項目。推し量れないもの（表の名前など）や、推し量った値で SQL が壊れたときは、値を入れるよう知らせる
+    List<String> rawMissing = ParamSources.rawPaths(schema, parameters);
+    boolean probeOk = false;
+    Map<String, List<ParamSources.Source>> byProperty = new LinkedHashMap<>();
+    Map<String, Integer> indexOf = new LinkedHashMap<>();
+    String firstError = null;
+    boolean anyOk = false;
+    // 先に両方を組み立てる（DB は使わない）。仮の値で新しい項目が出ないなら、仮の値の推論は省く（DB への負担を減らす）
+    SqlRenderer.Result[] renders = new SqlRenderer.Result[2];
+    Object[] all = {parameters, probe};
+    for (int i = 0; i < 2; i++) {
+      try {
+        renders[i] = renderer.render(statementId, all[i]);
+      } catch (RuntimeException e) {
+        String m = (i == 1 ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
+        firstError = firstError == null ? m : firstError + "\n" + m;
+      }
+    }
+    if (renders[0] != null && renders[1] != null && properties(renders[0]).containsAll(properties(renders[1]))) {
+      renders[1] = null;
+      probeOk = true;
+    }
+    java.sql.Connection shared = null;
+    try {
+      for (int ri = 0; ri < 2; ri++) {
+        SqlRenderer.Result rendered = renders[ri];
+        Object params = all[ri];
+        if (rendered == null) {
+          continue;
+        }
+        try {
+          if (shared == null && !rendered.bindings.isEmpty()) {
+            shared = ParamSources.open(() -> connections.open(connectionId));
+          }
+          List<String> fallbackTypes = new ArrayList<>();
+          List<String> actualValues = new ArrayList<>();
+          for (SqlRenderer.Binding b : rendered.bindings) {
+            fallbackTypes.add(QueryExecutor.pgType(b.value, true));
+            actualValues.add(b.value == null ? null : b.value instanceof org.postgresql.util.PGobject
+                ? ((org.postgresql.util.PGobject) b.value).getValue() : b.value.toString());
+          }
+          Map<Integer, List<ParamSources.Source>> inferred = ParamSources.infer(rendered.numberedSql, rendered.bindings.size(),
+              fallbackTypes, actualValues, shared);
+          anyOk = true;
+          probeOk |= params == probe;
+          for (Map.Entry<Integer, List<ParamSources.Source>> e : inferred.entrySet()) {
+            String property = rendered.bindings.get(e.getKey() - 1).property;
+            List<ParamSources.Source> list = byProperty.computeIfAbsent(property, k -> new ArrayList<>());
+            indexOf.putIfAbsent(property, e.getKey());
+            for (ParamSources.Source src : e.getValue()) {
+              if (list.stream().noneMatch(x -> x.schema.equals(src.schema) && x.table.equals(src.table) && x.column.equals(src.column))) {
+                list.add(src);
+              }
+            }
+          }
+        } catch (QueryExecutor.ExecutionException | RuntimeException e) {
+          String m = (params == probe ? "仮の値で if をすべて通した SQL: " : "今の値の SQL: ") + Errors.describe(e);
+          firstError = firstError == null ? m : firstError + "\n" + m;
+        }
+      }
+    } finally {
+      if (shared != null) {
+        try {
+          shared.close();
+        } catch (java.sql.SQLException ignored) {
+          // 閉じられなくても結果は変わらない
+        }
+      }
+    }
+    // 仮の値の SQL で推論できなかったら、値の入っていない ${} の項目のうち、推し量れなかったもの（なければすべて）に値を入れるよう知らせる
+    List<String> needs = new ArrayList<>();
+    if (!probeOk) {
+      for (String p : rawMissing) {
+        if (ParamSources.rawGuess(script, p) == null) {
+          needs.add(p);
+        }
+      }
+      if (needs.isEmpty()) {
+        needs.addAll(rawMissing);
+      }
+    }
+    // 比べている列を推論できなかったパラメータ（列挙型など）も、同じ名前のパラメータから候補を出せるように入れておく
+    for (SqlRenderer.Result rendered : renders) {
+      if (rendered == null) {
+        continue;
+      }
+      for (int k = 0; k < rendered.bindings.size(); k++) {
+        String property = rendered.bindings.get(k).property;
+        if (!property.startsWith("__frch_") && !byProperty.containsKey(property)) {
+          byProperty.put(property, new ArrayList<>());
+          indexOf.putIfAbsent(property, k + 1);
+        }
+      }
+    }
+    // 値の候補を出す列を、リレーションの源流から並べる
+    Relations.Graph graph = relationGraph(connectionId);
+    Map<String, List<ParamSources.Source>> ordered = Relations.candidates(byProperty, graph);
+    List<Map<String, Object>> sources = new ArrayList<>();
+    for (Map.Entry<String, List<ParamSources.Source>> e : ordered.entrySet()) {
+      if (e.getValue().isEmpty()) {
+        continue;
+      }
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("index", indexOf.get(e.getKey()));
+      m.put("property", e.getKey());
+      List<Map<String, Object>> cols = new ArrayList<>();
+      for (ParamSources.Source src : e.getValue()) {
+        Map<String, Object> col = new LinkedHashMap<>();
+        col.put("schema", src.schema);
+        col.put("table", src.table);
+        col.put("column", src.column);
+        col.put("condition", src.condition);
+        col.put("direct", src.direct);
+        col.put("role", src.role);
+        List<String> via = new ArrayList<>();
+        for (String v : src.via) {
+          String[] p = Relations.split(v);
+          via.add(p[1] + "." + p[2]);
+        }
+        col.put("via", via);
+        col.put("count", src.count);
+        cols.add(col);
+      }
+      m.put("columns", cols);
+      sources.add(m);
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sources", sources);
+    body.put("needs", needs);
+    // リレーションを解析してあるか（していなければ、比べている列だけを出す）
+    body.put("relations", graph != null);
+    // どちらでも推論できなかったときの理由（比較のない INSERT などは、候補なしとしてエラーにしない）
+    body.put("error", anyOk ? null : firstError);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * 候補の値ごとの行と、入力中の値に当たる行（試作）: {"connectionId", "schema", "table", "column", "values": [...], "current"?}。
+   * 応答: {"columns", "rows"（値ごとに 1 行）, "currentRows", "currentError"}
+   */
+  private void columnRows(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    List<String> values;
+    try {
+      values = strings(req, "values");
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    try {
+      sendJson(ex, 200, ParamSources.rows(string(req, "schema"), string(req, "table"), string(req, "column"),
+          values.subList(0, Math.min(values.size(), 30)), string(req, "current"), () -> connections.open(connectionId)));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+    }
+  }
+
+  /** 列の値の候補（試作）: {"connectionId", "schema", "table", "column"} → {"type", "estimatedRows", "method", "values": [{"value", "count"}]} */
+  /** リレーションの解析を始める（終わるまで待たない。進み具合は /api/relations で見る） */
+  private void analyzeRelations(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    // すべての statement に入れる値（画面で選んだ共通パラメータ。スキーマを決める ${schema} など）
+    Object parameters;
+    try {
+      parameters = req.has("parameters") ? TypedValues.decode(Json.GSON.fromJson(req.get("parameters"), Object.class)) : null;
+    } catch (IllegalArgumentException e) {
+      sendJson(ex, 400, error(e.getMessage()));
+      return;
+    }
+    Relations.Progress progress = new Relations.Progress();
+    if (relationRuns.putIfAbsent(connectionId, progress) != null) {
+      sendJson(ex, 409, error("解析中です"));
+      return;
+    }
+    Relations.Store store = relationStore(connectionId);
+    SqlRenderer renderer = workspace.renderer();
+    List<String> ids = new ArrayList<>(renderer.statementIds());
+    Thread t = new Thread(() -> {
+      try (java.sql.Connection c = connections.open(connectionId)) {
+        synchronized (store) {
+          Relations.analyze(renderer, ids, parameters, c, store, progress);
+        }
+      } catch (Exception e) {
+        progress.current = "エラー: " + Errors.describe(e);
+      } finally {
+        relationLast.put(connectionId, progress);
+        relationRuns.remove(connectionId);
+      }
+    }, "relations-" + connectionId);
+    t.setDaemon(true);
+    t.start();
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("started", true);
+    sendJson(ex, 200, body);
+  }
+
+  /** リレーションの解析を一時停止する（そこまでの結果は保存する。次の「解析する」で続きから） */
+  private void stopRelations(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    Relations.Progress p = relationRuns.get(string(req, "connectionId"));
+    if (p != null) {
+      p.stop = true;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("stopping", p != null);
+    sendJson(ex, 200, body);
+  }
+
+  /** リレーションの解析の結果（つながりの一覧）と、解析中なら進み具合 */
+  private void relations(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    Relations.Store store = relationStore(connectionId);
+    Map<String, Object> body = new LinkedHashMap<>();
+    Relations.Progress p = relationRuns.get(connectionId);
+    if (p != null) {
+      Map<String, Object> pm = new LinkedHashMap<>();
+      pm.put("done", p.done);
+      pm.put("total", p.total);
+      pm.put("current", p.current);
+      pm.put("stopping", p.stop);
+      pm.putAll(timing(p));
+      body.put("progress", pm);
+    }
+    // 解析中は、書きかけの結果を読まない
+    if (p != null) {
+      sendJson(ex, 200, body);
+      return;
+    }
+    synchronized (store) {
+      body.put("updatedAt", store.updatedAt == 0 ? null : store.updatedAt);
+      body.put("statements", store.statements.size());
+      body.put("complete", store.complete);
+      Relations.Progress last = relationLast.get(connectionId);
+      if (last != null) {
+        body.put("lastRun", timing(last));
+      }
+      // まだ解析していない statement の数（一時停止した後や、statement が増えたとき）
+      int pending = 0;
+      for (String id : workspace.renderer().statementIds()) {
+        if (!store.statements.containsKey(id)) {
+          pending++;
+        }
+      }
+      body.put("pending", pending);
+      List<Map<String, Object>> errors = new ArrayList<>();
+      for (Map.Entry<String, Relations.Entry> e : store.statements.entrySet()) {
+        if (e.getValue().error != null) {
+          Map<String, Object> m = new LinkedHashMap<>();
+          m.put("id", e.getKey());
+          m.put("error", e.getValue().error);
+          errors.add(m);
+        }
+      }
+      body.put("errors", errors);
+      List<Map<String, Object>> links = new ArrayList<>();
+      for (Relations.Link l : Relations.links(store)) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("a", l.a);
+        m.put("b", l.b);
+        m.put("kind", l.kind);
+        m.put("statements", new ArrayList<>(l.statements));
+        links.add(m);
+      }
+      body.put("links", links);
+      // 一意でない列ごとの源流（兄弟をたどって見つけたものも）
+      List<Relations.Link> all = Relations.links(store);
+      java.util.Set<String> cols = new java.util.TreeSet<>();
+      for (Relations.Link l : all) {
+        cols.add(l.a);
+        cols.add(l.b);
+      }
+      List<Map<String, Object>> origins = new ArrayList<>();
+      for (String col : cols) {
+        List<Relations.Origin> os = Relations.origins(store, all, col);
+        if (os.isEmpty()) {
+          continue;
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Relations.Origin o : os) {
+          Map<String, Object> m = new LinkedHashMap<>();
+          m.put("column", o.column);
+          m.put("path", o.path);
+          m.put("count", o.count);
+          list.add(m);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("column", col);
+        m.put("origins", list);
+        origins.add(m);
+      }
+      body.put("origins", origins);
+      body.put("unique", new ArrayList<>(store.keys.entrySet().stream().filter(e -> Relations.unique(store, e.getKey()))
+          .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toList())));
+    }
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * 解析にかかった時間。1 件あたりの時間（解析した件の平均。DB との往復を含む）、そのうち計画を作った時間、
+   * 経過時間、残りの推定時間（解析した件の、経過時間での平均 × 残りの件数。解析し直さない件も残りに数えるので、多めに出る）
+   */
+  private static Map<String, Object> timing(Relations.Progress p) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    long elapsed = System.currentTimeMillis() - p.startedAt;
+    m.put("analyzed", p.analyzed);
+    m.put("elapsedMillis", elapsed);
+    if (p.analyzed > 0) {
+      m.put("perStatementMillis", Math.round(p.millis / p.analyzed));
+      m.put("planPerStatementMillis", Math.round(p.planMillis / p.analyzed));
+    }
+    // 数件では平均がぶれるので、3 件から出す
+    if (p.analyzed >= 3 && p.total > p.done) {
+      // 続きからのときは、解析済みの件を最初にまとめて飛ばすので、解析した件の数で割る
+      m.put("remainingMillis", Math.round((double) elapsed / p.analyzed * (p.total - p.done)));
+    }
+    return m;
+  }
+
+  /**
+   * 列と列のリレーション。今は、解析の結果（SQL の結合の条件から推し量ったもの）だけ。解析していなければ null。
+   * （後で、手で設定したリレーションもここで足す）
+   */
+  private Relations.Graph relationGraph(String connectionId) throws IOException {
+    if (relationsDir == null && !relationStores.containsKey(connectionId)) {
+      return null;
+    }
+    Relations.Store store = relationStore(connectionId);
+    synchronized (store) {
+      if (store.statements.isEmpty()) {
+        return null;
+      }
+      // 保存が変わっていなければ、前にまとめたものを使う（statement が多いと、まとめるのに時間がかかる）
+      Object[] cached = relationGraphs.get(connectionId);
+      if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()) {
+        return (Relations.Graph) cached[2];
+      }
+      Relations.Graph g = new Relations.Graph(store, Relations.links(store));
+      relationGraphs.put(connectionId, new Object[] {store.updatedAt, store.statements.size(), g});
+      return g;
+    }
+  }
+
+  /** 接続先ごとの、まとめたリレーション（[保存した時刻, statement の数, Graph]） */
+  private final Map<String, Object[]> relationGraphs = new java.util.concurrent.ConcurrentHashMap<>();
+
+
+
+  /** SQL に出ている項目（バインド変数の元の式） */
+  private static java.util.Set<String> properties(SqlRenderer.Result r) {
+    java.util.Set<String> out = new java.util.HashSet<>();
+    for (SqlRenderer.Binding b : r.bindings) {
+      out.add(b.property);
+    }
+    return out;
+  }
+
+  private void columnValues(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    try {
+      boolean scan = req.has("scan") && req.get("scan").getAsBoolean();
+      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"), scan,
+          () -> connections.open(connectionId)));
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+    }
   }
 
   /** 基準ディレクトリからの相対パスを / 区切りで返す。基準の外なら絶対パスのまま */
