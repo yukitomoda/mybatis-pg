@@ -161,18 +161,6 @@ export function RelationsScreen({
   const shownNames = Object.keys(names).filter((n) => n.toLowerCase().includes(q));
   const detailOf = useMemo(() => new Map(details.map((d) => [d.id, d])), [details]);
 
-  const download = () => {
-    if (!result) return;
-    const blob = new Blob([toText(result, oneSchema)], {
-      type: 'text/plain;charset=utf-8',
-    });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'relations.txt';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
   return (
     <div className="relations">
       <div className="relations-head">
@@ -199,11 +187,6 @@ export function RelationsScreen({
         ) : (
           <button type="button" className="run" disabled={!connectionId} onClick={start}>
             {partial ? '続きから解析する' : '解析する'}
-          </button>
-        )}
-        {result && !running && result.updatedAt && (
-          <button type="button" onClick={download}>
-            テキストで書き出す
           </button>
         )}
       </div>
@@ -907,33 +890,4 @@ function Evidence({
       </ul>
     </details>
   );
-}
-
-/** 解析の結果をまとめたテキスト */
-export function toText(r: RelationsResult, oneSchema: boolean): string {
-  const s = (c: string) => shorten(c, oneSchema);
-  const links = r.links ?? [];
-  const lines: string[] = [];
-  lines.push('# リレーション（SQL の結合の条件から推し量ったもの）');
-  lines.push('');
-  lines.push(
-    `解析: ${r.updatedAt ? new Date(r.updatedAt).toLocaleString('ja-JP') : '-'}　statement ${r.statements ?? 0} 件　解析できなかったもの ${r.errors?.length ?? 0} 件　つながり ${links.length} 組`,
-  );
-  const section = (title: string, list: RelationLink[], fmt: (l: RelationLink) => string) => {
-    lines.push('', `## ${title}（${list.length} 組）`, '');
-    for (const l of list)
-      lines.push(
-        `${fmt(l)}${l.manual ? '（手動）' : ''}${l.disabled ? '（無効）' : ''}　[${l.statements.length} 件] ${l.statements.join(', ')}`,
-      );
-  };
-  const byName = (x: RelationLink, y: RelationLink) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b);
-  section('親子（子の列 → 親の列）', links.filter((l) => l.kind === 'parent').sort(byName), (l) => `${s(l.a)} → ${s(l.b)}`);
-  section('1 対 1（どちらも一意）', links.filter((l) => l.kind === 'one-to-one').sort(byName), (l) => `${s(l.a)} ＝ ${s(l.b)}`);
-  section('兄弟（どちらも一意でない）', links.filter((l) => l.kind === 'sibling').sort(byName), (l) => `${s(l.a)} ＝ ${s(l.b)}`);
-  const far = (r.origins ?? []).flatMap((o) => o.origins.filter((x) => x.path.length > 1).map((x) => ({ col: o.column, ...x })));
-  lines.push('', `## 兄弟をたどった源流（${far.length} 件）`, '');
-  for (const o of far) lines.push(`${s(o.col)} → ${s(o.column)}　（${o.path.slice(1).map(s).join(' → ')} 経由、${o.count} 件の SQL）`);
-  lines.push('', `## 解析できなかった statement（${r.errors?.length ?? 0} 件）`, '');
-  for (const e of r.errors ?? []) lines.push(`${e.id}: ${e.error.split('\n')[0]}`);
-  return lines.join('\n') + '\n';
 }
