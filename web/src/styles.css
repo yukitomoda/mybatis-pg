@@ -2371,6 +2371,11 @@ button.icon.suggest-toggle {
 /* リレーション（試作） */
 .relations {
   padding: 1rem 1.25rem;
+  /* 画面の高さいっぱいに並べ、表の一覧と詳細はそれぞれの中でスクロールする */
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .relations-head {
@@ -2399,9 +2404,26 @@ button.icon.suggest-toggle {
 }
 
 /* 列を上に寄せるので、仕切りだけは上から下まで伸ばす（中身がないので、伸ばさないと高さが 0 になる） */
+.relations-body {
+  flex: 1;
+  min-height: 0;
+}
+
 .relations-body > .splitter {
   align-self: stretch;
-  min-height: 60vh;
+}
+
+.relations-tables {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 0;
+}
+
+.relations-detail {
+  align-self: stretch;
+  min-height: 0;
+  overflow: auto;
 }
 
 .relations-tables input {
@@ -2413,7 +2435,8 @@ button.icon.suggest-toggle {
   list-style: none;
   margin: 0.4rem 0 0;
   padding: 0;
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -2538,7 +2561,13 @@ button.icon.suggest-relation:hover {
 }
 
 @media (max-width: 700px) {
+  .relations {
+    height: auto;
+  }
   .relations-body {
     grid-template-columns: 1fr;
+  }
+  .relations-tables ul {
+    max-height: 40vh;
   }
 }
