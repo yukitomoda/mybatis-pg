@@ -31,6 +31,9 @@ interface Props {
 /** 値の候補を出す（パラメータが比べられている列から、値を選んで入れる） */
 export interface Suggest {
   has: (path: Path) => boolean;
+  /** 候補のパネルを開いているか（開閉は呼び出し側で持つ。statement を切り替えたら閉じるため） */
+  isOpen: (path: Path) => boolean;
+  setOpen: (path: Path, open: boolean) => void;
   render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => ReactNode;
 }
 
@@ -114,7 +117,8 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const origin = local === undefined && shown !== undefined ? (fromGlobal ? (ctx.originOf(path) ?? '共通') : '既定') : null;
   const type = shown?.t;
   const set = (v: PValue | undefined) => ctx.update(path, v);
-  const [suggesting, setSuggesting] = useState(false);
+  const suggesting = !!ctx.suggest?.isOpen(path);
+  const setSuggesting = (open: boolean) => ctx.suggest?.setOpen(path, open);
   const canSuggest = !!ctx.suggest?.has(path);
   // XML で参照されているのに値がない（多くは入力のし忘れ）
   const missing =

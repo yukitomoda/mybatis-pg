@@ -436,9 +436,20 @@ function Workspace({ api }: { api: Api }) {
     conn.current?.hasPassword,
     draftP?.content,
   ]);
+  // 候補のパネルを開いているパラメータ。別の statement に移ったら閉じる（開いたままだと、移った途端に候補を読み始めるため）
+  const [suggestOpen, setSuggestOpen] = useState<Set<string>>(new Set());
+  useEffect(() => setSuggestOpen(new Set()), [selected]);
   const suggest = useMemo(
     () => ({
       has: (path: Path) => sources.has(pathLabel(path)),
+      isOpen: (path: Path) => suggestOpen.has(pathLabel(path)),
+      setOpen: (path: Path, open: boolean) =>
+        setSuggestOpen((prev) => {
+          const next = new Set(prev);
+          if (open) next.add(pathLabel(path));
+          else next.delete(pathLabel(path));
+          return next;
+        }),
       render: (
         path: Path,
         current: PValue | undefined,
@@ -462,7 +473,7 @@ function Workspace({ api }: { api: Api }) {
         );
       },
     }),
-    [sources, conn, sourceRelations],
+    [sources, conn, sourceRelations, suggestOpen],
   );
 
   // 入力や XML が変わるたびにレンダリングする
