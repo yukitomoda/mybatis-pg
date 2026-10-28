@@ -110,12 +110,66 @@ const QUERY_START = new Set(['SELECT', 'WITH', 'VALUES', 'TABLE']);
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 /** 別名にならない語 */
 const NOT_ALIAS = new Set([
-  'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'NATURAL', 'ON', 'USING', 'GROUP', 'ORDER', 'LIMIT', 'OFFSET',
-  'HAVING', 'WINDOW', 'UNION', 'INTERSECT', 'EXCEPT', 'LATERAL', 'FOR', 'FETCH', 'RETURNING', 'SET', 'VALUES', 'SELECT', 'AND', 'OR',
-  'TABLESAMPLE', 'WITH', 'AS', 'FROM', 'INTO', 'DEFAULT', 'DO', 'CONFLICT', 'WHEN', 'THEN', 'ELSE', 'END',
+  'WHERE',
+  'JOIN',
+  'LEFT',
+  'RIGHT',
+  'INNER',
+  'OUTER',
+  'FULL',
+  'CROSS',
+  'NATURAL',
+  'ON',
+  'USING',
+  'GROUP',
+  'ORDER',
+  'LIMIT',
+  'OFFSET',
+  'HAVING',
+  'WINDOW',
+  'UNION',
+  'INTERSECT',
+  'EXCEPT',
+  'LATERAL',
+  'FOR',
+  'FETCH',
+  'RETURNING',
+  'SET',
+  'VALUES',
+  'SELECT',
+  'AND',
+  'OR',
+  'TABLESAMPLE',
+  'WITH',
+  'AS',
+  'FROM',
+  'INTO',
+  'DEFAULT',
+  'DO',
+  'CONFLICT',
+  'WHEN',
+  'THEN',
+  'ELSE',
+  'END',
 ]);
 /** 句の始まり（どの句の中にいるかを覚える） */
-const CLAUSES = new Set(['SELECT', 'FROM', 'WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'WINDOW', 'ON', 'SET', 'RETURNING', 'VALUES', 'USING', 'INTO']);
+const CLAUSES = new Set([
+  'SELECT',
+  'FROM',
+  'WHERE',
+  'GROUP',
+  'HAVING',
+  'ORDER',
+  'LIMIT',
+  'OFFSET',
+  'WINDOW',
+  'ON',
+  'SET',
+  'RETURNING',
+  'VALUES',
+  'USING',
+  'INTO',
+]);
 
 /** 解析の途中で、部分ごとに持つもの */
 interface Scope {
@@ -200,7 +254,15 @@ export function analyze(sql: string): Analysis {
     for (let i = from; i < to; i++) {
       const t = tokens[i];
       if (t.kind === 'word' && CLAUSES.has(t.upper)) clause = t.upper;
-      if (t.kind === 'word' && (t.upper === 'FROM' || t.upper === 'JOIN' || t.upper === 'UPDATE' || t.upper === 'INTO' || t.upper === 'USING' || (t.upper === 'LATERAL' && clause === 'FROM'))) {
+      if (
+        t.kind === 'word' &&
+        (t.upper === 'FROM' ||
+          t.upper === 'JOIN' ||
+          t.upper === 'UPDATE' ||
+          t.upper === 'INTO' ||
+          t.upper === 'USING' ||
+          (t.upper === 'LATERAL' && clause === 'FROM'))
+      ) {
         if (t.upper !== 'USING' || clause !== 'ON') fromItemAt = i + 1;
         if (t.upper === 'JOIN' || t.upper === 'UPDATE') clause = 'FROM';
       } else if (t.kind === ',' && clause === 'FROM') {
@@ -316,7 +378,16 @@ export function analyze(sql: string): Analysis {
     return part;
   };
 
-  const root: Part = { key: '0', kind: 'main', name: null, start: 0, end: tokens[last - 1]?.end ?? 0, children: [], outerRefs: [], writes: false };
+  const root: Part = {
+    key: '0',
+    kind: 'main',
+    name: null,
+    start: 0,
+    end: tokens[last - 1]?.end ?? 0,
+    children: [],
+    outerRefs: [],
+    writes: false,
+  };
   const rootScope = newScope(root, null);
   query(0, last, rootScope);
   root.writes = !!tokens[0] && !QUERY_START.has(tokens[0].upper);

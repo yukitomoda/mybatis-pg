@@ -212,7 +212,12 @@ export function PartsPanel({
     <div className="subquery-panel">
       <div className="execute-bar">
         <ConnectionPicker conn={conn} />
-        <button type="button" disabled={!conn.current || running !== null} onClick={runAll} title="実行できる部分をまとめて実行し、部分ごとの件数を出す">
+        <button
+          type="button"
+          disabled={!conn.current || running !== null}
+          onClick={runAll}
+          title="実行できる部分をまとめて実行し、部分ごとの件数を出す"
+        >
           すべての部分を実行
         </button>
       </div>
@@ -248,7 +253,12 @@ export function PartsPanel({
                 <p className="warn-text part-missing">⚠ 未設定: {missingByPart.get(selected.key)!.join(', ')}</p>
               )}
               <div className="execute-bar">
-                <button type="button" className="run" disabled={!conn.current || !runnable(selected) || running !== null} onClick={() => run(selected)}>
+                <button
+                  type="button"
+                  className="run"
+                  disabled={!conn.current || !runnable(selected) || running !== null}
+                  onClick={() => run(selected)}
+                >
                   {running === selected.key ? '実行中…' : 'この部分を実行'}
                 </button>
               </div>

@@ -1,15 +1,15 @@
 // 値の候補（試作）: パラメータと比べられている列の、よく出てくる値を出し、選ぶと入れる
-import { useEffect, useState } from "react";
-import type { SourceColumn } from "./api";
-import type { Connections } from "./Execution";
-import { message } from "./Execution";
-import type { PValue } from "./params";
+import { useEffect, useState } from 'react';
+import type { SourceColumn } from './api';
+import type { Connections } from './Execution';
+import { message } from './Execution';
+import type { PValue } from './params';
 
 type Values = {
   type: string;
   estimatedRows: number;
   /** none: 統計情報によく出る値がなく、表を読んでいない */
-  method: "stats" | "scan" | "sample" | "none";
+  method: 'stats' | 'scan' | 'sample' | 'none';
   /** 列から始まるインデックスがある（入力中の値の行を自動で探しても軽い） */
   indexed: boolean;
   values: { value: string | null; count: number }[];
@@ -18,28 +18,24 @@ type Values = {
 /** 列の値の候補は、開いている間は覚えておく（同じ列を何度も読まない） */
 const cache = new Map<string, Promise<Values>>();
 
-const keyOf = (connectionId: string, c: SourceColumn) =>
-  `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
+const keyOf = (connectionId: string, c: SourceColumn) => `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
 
-const NUMBER_TYPES =
-  /^(smallint|integer|bigint|numeric|real|double precision|decimal)/;
+const NUMBER_TYPES = /^(smallint|integer|bigint|numeric|real|double precision|decimal)/;
 
 /** 列の型に合わせて、選んだ値をパラメータの値にする */
 export function toParam(text: string | null, type: string): PValue {
-  if (text === null) return { t: "null" };
-  if (NUMBER_TYPES.test(type)) return { t: "number", v: text };
-  if (type.startsWith("timestamp"))
+  if (text === null) return { t: 'null' };
+  if (NUMBER_TYPES.test(type)) return { t: 'number', v: text };
+  if (type.startsWith('timestamp'))
     return {
-      t: "timestamp",
-      v: text.replace(/(\.\d+)?([+-]\d{2}(:\d{2})?)?$/, ""),
+      t: 'timestamp',
+      v: text.replace(/(\.\d+)?([+-]\d{2}(:\d{2})?)?$/, ''),
     };
-  if (type === "date") return { t: "date", v: text };
-  if (type === "boolean")
-    return { t: "boolean", v: text === "t" || text === "true" };
-  if (/^(text|character|"char"|name|citext)/.test(type))
-    return { t: "string", v: text };
+  if (type === 'date') return { t: 'date', v: text };
+  if (type === 'boolean') return { t: 'boolean', v: text === 't' || text === 'true' };
+  if (/^(text|character|"char"|name|citext)/.test(type)) return { t: 'string', v: text };
   // 列挙型・uuid・jsonb など: その型でバインドする
-  return { t: "pg", type, v: text };
+  return { t: 'pg', type, v: text };
 }
 
 type Rows = {
@@ -56,30 +52,30 @@ const MAX_ROWS = 15;
 function currentText(v: PValue | undefined): string | null {
   if (!v) return null;
   switch (v.t) {
-    case "string":
-    case "number":
-    case "timestamp":
-    case "date":
-    case "pg":
-      return v.v.trim() === "" ? null : v.v;
-    case "boolean":
+    case 'string':
+    case 'number':
+    case 'timestamp':
+    case 'date':
+    case 'pg':
+      return v.v.trim() === '' ? null : v.v;
+    case 'boolean':
       return String(v.v);
     default:
       return null;
   }
 }
 
-const METHOD_LABELS: Record<Values["method"], string> = {
-  stats: "統計情報のよく出る値",
-  scan: "表を読んで数えた",
-  sample: "表の一部を読んで数えた",
-  none: "統計情報によく出る値がありません",
+const METHOD_LABELS: Record<Values['method'], string> = {
+  stats: '統計情報のよく出る値',
+  scan: '表を読んで数えた',
+  sample: '表の一部を読んで数えた',
+  none: '統計情報によく出る値がありません',
 };
 
-const ROLE_LABELS: Record<SourceColumn["role"], string> = {
-  origin: "（源流）",
-  compared: "（比べている列）",
-  name: "（同じ名前のパラメータから）",
+const ROLE_LABELS: Record<SourceColumn['role'], string> = {
+  origin: '（源流）',
+  compared: '（比べている列）',
+  name: '（同じ名前のパラメータから）',
 };
 
 export function SuggestPanel({
@@ -167,8 +163,7 @@ export function SuggestPanel({
   } | null>(null);
   useEffect(() => {
     setFound(null);
-    if (!connectionId || !values || now === null || (!auto && lookFor !== now))
-      return;
+    if (!connectionId || !values || now === null || (!auto && lookFor !== now)) return;
     let active = true;
     const timer = window.setTimeout(
       () => {
@@ -197,8 +192,8 @@ export function SuggestPanel({
     onPick(
       list
         ? {
-            t: "list",
-            items: [...(current?.t === "list" ? current.items : []), v],
+            t: 'list',
+            items: [...(current?.t === 'list' ? current.items : []), v],
           }
         : v,
     );
@@ -213,16 +208,12 @@ export function SuggestPanel({
         }
       : null;
 
-  const hasOrigin = columns.some((x) => x.role === "origin");
+  const hasOrigin = columns.some((x) => x.role === 'origin');
   return (
     <div className="suggest-panel">
       <div className="suggest-head">
         {columns.length > 1 ? (
-          <select
-            aria-label="比べている列"
-            value={index}
-            onChange={(e) => setIndex(Number(e.target.value))}
-          >
+          <select aria-label="比べている列" value={index} onChange={(e) => setIndex(Number(e.target.value))}>
             {columns.map((c, i) => (
               <option key={i} value={i}>
                 {c.table}.{c.column}
@@ -235,19 +226,12 @@ export function SuggestPanel({
             {column.table}.{column.column}
           </code>
         )}
-        {column.role === "origin" ? (
-          <span
-            className="suggest-condition"
-            title="リレーションでたどった経路"
-          >
-            リレーション: {column.condition}（
-            {column.manual ? "手動" : `${column.count} 件の SQL`}）
+        {column.role === 'origin' ? (
+          <span className="suggest-condition" title="リレーションでたどった経路">
+            リレーション: {column.condition}（{column.manual ? '手動' : `${column.count} 件の SQL`}）
           </span>
-        ) : column.role === "name" ? (
-          <span
-            className="suggest-condition"
-            title="名前が同じパラメータは、同じものを指しているとみなしています"
-          >
+        ) : column.role === 'name' ? (
+          <span className="suggest-condition" title="名前が同じパラメータは、同じものを指しているとみなしています">
             {column.condition}（{column.count} 件の SQL）
           </span>
         ) : (
@@ -259,68 +243,30 @@ export function SuggestPanel({
         <button
           type="button"
           className="icon suggest-relation"
-          title={hasOrigin ? "リレーションを見る" : "リレーションを追加"}
-          aria-label={hasOrigin ? "リレーションを見る" : "リレーションを追加"}
+          title={hasOrigin ? 'リレーションを見る' : 'リレーションを追加'}
+          aria-label={hasOrigin ? 'リレーションを見る' : 'リレーションを追加'}
           onClick={() => {
-            const c = columns.find((x) => x.role === "compared") ?? column;
+            const c = columns.find((x) => x.role === 'compared') ?? column;
             onOpenRelation(`${c.schema}.${c.table}.${c.column}`);
           }}
         >
           <svg width="13" height="11" viewBox="0 0 18 14" aria-hidden="true">
-            <rect
-              x="1"
-              y="1"
-              width="6"
-              height="5"
-              rx="1"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-            />
-            <rect
-              x="11"
-              y="8"
-              width="6"
-              height="5"
-              rx="1"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-            />
-            <path
-              d="M7 3.5h3a1.5 1.5 0 0 1 1.5 1.5v3"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-            />
+            <rect x="1" y="1" width="6" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <rect x="11" y="8" width="6" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M7 3.5h3a1.5 1.5 0 0 1 1.5 1.5v3" fill="none" stroke="currentColor" strokeWidth="1.6" />
           </svg>
         </button>
       </div>
-      {!relations && (
-        <p className="hint">
-          リレーションを解析すると、源流の表（この列が指している表）の値も出せます。
-        </p>
-      )}
-      {!column.direct && (
-        <p className="hint">
-          列を式で包んで比べているので、列の値がそのまま合わないことがあります。
-        </p>
-      )}
+      {!relations && <p className="hint">リレーションを解析すると、源流の表（この列が指している表）の値も出せます。</p>}
+      {!column.direct && <p className="hint">列を式で包んで比べているので、列の値がそのまま合わないことがあります。</p>}
       {error && <p className="error-text">{error}</p>}
       {!values && !error && <p className="hint">読み込んでいます…</p>}
       {values && (
         <>
           {table ? (
-            <SuggestRows
-              rows={table}
-              column={column.column}
-              counts={new Map(top.map((v) => [v.value, v.count]))}
-              onPick={pick}
-            />
+            <SuggestRows rows={table} column={column.column} counts={new Map(top.map((v) => [v.value, v.count]))} onPick={pick} />
           ) : (
-            values.values.length > 0 && (
-              <p className="hint">行を読み込んでいます…</p>
-            )
+            values.values.length > 0 && <p className="hint">行を読み込んでいます…</p>
           )}
           <div className="suggest-actions">
             {now !== null && !auto && lookFor !== now && (
@@ -334,8 +280,7 @@ export function SuggestPanel({
               </button>
             )}
             <span className="hint suggest-method">
-              {METHOD_LABELS[values.method]}（全{" "}
-              {values.estimatedRows.toLocaleString("ja-JP")} 行ほど）
+              {METHOD_LABELS[values.method]}（全 {values.estimatedRows.toLocaleString('ja-JP')} 行ほど）
             </span>
           </div>
         </>
@@ -360,22 +305,14 @@ function SuggestRows({
   if (rows.columns.length === 0) return <p className="hint">行がありません</p>;
   const row = (r: (string | null)[], i: number, isCurrent: boolean) => (
     <tr
-      key={`${isCurrent ? "c" : "v"}${i}`}
-      className={isCurrent ? "current" : undefined}
+      key={`${isCurrent ? 'c' : 'v'}${i}`}
+      className={isCurrent ? 'current' : undefined}
       onClick={() => onPick(r[at])}
       title="この値を入れる"
     >
-      <td className="num">
-        {isCurrent
-          ? "入力中"
-          : (counts.get(r[at])?.toLocaleString("ja-JP") ?? "")}
-      </td>
+      <td className="num">{isCurrent ? '入力中' : (counts.get(r[at])?.toLocaleString('ja-JP') ?? '')}</td>
       {r.map((v, j) => (
-        <td
-          key={j}
-          className={j === at ? "target" : undefined}
-          title={v ?? "NULL"}
-        >
+        <td key={j} className={j === at ? 'target' : undefined} title={v ?? 'NULL'}>
           {v ?? <span className="null">NULL</span>}
         </td>
       ))}
@@ -388,7 +325,7 @@ function SuggestRows({
           <tr>
             <th className="num">件数</th>
             {rows.columns.map((c, j) => (
-              <th key={j} className={j === at ? "target" : undefined}>
+              <th key={j} className={j === at ? 'target' : undefined}>
                 {c}
               </th>
             ))}
@@ -397,14 +334,10 @@ function SuggestRows({
         <tbody>
           {rows.currentRows.map((r, i) => row(r, i, true))}
           {/* 件数の多い順 */}
-          {[...rows.rows]
-            .sort((a, b) => (counts.get(b[at]) ?? 0) - (counts.get(a[at]) ?? 0))
-            .map((r, i) => row(r, i, false))}
+          {[...rows.rows].sort((a, b) => (counts.get(b[at]) ?? 0) - (counts.get(a[at]) ?? 0)).map((r, i) => row(r, i, false))}
         </tbody>
       </table>
-      {rows.currentError && (
-        <p className="hint">入力中の値で探せません: {rows.currentError}</p>
-      )}
+      {rows.currentError && <p className="hint">入力中の値で探せません: {rows.currentError}</p>}
     </div>
   );
 }

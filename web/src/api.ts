@@ -1,13 +1,9 @@
 // Java サーバの API クライアント
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
-import type { ParamSchema, PValue } from "./params";
-import { fromJson, getAt, toJson } from "./params";
-import type {
-  GlobalSet,
-  StatementSettings,
-  StatementsSettings,
-} from "./globalModel";
-import type { StatementEntry } from "./tree";
+import type { ParamSchema, PValue } from './params';
+import { fromJson, getAt, toJson } from './params';
+import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
+import type { StatementEntry } from './tree';
 
 export interface LoadError {
   source: string;
@@ -47,7 +43,7 @@ export interface SourceColumn {
    * compared: パラメータと比べている列、origin: リレーションでたどった源流の列、
    * name: 同じ名前のパラメータが、ほかの statement で源流と判断した列
    */
-  role: "compared" | "origin" | "name";
+  role: 'compared' | 'origin' | 'name';
   /** 源流のとき、比べている列から源流の手前までにたどった列（表.列） */
   via: string[];
   /** 源流のとき、根拠の SQL の数。name のとき、その列と判断した statement の数 */
@@ -92,8 +88,7 @@ export interface TableInfo {
   indexes: IndexInfo[];
 }
 
-export type OpenTarget =
-  { statementId: string } | { file: string; line?: number | null };
+export type OpenTarget = { statementId: string } | { file: string; line?: number | null };
 
 export interface TemplateResponse {
   /** 定義したファイル（基準からの相対パス） */
@@ -207,35 +202,34 @@ export interface ParameterName {
 /** 数値の精度を保つため、共通パラメータの応答は自前の JSON 解析で読む */
 function parseGlobals(text: string): GlobalsResponse {
   const root = fromJson(text);
-  const str = (v: PValue | undefined) => (v && v.t === "string" ? v.v : null);
-  const strs = (v: PValue | undefined) =>
-    v && v.t === "list" ? v.items.map((i) => str(i) ?? "").filter(Boolean) : [];
-  const sets = getAt(root, ["sets"]);
+  const str = (v: PValue | undefined) => (v && v.t === 'string' ? v.v : null);
+  const strs = (v: PValue | undefined) => (v && v.t === 'list' ? v.items.map((i) => str(i) ?? '').filter(Boolean) : []);
+  const sets = getAt(root, ['sets']);
   return {
     sets:
-      sets && sets.t === "list"
+      sets && sets.t === 'list'
         ? sets.items.map((s) => ({
-            id: str(getAt(s, ["id"])) ?? "",
-            name: str(getAt(s, ["name"])) ?? "",
+            id: str(getAt(s, ['id'])) ?? '',
+            name: str(getAt(s, ['name'])) ?? '',
             isDefault: (() => {
-              const d = getAt(s, ["default"]);
-              return d?.t === "boolean" && d.v;
+              const d = getAt(s, ['default']);
+              return d?.t === 'boolean' && d.v;
             })(),
-            values: getAt(s, ["values"]) ?? { t: "object", fields: [] },
+            values: getAt(s, ['values']) ?? { t: 'object', fields: [] },
           }))
         : [],
     statements: Object.fromEntries(
       (() => {
-        const st = getAt(root, ["statements"]);
-        if (!st || st.t !== "object") return [];
+        const st = getAt(root, ['statements']);
+        if (!st || st.t !== 'object') return [];
         return st.fields.map(([id, v]) => {
-          const order = getAt(v, ["order"]);
+          const order = getAt(v, ['order']);
           return [
             id,
             {
-              added: strs(getAt(v, ["added"])),
-              removed: strs(getAt(v, ["removed"])),
-              order: order && order.t === "list" ? strs(order) : undefined,
+              added: strs(getAt(v, ['added'])),
+              removed: strs(getAt(v, ['removed'])),
+              order: order && order.t === 'list' ? strs(order) : undefined,
             },
           ];
         });
@@ -244,7 +238,7 @@ function parseGlobals(text: string): GlobalsResponse {
   };
 }
 
-const TOKEN_KEY = "mybatis-pg.token";
+const TOKEN_KEY = 'mybatis-pg.token';
 
 /**
  * 起動時に表示された URL の ?token= を取り出してタブ内に保存し、URL からは消す
@@ -252,15 +246,15 @@ const TOKEN_KEY = "mybatis-pg.token";
  */
 export function takeToken(): string | null {
   const url = new URL(window.location.href);
-  const fromUrl = url.searchParams.get("token");
+  const fromUrl = url.searchParams.get('token');
   if (fromUrl) {
     try {
       sessionStorage.setItem(TOKEN_KEY, fromUrl);
     } catch {
       // 保存できなくても、この表示中はメモリ上のトークンで動く
     }
-    url.searchParams.delete("token");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    url.searchParams.delete('token');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     return fromUrl;
   }
   try {
@@ -279,14 +273,13 @@ export function createApi(token: string) {
   async function callText(path: string, init?: RequestInit): Promise<string> {
     const res = await fetch(path, {
       ...init,
-      headers: { ...(init?.headers ?? {}), "X-Auth-Token": token },
+      headers: { ...(init?.headers ?? {}), 'X-Auth-Token': token },
     });
     const text = await res.text();
     if (!res.ok) {
       let message = text || res.statusText;
       try {
-        message =
-          (JSON.parse(text) as { error?: string }).error ?? res.statusText;
+        message = (JSON.parse(text) as { error?: string }).error ?? res.statusText;
       } catch {
         // JSON でなければ本文をそのまま使う
       }
@@ -296,44 +289,26 @@ export function createApi(token: string) {
   }
 
   const post = (body: string): RequestInit => ({
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body,
   });
-  const globalsCall = async (action: string, body: string) =>
-    parseGlobals(await callText(`api/globals/${action}`, post(body)));
+  const globalsCall = async (action: string, body: string) => parseGlobals(await callText(`api/globals/${action}`, post(body)));
 
   return {
-    statements: () => call<StatementsResponse>("api/statements"),
+    statements: () => call<StatementsResponse>('api/statements'),
     parameters: (id: string, draft: DraftParam = null) =>
       draft
-        ? call<ParametersResponse>(
-            "api/parameters",
-            post(JSON.stringify({ id, draft })),
-          )
-        : call<ParametersResponse>(
-            `api/parameters?id=${encodeURIComponent(id)}`,
-          ),
+        ? call<ParametersResponse>('api/parameters', post(JSON.stringify({ id, draft })))
+        : call<ParametersResponse>(`api/parameters?id=${encodeURIComponent(id)}`),
     /** mapper XML の中身 */
-    file: (path: string) =>
-      call<{ file: string; content: string }>(
-        `api/file?path=${encodeURIComponent(path)}`,
-      ),
+    file: (path: string) => call<{ file: string; content: string }>(`api/file?path=${encodeURIComponent(path)}`),
     /** 編集した内容をファイルに保存する。編集を始めた後にファイルが変わっていたら、force がなければ 409 */
     saveFile: (file: string, base: string, content: string, force: boolean) =>
-      call<object>(
-        "api/file/save",
-        post(JSON.stringify({ file, base, content, force })),
-      ),
-    createPlayground: (name: string) =>
-      call<object>("api/playground/create", post(JSON.stringify({ name }))),
-    renamePlayground: (name: string, newName: string) =>
-      call<object>(
-        "api/playground/rename",
-        post(JSON.stringify({ name, newName })),
-      ),
-    deletePlayground: (name: string) =>
-      call<object>("api/playground/delete", post(JSON.stringify({ name }))),
+      call<object>('api/file/save', post(JSON.stringify({ file, base, content, force }))),
+    createPlayground: (name: string) => call<object>('api/playground/create', post(JSON.stringify({ name }))),
+    renamePlayground: (name: string, newName: string) => call<object>('api/playground/rename', post(JSON.stringify({ name, newName }))),
+    deletePlayground: (name: string) => call<object>('api/playground/delete', post(JSON.stringify({ name }))),
     /** 保存してある下書き（更新の新しい順） */
     drafts: () =>
       call<{
@@ -345,14 +320,10 @@ export function createApi(token: string) {
           loaded: boolean;
           changed: boolean;
         }[];
-      }>("api/drafts"),
+      }>('api/drafts'),
     saveDraft: (file: string, base: string, content: string) =>
-      call<object>(
-        "api/drafts/save",
-        post(JSON.stringify({ file, base, content })),
-      ),
-    discardDrafts: (files: string[]) =>
-      call<object>("api/drafts/discard", post(JSON.stringify({ files }))),
+      call<object>('api/drafts/save', post(JSON.stringify({ file, base, content }))),
+    discardDrafts: (files: string[]) => call<object>('api/drafts/discard', post(JSON.stringify({ files }))),
     /** 下書きを読み込んでみる */
     checkDraft: (file: string, content: string, signal?: AbortSignal) =>
       call<{
@@ -363,7 +334,7 @@ export function createApi(token: string) {
           column: number | null;
           message: string;
         }[];
-      }>("api/draft/check", {
+      }>('api/draft/check', {
         ...post(JSON.stringify({ file, content })),
         signal,
       }),
@@ -372,23 +343,19 @@ export function createApi(token: string) {
       call<{
         trees: Record<string, ParamSchema>;
         errors: Record<string, string>;
-      }>("api/parameters-all"),
-    globals: async () => parseGlobals(await callText("api/globals")),
-    createGlobal: (name: string, copyFrom: string | null) =>
-      globalsCall("create", JSON.stringify({ name, copyFrom })),
-    renameGlobal: (id: string, name: string) =>
-      globalsCall("rename", JSON.stringify({ id, name })),
-    deleteGlobal: (id: string) => globalsCall("delete", JSON.stringify({ id })),
+      }>('api/parameters-all'),
+    globals: async () => parseGlobals(await callText('api/globals')),
+    createGlobal: (name: string, copyFrom: string | null) => globalsCall('create', JSON.stringify({ name, copyFrom })),
+    renameGlobal: (id: string, name: string) => globalsCall('rename', JSON.stringify({ id, name })),
+    deleteGlobal: (id: string) => globalsCall('delete', JSON.stringify({ id })),
     /** すべての statement に既定で入れるか */
-    defaultGlobal: (id: string, on: boolean) =>
-      globalsCall("default", JSON.stringify({ id, on })),
+    defaultGlobal: (id: string, on: boolean) => globalsCall('default', JSON.stringify({ id, on })),
     /** 既定の順番（すべての id を並べる） */
-    reorderGlobals: (ids: string[]) =>
-      globalsCall("reorder", JSON.stringify({ ids })),
+    reorderGlobals: (ids: string[]) => globalsCall('reorder', JSON.stringify({ ids })),
     /** statement ごとの設定（追加するもの、外すもの、順番。順番が null なら既定の順番） */
     statementGlobals: (statement: string, settings: StatementSettings) =>
       globalsCall(
-        "statement",
+        'statement',
         JSON.stringify({
           statement,
           added: settings.added,
@@ -396,63 +363,43 @@ export function createApi(token: string) {
           order: settings.order ?? null,
         }),
       ),
-    saveGlobalValues: (id: string, values: PValue) =>
-      globalsCall(
-        "values",
-        `{"id":${JSON.stringify(id)},"values":${toJson(values, "")}}`,
-      ),
-    parameterNames: () =>
-      call<{ names: ParameterName[] }>("api/parameter-names"),
-    editor: () =>
-      call<{ available: boolean; command: string | null }>("api/editor"),
+    saveGlobalValues: (id: string, values: PValue) => globalsCall('values', `{"id":${JSON.stringify(id)},"values":${toJson(values, '')}}`),
+    parameterNames: () => call<{ names: ParameterName[] }>('api/parameter-names'),
+    editor: () => call<{ available: boolean; command: string | null }>('api/editor'),
     /** mapper XML をエディタで開く（statement の開始行、またはファイルと行） */
-    open: (target: OpenTarget) =>
-      call<object>("api/open", post(JSON.stringify(target))),
-    template: (id: string) =>
-      call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
-    render: (
-      statementId: string,
-      parameters: PValue | undefined,
-      signal?: AbortSignal,
-      draft: DraftParam = null,
-    ) =>
-      call<RenderResponse>("api/render", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+    open: (target: OpenTarget) => call<object>('api/open', post(JSON.stringify(target))),
+    template: (id: string) => call<TemplateResponse>(`api/template?id=${encodeURIComponent(id)}`),
+    render: (statementId: string, parameters: PValue | undefined, signal?: AbortSignal, draft: DraftParam = null) =>
+      call<RenderResponse>('api/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         // 数値の精度を保つため、JSON は自前で組み立てる
-        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"parameters":${toJson(parameters, "")}}`,
+        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"parameters":${toJson(parameters, '')}}`,
         signal,
       }),
-    connections: () =>
-      call<{ connections: ConnectionProfile[] }>("api/connections"),
-    vault: () => call<VaultStatus>("api/vault"),
-    vaultSetup: (password: string) =>
-      call<VaultStatus>("api/vault/setup", post(JSON.stringify({ password }))),
-    vaultUnlock: (password: string) =>
-      call<VaultStatus>("api/vault/unlock", post(JSON.stringify({ password }))),
-    vaultLock: () => call<VaultStatus>("api/vault/lock", post("{}")),
-    vaultChange: (current: string, password: string) =>
-      call<VaultStatus>(
-        "api/vault/change",
-        post(JSON.stringify({ current, password })),
-      ),
-    vaultReset: () => call<VaultStatus>("api/vault/reset", post("{}")),
+    connections: () => call<{ connections: ConnectionProfile[] }>('api/connections'),
+    vault: () => call<VaultStatus>('api/vault'),
+    vaultSetup: (password: string) => call<VaultStatus>('api/vault/setup', post(JSON.stringify({ password }))),
+    vaultUnlock: (password: string) => call<VaultStatus>('api/vault/unlock', post(JSON.stringify({ password }))),
+    vaultLock: () => call<VaultStatus>('api/vault/lock', post('{}')),
+    vaultChange: (current: string, password: string) => call<VaultStatus>('api/vault/change', post(JSON.stringify({ current, password }))),
+    vaultReset: () => call<VaultStatus>('api/vault/reset', post('{}')),
     saveConnection: (input: ConnectionInput) =>
-      call<ConnectionProfile>("api/connections/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      call<ConnectionProfile>('api/connections/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
       }),
     deleteConnection: (id: string) =>
-      call<object>("api/connections/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      call<object>('api/connections/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       }),
     testConnection: (id: string) =>
-      call<{ server: string }>("api/connections/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      call<{ server: string }>('api/connections/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       }),
     /** 実行する。commit が true でなければロールバックする */
@@ -464,10 +411,10 @@ export function createApi(token: string) {
       maxRows: number,
       draft: DraftParam = null,
     ) =>
-      call<ExecuteResponse>("api/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, "")}}`,
+      call<ExecuteResponse>('api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"commit":${commit},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
       }),
     /** EXPLAIN を実行する。plan は FORMAT JSON の結果の文字列 */
     explain: (
@@ -494,21 +441,15 @@ export function createApi(token: string) {
         /** 繰り返したときの、各回の実行時間（ms） */
         runs?: number[];
       }>(
-        "api/explain",
+        'api/explain',
         post(
           `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},` +
             `"analyze":${options.analyze},"buffers":${options.buffers},"readOnly":${options.readOnly},` +
-            `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, "")}}`,
+            `"timeoutSeconds":${options.timeoutSeconds},"sixthExecution":${options.sixthExecution},"repeat":${options.repeat},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
     /** パラメータがどの表のどの列と比べられているかを推論する（試作。SQL は実行しない） */
-    paramSources: (
-      statementId: string,
-      parameters: PValue | undefined,
-      draft: DraftParam,
-      connectionId: string,
-      signal?: AbortSignal,
-    ) =>
+    paramSources: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, signal?: AbortSignal) =>
       call<{
         sources: { index: number; property: string; columns: SourceColumn[] }[];
         /** 推論するには値を入れる必要がある ${} の項目 */
@@ -517,9 +458,9 @@ export function createApi(token: string) {
         error: string | null;
         /** リレーションを解析してあるか */
         relations: boolean;
-      }>("api/param-sources", {
+      }>('api/param-sources', {
         ...post(
-          `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"parameters":${toJson(parameters, "")}}`,
+          `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},"parameters":${toJson(parameters, '')}}`,
         ),
         signal,
       }),
@@ -536,7 +477,7 @@ export function createApi(token: string) {
         currentRows: (string | null)[][];
         currentError: string | null;
       }>(
-        "api/column-rows",
+        'api/column-rows',
         post(
           JSON.stringify({
             connectionId,
@@ -550,60 +491,33 @@ export function createApi(token: string) {
       ),
     /** 手で設定したリレーションを変える（列は schema.table.column） */
     changeManualRelation: (
-      change:
-        | { action: "add" | "remove"; child: string; parent: string }
-        | { action: "disable" | "enable"; a: string; b: string },
-    ) =>
-      call<{ ok: boolean }>(
-        "api/relations/manual",
-        post(JSON.stringify(change)),
-      ),
+      change: { action: 'add' | 'remove'; child: string; parent: string } | { action: 'disable' | 'enable'; a: string; b: string },
+    ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
-    dbTables: (connectionId: string) =>
-      call<{ tables: string[] }>(
-        "api/db-columns",
-        post(JSON.stringify({ connectionId })),
-      ),
+    dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
     /** 表（schema.table）の列の一覧 */
     dbColumns: (connectionId: string, table: string) =>
-      call<{ columns: string[] }>(
-        "api/db-columns",
-        post(JSON.stringify({ connectionId, table })),
-      ),
+      call<{ columns: string[] }>('api/db-columns', post(JSON.stringify({ connectionId, table }))),
     /** リレーション（試作）の解析の結果。解析中なら進み具合だけ */
-    relations: (connectionId: string) =>
-      call<RelationsResult>(
-        "api/relations",
-        post(JSON.stringify({ connectionId })),
-      ),
+    relations: (connectionId: string) => call<RelationsResult>('api/relations', post(JSON.stringify({ connectionId }))),
     /** リレーションの解析を始める（終わるまで待たない） */
     /** リレーションの解析を一時停止する（そこまでの結果は保存する） */
-    stopRelations: (connectionId: string) =>
-      call<{ stopping: boolean }>(
-        "api/relations/stop",
-        post(JSON.stringify({ connectionId })),
-      ),
+    stopRelations: (connectionId: string) => call<{ stopping: boolean }>('api/relations/stop', post(JSON.stringify({ connectionId }))),
     analyzeRelations: (connectionId: string, parameters?: PValue) =>
       call<{ started: boolean }>(
-        "api/relations/analyze",
-        post(
-          `{"connectionId":${JSON.stringify(connectionId)}${parameters ? `,"parameters":${toJson(parameters, "")}` : ""}}`,
-        ),
+        'api/relations/analyze',
+        post(`{"connectionId":${JSON.stringify(connectionId)}${parameters ? `,"parameters":${toJson(parameters, '')}` : ''}}`),
       ),
     /** 列の値の候補（多く出てくる順） */
-    columnValues: (
-      connectionId: string,
-      c: { schema: string; table: string; column: string },
-      scan = false,
-    ) =>
+    columnValues: (connectionId: string, c: { schema: string; table: string; column: string }, scan = false) =>
       call<{
         type: string;
         estimatedRows: number;
-        method: "stats" | "scan" | "sample" | "none";
+        method: 'stats' | 'scan' | 'sample' | 'none';
         indexed: boolean;
         values: { value: string | null; count: number }[];
       }>(
-        "api/column-values",
+        'api/column-values',
         post(
           JSON.stringify({
             connectionId,
@@ -618,29 +532,18 @@ export function createApi(token: string) {
      * statement の SQL の一部（サブクエリ・CTE など）を、本番と同じバインド変数で、読み取り専用で実行する（必ずロールバックする）。
      * sql は番号付き（$1, $2, ...。render の numberedSql と同じ番号）
      */
-    runPart: (
-      statementId: string,
-      parameters: PValue | undefined,
-      draft: DraftParam,
-      connectionId: string,
-      sql: string,
-      maxRows = 200,
-    ) =>
+    runPart: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, sql: string, maxRows = 200) =>
       call<ResultTable & { total: number | null; elapsedMillis: number }>(
-        "api/part",
+        'api/part',
         post(
           `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},` +
-            `"sql":${JSON.stringify(sql)},"maxRows":${maxRows},"parameters":${toJson(parameters, "")}}`,
+            `"sql":${JSON.stringify(sql)},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
         ),
       ),
     tables: (connectionId: string, tables: string[]) =>
-      call<{ tables: TableInfo[]; notFound: string[] }>(
-        "api/tables",
-        post(JSON.stringify({ connectionId, tables })),
-      ),
+      call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
-    changes: (since: number, signal?: AbortSignal) =>
-      call<{ generation: number }>(`api/changes?since=${since}`, { signal }),
+    changes: (since: number, signal?: AbortSignal) => call<{ generation: number }>(`api/changes?since=${since}`, { signal }),
   };
 }
 
@@ -651,7 +554,7 @@ export interface RelationLink {
   a: string;
   b: string;
   /** parent: b が親（a が子）、one-to-one: どちらも一意、sibling: どちらも一意でない */
-  kind: "parent" | "one-to-one" | "sibling";
+  kind: 'parent' | 'one-to-one' | 'sibling';
   /** 根拠の statement */
   statements: string[];
   /** 手で追加したリレーション（a が子、b が親） */

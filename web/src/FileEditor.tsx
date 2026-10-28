@@ -264,7 +264,9 @@ export function FileEditor({
           )}
         </span>
       </div>
-      {stale && <p className="notes warn">編集を始めた後に、ファイルが変更されました。編集中の内容は変更前のファイルをもとにしています。</p>}
+      {stale && (
+        <p className="notes warn">編集を始めた後に、ファイルが変更されました。編集中の内容は変更前のファイルをもとにしています。</p>
+      )}
       <Suspense fallback={<p className="hint">エディタを読み込んでいます…</p>}>
         <XmlEditor
           key={file}

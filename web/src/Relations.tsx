@@ -1,33 +1,27 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
-import { useEffect, useMemo, useState } from "react";
-import type {
-  Api,
-  RelationLink,
-  RelationsResult,
-  RelationsTiming,
-} from "./api";
-import type { Connections } from "./Execution";
-import { ConnectionPicker, message } from "./Execution";
-import { SideSplitter, useSideWidth } from "./Splitter";
-import type { GlobalSet } from "./globalModel";
-import { resolveTemplates } from "./gen";
+import { useEffect, useMemo, useState } from 'react';
+import type { Api, RelationLink, RelationsResult, RelationsTiming } from './api';
+import type { Connections } from './Execution';
+import { ConnectionPicker, message } from './Execution';
+import { SideSplitter, useSideWidth } from './Splitter';
+import type { GlobalSet } from './globalModel';
+import { resolveTemplates } from './gen';
 
 /** 解析に使う共通パラメータの設定（ブラウザに覚える） */
-const SET_KEY = "mybatis-pg.relations.set";
+const SET_KEY = 'mybatis-pg.relations.set';
 
 function loadSetId(): string {
   try {
-    return localStorage.getItem(SET_KEY) ?? "";
+    return localStorage.getItem(SET_KEY) ?? '';
   } catch {
-    return "";
+    return '';
   }
 }
 
 /** schema.table.column の表の部分（schema.table） */
-const tableOf = (col: string) => col.slice(0, col.lastIndexOf("."));
+const tableOf = (col: string) => col.slice(0, col.lastIndexOf('.'));
 /** 表示用。schema が 1 つだけなら省く */
-const shorten = (col: string, oneSchema: boolean) =>
-  oneSchema ? col.slice(col.indexOf(".") + 1) : col;
+const shorten = (col: string, oneSchema: boolean) => (oneSchema ? col.slice(col.indexOf('.') + 1) : col);
 
 /** 時間を「1 時間 5 分」「3 分」「40 秒」の形にする */
 export function duration(ms: number): string {
@@ -35,12 +29,12 @@ export function duration(ms: number): string {
   if (sec < 60) return `${sec} 秒`;
   const min = Math.round(sec / 60);
   if (min < 60) return `${min} 分`;
-  return `${Math.floor(min / 60)} 時間${min % 60 ? ` ${min % 60} 分` : ""}`;
+  return `${Math.floor(min / 60)} 時間${min % 60 ? ` ${min % 60} 分` : ''}`;
 }
 
 /** 1 件あたりの時間と、そのうち計画を作った時間 */
 function perStatement(t: RelationsTiming): string {
-  if (t.perStatementMillis === undefined) return "";
+  if (t.perStatementMillis === undefined) return '';
   return `（1 件 ${(t.perStatementMillis / 1000).toFixed(2)} 秒、うち計画 ${((t.planPerStatementMillis ?? 0) / 1000).toFixed(2)} 秒）`;
 }
 
@@ -61,20 +55,18 @@ export function RelationsScreen({
   /** 開いたときに見る列（schema.table.column。クエリの画面のパラメータから飛んできたとき） */
   focus: string | null;
 }) {
-  const side = useSideWidth("relations");
+  const side = useSideWidth('relations');
   const connectionId = conn.current?.id;
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState('');
   const [table, setTable] = useState<string | null>(null);
   // パラメータから飛んできたら、その列の表を開く
   useEffect(() => {
     if (focus) setTable(tableOf(focus));
   }, [focus]);
   /** 手で設定したリレーションを変えて、読み直す */
-  const change = (
-    c: Parameters<Api["changeManualRelation"]>[0],
-  ): Promise<void> =>
+  const change = (c: Parameters<Api['changeManualRelation']>[0]): Promise<void> =>
     api.changeManualRelation(c).then(load, (e) => setError(message(e)));
 
   const load = () => {
@@ -111,29 +103,18 @@ export function RelationsScreen({
   const start = () => {
     if (!connectionId) return;
     // {{date:now}} などの式は、値にしてから送る
-    const params = chosen
-      ? resolveTemplates(chosen.values, new Map()).value
-      : undefined;
-    api
-      .analyzeRelations(connectionId, params)
-      .then(load, (e) => setError(message(e)));
+    const params = chosen ? resolveTemplates(chosen.values, new Map()).value : undefined;
+    api.analyzeRelations(connectionId, params).then(load, (e) => setError(message(e)));
   };
   const stop = () => {
     if (!connectionId) return;
     api.stopRelations(connectionId).then(load, (e) => setError(message(e)));
   };
   // 一時停止した後か、まだ解析していない statement がある（続きから解析できる）
-  const partial =
-    !!result?.updatedAt && (!result.complete || (result.pending ?? 0) > 0);
+  const partial = !!result?.updatedAt && (!result.complete || (result.pending ?? 0) > 0);
 
   const links = result?.links ?? [];
-  const oneSchema = useMemo(
-    () =>
-      new Set(
-        links.flatMap((l) => [l.a, l.b]).map((c) => c.slice(0, c.indexOf("."))),
-      ).size <= 1,
-    [links],
-  );
+  const oneSchema = useMemo(() => new Set(links.flatMap((l) => [l.a, l.b]).map((c) => c.slice(0, c.indexOf('.')))).size <= 1, [links]);
   const s = (col: string) => shorten(col, oneSchema);
   // DB の表（リレーションがまだない表にも、追加できるように）
   const [allTables, setAllTables] = useState<string[]>([]);
@@ -147,32 +128,24 @@ export function RelationsScreen({
   const tables = useMemo(() => {
     const count = new Map<string, number>();
     for (const l of links) {
-      for (const t of new Set([tableOf(l.a), tableOf(l.b)]))
-        count.set(t, (count.get(t) ?? 0) + 1);
+      for (const t of new Set([tableOf(l.a), tableOf(l.b)])) count.set(t, (count.get(t) ?? 0) + 1);
     }
     if (focus && !count.has(tableOf(focus))) count.set(tableOf(focus), 0);
     // リレーションのある表を先に、ほかの表を後に
     for (const t of allTables) if (!count.has(t)) count.set(t, 0);
-    return [...count.entries()].sort(
-      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
-    );
+    return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [links, focus, allTables]);
-  const shown = tables.filter(([t]) =>
-    t.toLowerCase().includes(filter.trim().toLowerCase()),
-  );
-  const origins = useMemo(
-    () => new Map((result?.origins ?? []).map((o) => [o.column, o.origins])),
-    [result],
-  );
+  const shown = tables.filter(([t]) => t.toLowerCase().includes(filter.trim().toLowerCase()));
+  const origins = useMemo(() => new Map((result?.origins ?? []).map((o) => [o.column, o.origins])), [result]);
 
   const download = () => {
     if (!result) return;
     const blob = new Blob([toText(result, oneSchema)], {
-      type: "text/plain;charset=utf-8",
+      type: 'text/plain;charset=utf-8',
     });
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = "relations.txt";
+    a.download = 'relations.txt';
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -185,7 +158,7 @@ export function RelationsScreen({
         <select
           aria-label="解析に使う共通パラメータ"
           title="選んだ共通パラメータの値（スキーマを決める ${schema} など）を、すべての statement の解析に使います。値のない項目は仮の値で埋めます"
-          value={chosen ? chosen.id : ""}
+          value={chosen ? chosen.id : ''}
           onChange={(e) => chooseSet(e.target.value)}
           disabled={running}
         >
@@ -197,21 +170,12 @@ export function RelationsScreen({
           ))}
         </select>
         {running ? (
-          <button
-            type="button"
-            disabled={result?.progress?.stopping}
-            onClick={stop}
-          >
-            {result?.progress?.stopping ? "止めています…" : "一時停止"}
+          <button type="button" disabled={result?.progress?.stopping} onClick={stop}>
+            {result?.progress?.stopping ? '止めています…' : '一時停止'}
           </button>
         ) : (
-          <button
-            type="button"
-            className="run"
-            disabled={!connectionId}
-            onClick={start}
-          >
-            {partial ? "続きから解析する" : "解析する"}
+          <button type="button" className="run" disabled={!connectionId} onClick={start}>
+            {partial ? '続きから解析する' : '解析する'}
           </button>
         )}
         {result && !running && result.updatedAt && (
@@ -224,34 +188,27 @@ export function RelationsScreen({
       {result?.progress && (
         <p className="hint">
           {result.progress.done} / {result.progress.total}
-          {result.progress.remainingMillis !== undefined &&
-            `　残り約 ${duration(result.progress.remainingMillis)}`}
+          {result.progress.remainingMillis !== undefined && `　残り約 ${duration(result.progress.remainingMillis)}`}
           {perStatement(result.progress)}　{result.progress.current}
         </p>
       )}
       {result && !running && (
         <p className="hint">
           {result.updatedAt
-            ? `${new Date(result.updatedAt).toLocaleString("ja-JP")} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ""}　つながり ${links.length} 組　表 ${tables.filter(([, n]) => n > 0).length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ""}`
-            : "まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。"}
+            ? `${new Date(result.updatedAt).toLocaleString('ja-JP')} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ''}　つながり ${links.length} 組　表 ${tables.filter(([, n]) => n > 0).length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ''}`
+            : 'まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。'}
         </p>
       )}
       {result?.errors && result.errors.length > 0 && !running && (
         <details className="relations-errors">
-          <summary>
-            解析できなかった statement（{result.errors.length} 件）
-          </summary>
+          <summary>解析できなかった statement（{result.errors.length} 件）</summary>
           <ul>
             {result.errors.map((e) => (
               <li key={e.id}>
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => onOpen(e.id)}
-                >
+                <button type="button" className="link" onClick={() => onOpen(e.id)}>
                   {e.id}
                 </button>
-                <span className="hint"> {e.error.split("\n")[0]}</span>
+                <span className="hint"> {e.error.split('\n')[0]}</span>
               </li>
             ))}
           </ul>
@@ -260,22 +217,13 @@ export function RelationsScreen({
       {connectionId && !running && (
         <div className="relations-body" style={side.style}>
           <div className="relations-tables">
-            <input
-              type="search"
-              placeholder="表を絞り込む"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
+            <input type="search" placeholder="表を絞り込む" value={filter} onChange={(e) => setFilter(e.target.value)} />
             <ul>
               {shown.map(([t, n]) => (
                 <li key={t}>
-                  <button
-                    type="button"
-                    className={t === table ? "selected" : undefined}
-                    onClick={() => setTable(t)}
-                  >
-                    <span>{oneSchema ? t.slice(t.indexOf(".") + 1) : t}</span>
-                    <span className="count">{n || ""}</span>
+                  <button type="button" className={t === table ? 'selected' : undefined} onClick={() => setTable(t)}>
+                    <span>{oneSchema ? t.slice(t.indexOf('.') + 1) : t}</span>
+                    <span className="count">{n || ''}</span>
                   </button>
                 </li>
               ))}
@@ -324,51 +272,28 @@ function TableRelations({
   allTables: string[];
   table: string;
   links: RelationLink[];
-  origins: Map<
-    string,
-    { column: string; path: string[]; count: number; manual: boolean }[]
-  >;
+  origins: Map<string, { column: string; path: string[]; count: number; manual: boolean }[]>;
   s: (col: string) => string;
   onOpen: (id: string) => void;
   /** 強調する列 */
   focus: string | null;
-  onChange: (c: Parameters<Api["changeManualRelation"]>[0]) => Promise<void>;
+  onChange: (c: Parameters<Api['changeManualRelation']>[0]) => Promise<void>;
 }) {
-  const mine = links.filter(
-    (l) => tableOf(l.a) === table || tableOf(l.b) === table,
-  );
+  const mine = links.filter((l) => tableOf(l.a) === table || tableOf(l.b) === table);
   // この表の列が子（親を指している）
-  const parents = mine.filter(
-    (l) => l.kind === "parent" && tableOf(l.a) === table,
-  );
+  const parents = mine.filter((l) => l.kind === 'parent' && tableOf(l.a) === table);
   // ほかの表がこの表を指している
-  const children = mine.filter(
-    (l) =>
-      l.kind === "parent" && tableOf(l.b) === table && tableOf(l.a) !== table,
-  );
-  const others = mine.filter((l) => l.kind !== "parent");
+  const children = mine.filter((l) => l.kind === 'parent' && tableOf(l.b) === table && tableOf(l.a) !== table);
+  const others = mine.filter((l) => l.kind !== 'parent');
   // 兄弟をたどって見つけた源流（直接の親は上に出ている）
-  const cols = [
-    ...new Set(
-      mine.flatMap((l) => [l.a, l.b]).filter((c) => tableOf(c) === table),
-    ),
-  ].sort();
-  const farOrigins = cols.flatMap((c) =>
-    (origins.get(c) ?? [])
-      .filter((o) => o.path.length > 1)
-      .map((o) => ({ col: c, ...o })),
-  );
+  const cols = [...new Set(mine.flatMap((l) => [l.a, l.b]).filter((c) => tableOf(c) === table))].sort();
+  const farOrigins = cols.flatMap((c) => (origins.get(c) ?? []).filter((o) => o.path.length > 1).map((o) => ({ col: c, ...o })));
 
   const row = (l: RelationLink, left: string, right: string, arrow: string) => (
     <tr
       key={`${l.a} ${l.b}`}
       className={
-        [
-          l.disabled ? "disabled" : "",
-          focus && (l.a === focus || l.b === focus) ? "focus" : "",
-        ]
-          .filter(Boolean)
-          .join(" ") || undefined
+        [l.disabled ? 'disabled' : '', focus && (l.a === focus || l.b === focus) ? 'focus' : ''].filter(Boolean).join(' ') || undefined
       }
     >
       <td>
@@ -379,28 +304,14 @@ function TableRelations({
         <code>{s(right)}</code>
         {l.manual && <span className="badge">手動</span>}
       </td>
-      <td>
-        {l.statements.length > 0 && (
-          <Evidence ids={l.statements} onOpen={onOpen} />
-        )}
-      </td>
+      <td>{l.statements.length > 0 && <Evidence ids={l.statements} onOpen={onOpen} />}</td>
       <td className="relations-actions">
         {l.manual ? (
-          <button
-            type="button"
-            className="link"
-            onClick={() =>
-              onChange({ action: "remove", child: l.a, parent: l.b })
-            }
-          >
+          <button type="button" className="link" onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}>
             削除
           </button>
         ) : l.disabled ? (
-          <button
-            type="button"
-            className="link"
-            onClick={() => onChange({ action: "enable", a: l.a, b: l.b })}
-          >
+          <button type="button" className="link" onClick={() => onChange({ action: 'enable', a: l.a, b: l.b })}>
             有効に戻す
           </button>
         ) : (
@@ -408,7 +319,7 @@ function TableRelations({
             type="button"
             className="link"
             title="誤ったリレーションを、源流を探すときに使わないようにします"
-            onClick={() => onChange({ action: "disable", a: l.a, b: l.b })}
+            onClick={() => onChange({ action: 'disable', a: l.a, b: l.b })}
           >
             無効にする
           </button>
@@ -421,7 +332,7 @@ function TableRelations({
       <h3>親（この表の列が指している表）</h3>
       {parents.length > 0 && (
         <table className="relations-table">
-          <tbody>{parents.map((l) => row(l, l.a, l.b, "→"))}</tbody>
+          <tbody>{parents.map((l) => row(l, l.a, l.b, '→'))}</tbody>
         </table>
       )}
       <AddLink
@@ -431,12 +342,8 @@ function TableRelations({
         connectionId={connectionId}
         allTables={allTables}
         table={table}
-        initialColumn={
-          focus && tableOf(focus) === table
-            ? focus.slice(focus.lastIndexOf(".") + 1)
-            : null
-        }
-        onAdd={(child, parent) => onChange({ action: "add", child, parent })}
+        initialColumn={focus && tableOf(focus) === table ? focus.slice(focus.lastIndexOf('.') + 1) : null}
+        onAdd={(child, parent) => onChange({ action: 'add', child, parent })}
       />
       {farOrigins.length > 0 && (
         <>
@@ -456,8 +363,8 @@ function TableRelations({
                     {o.path
                       .slice(1)
                       .map((p) => s(p))
-                      .join(" → ")}{" "}
-                    経由（{o.manual ? "手動" : `${o.count} 件の SQL`}）
+                      .join(' → ')}{' '}
+                    経由（{o.manual ? '手動' : `${o.count} 件の SQL`}）
                   </td>
                 </tr>
               ))}
@@ -468,7 +375,7 @@ function TableRelations({
       <h3>子（この表を指している表）</h3>
       {children.length > 0 && (
         <table className="relations-table">
-          <tbody>{children.map((l) => row(l, l.b, l.a, "←"))}</tbody>
+          <tbody>{children.map((l) => row(l, l.b, l.a, '←'))}</tbody>
         </table>
       )}
       <AddLink
@@ -479,7 +386,7 @@ function TableRelations({
         allTables={allTables}
         table={table}
         initialColumn={null}
-        onAdd={(child, parent) => onChange({ action: "add", child, parent })}
+        onAdd={(child, parent) => onChange({ action: 'add', child, parent })}
       />
       {others.length > 0 && (
         <>
@@ -487,9 +394,8 @@ function TableRelations({
           <table className="relations-table">
             <tbody>
               {others.map((l) => {
-                const [left, right] =
-                  tableOf(l.a) === table ? [l.a, l.b] : [l.b, l.a];
-                return row(l, left, right, l.kind === "sibling" ? "＝" : "1:1");
+                const [left, right] = tableOf(l.a) === table ? [l.a, l.b] : [l.b, l.a];
+                return row(l, left, right, l.kind === 'sibling' ? '＝' : '1:1');
               })}
             </tbody>
           </table>
@@ -538,7 +444,7 @@ function ColumnPicker({
         placeholder="schema.table"
         list={listId}
         value={value.table}
-        onChange={(e) => onChange({ table: e.target.value, column: "" })}
+        onChange={(e) => onChange({ table: e.target.value, column: '' })}
       />
       <datalist id={listId}>
         {tables.map((t) => (
@@ -590,11 +496,7 @@ function OwnColumn({
     };
   }, [connectionId, table]);
   return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">列</option>
       {columns.map((c) => (
         <option key={c} value={c}>
@@ -617,7 +519,7 @@ function AddLink({
   initialColumn,
   onAdd,
 }: {
-  side: "parent" | "child";
+  side: 'parent' | 'child';
   api: Api;
   connectionId: string;
   allTables: string[];
@@ -628,13 +530,13 @@ function AddLink({
   onAdd: (child: string, parent: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(!!initialColumn);
-  const [own, setOwn] = useState(initialColumn ?? "");
-  const [other, setOther] = useState({ table: "", column: "" });
+  const [own, setOwn] = useState(initialColumn ?? '');
+  const [other, setOther] = useState({ table: '', column: '' });
   if (!open) {
     return (
       <p className="relations-add-open">
         <button type="button" className="link" onClick={() => setOpen(true)}>
-          {side === "parent" ? "＋ 親を追加" : "＋ 子を追加"}
+          {side === 'parent' ? '＋ 親を追加' : '＋ 子を追加'}
         </button>
       </p>
     );
@@ -644,7 +546,7 @@ function AddLink({
       api={api}
       connectionId={connectionId}
       table={table}
-      label={side === "parent" ? "この表の列（子）" : "この表の列（親）"}
+      label={side === 'parent' ? 'この表の列（子）' : 'この表の列（親）'}
       value={own}
       onChange={setOwn}
     />
@@ -654,29 +556,27 @@ function AddLink({
       api={api}
       connectionId={connectionId}
       tables={allTables}
-      label={side === "parent" ? "親" : "子"}
+      label={side === 'parent' ? '親' : '子'}
       value={other}
       onChange={setOther}
     />
   );
-  const ready = own !== "" && other.column !== "";
+  const ready = own !== '' && other.column !== '';
   const mine = `${table}.${own}`;
   const theirs = `${other.table}.${other.column}`;
   return (
     <div className="relations-add">
-      {side === "parent" ? ownColumn : otherColumn}
+      {side === 'parent' ? ownColumn : otherColumn}
       <span className="arrow">→</span>
-      {side === "parent" ? otherColumn : ownColumn}
+      {side === 'parent' ? otherColumn : ownColumn}
       <button
         type="button"
         disabled={!ready}
         onClick={() =>
-          (side === "parent" ? onAdd(mine, theirs) : onAdd(theirs, mine)).then(
-            () => {
-              setOther({ table: "", column: "" });
-              setOpen(false);
-            },
-          )
+          (side === 'parent' ? onAdd(mine, theirs) : onAdd(theirs, mine)).then(() => {
+            setOther({ table: '', column: '' });
+            setOpen(false);
+          })
         }
       >
         追加
@@ -689,13 +589,7 @@ function AddLink({
 }
 
 /** 根拠の statement。件数を出し、押すと一覧を開く */
-function Evidence({
-  ids,
-  onOpen,
-}: {
-  ids: string[];
-  onOpen: (id: string) => void;
-}) {
+function Evidence({ ids, onOpen }: { ids: string[]; onOpen: (id: string) => void }) {
   return (
     <details className="relations-evidence">
       <summary>{ids.length} 件の SQL</summary>
@@ -717,55 +611,26 @@ export function toText(r: RelationsResult, oneSchema: boolean): string {
   const s = (c: string) => shorten(c, oneSchema);
   const links = r.links ?? [];
   const lines: string[] = [];
-  lines.push("# リレーション（SQL の結合の条件から推し量ったもの）");
-  lines.push("");
+  lines.push('# リレーション（SQL の結合の条件から推し量ったもの）');
+  lines.push('');
   lines.push(
-    `解析: ${r.updatedAt ? new Date(r.updatedAt).toLocaleString("ja-JP") : "-"}　statement ${r.statements ?? 0} 件　解析できなかったもの ${r.errors?.length ?? 0} 件　つながり ${links.length} 組`,
+    `解析: ${r.updatedAt ? new Date(r.updatedAt).toLocaleString('ja-JP') : '-'}　statement ${r.statements ?? 0} 件　解析できなかったもの ${r.errors?.length ?? 0} 件　つながり ${links.length} 組`,
   );
-  const section = (
-    title: string,
-    list: RelationLink[],
-    fmt: (l: RelationLink) => string,
-  ) => {
-    lines.push("", `## ${title}（${list.length} 組）`, "");
+  const section = (title: string, list: RelationLink[], fmt: (l: RelationLink) => string) => {
+    lines.push('', `## ${title}（${list.length} 組）`, '');
     for (const l of list)
       lines.push(
-        `${fmt(l)}${l.manual ? "（手動）" : ""}${l.disabled ? "（無効）" : ""}　[${l.statements.length} 件] ${l.statements.join(", ")}`,
+        `${fmt(l)}${l.manual ? '（手動）' : ''}${l.disabled ? '（無効）' : ''}　[${l.statements.length} 件] ${l.statements.join(', ')}`,
       );
   };
-  const byName = (x: RelationLink, y: RelationLink) =>
-    x.a.localeCompare(y.a) || x.b.localeCompare(y.b);
-  section(
-    "親子（子の列 → 親の列）",
-    links.filter((l) => l.kind === "parent").sort(byName),
-    (l) => `${s(l.a)} → ${s(l.b)}`,
-  );
-  section(
-    "1 対 1（どちらも一意）",
-    links.filter((l) => l.kind === "one-to-one").sort(byName),
-    (l) => `${s(l.a)} ＝ ${s(l.b)}`,
-  );
-  section(
-    "兄弟（どちらも一意でない）",
-    links.filter((l) => l.kind === "sibling").sort(byName),
-    (l) => `${s(l.a)} ＝ ${s(l.b)}`,
-  );
-  const far = (r.origins ?? []).flatMap((o) =>
-    o.origins
-      .filter((x) => x.path.length > 1)
-      .map((x) => ({ col: o.column, ...x })),
-  );
-  lines.push("", `## 兄弟をたどった源流（${far.length} 件）`, "");
-  for (const o of far)
-    lines.push(
-      `${s(o.col)} → ${s(o.column)}　（${o.path.slice(1).map(s).join(" → ")} 経由、${o.count} 件の SQL）`,
-    );
-  lines.push(
-    "",
-    `## 解析できなかった statement（${r.errors?.length ?? 0} 件）`,
-    "",
-  );
-  for (const e of r.errors ?? [])
-    lines.push(`${e.id}: ${e.error.split("\n")[0]}`);
-  return lines.join("\n") + "\n";
+  const byName = (x: RelationLink, y: RelationLink) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b);
+  section('親子（子の列 → 親の列）', links.filter((l) => l.kind === 'parent').sort(byName), (l) => `${s(l.a)} → ${s(l.b)}`);
+  section('1 対 1（どちらも一意）', links.filter((l) => l.kind === 'one-to-one').sort(byName), (l) => `${s(l.a)} ＝ ${s(l.b)}`);
+  section('兄弟（どちらも一意でない）', links.filter((l) => l.kind === 'sibling').sort(byName), (l) => `${s(l.a)} ＝ ${s(l.b)}`);
+  const far = (r.origins ?? []).flatMap((o) => o.origins.filter((x) => x.path.length > 1).map((x) => ({ col: o.column, ...x })));
+  lines.push('', `## 兄弟をたどった源流（${far.length} 件）`, '');
+  for (const o of far) lines.push(`${s(o.col)} → ${s(o.column)}　（${o.path.slice(1).map(s).join(' → ')} 経由、${o.count} 件の SQL）`);
+  lines.push('', `## 解析できなかった statement（${r.errors?.length ?? 0} 件）`, '');
+  for (const e of r.errors ?? []) lines.push(`${e.id}: ${e.error.split('\n')[0]}`);
+  return lines.join('\n') + '\n';
 }

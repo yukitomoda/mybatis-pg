@@ -92,7 +92,10 @@ describe('resolveTemplates', () => {
   });
 
   it('数値の欄は結果が数値でなければ誤り', () => {
-    const v = { t: 'object' as const, fields: [['n', { t: 'number' as const, v: '1{{unixtime:2026-01-03+09:00}}x' }]] as [string, never][] };
+    const v = {
+      t: 'object' as const,
+      fields: [['n', { t: 'number' as const, v: '1{{unixtime:2026-01-03+09:00}}x' }]] as [string, never][],
+    };
     const r = resolveTemplates(v, new Map(), NOW);
     expect(r.issues[0].message).toContain('結果が数値になりません');
   });

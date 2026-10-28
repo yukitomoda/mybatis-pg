@@ -193,7 +193,7 @@
                                   "Parallel Aware": true,
                                   "Relation Name": "orders",
                                   "Alias": "o",
-                                  "Startup Cost": 0.00,
+                                  "Startup Cost": 0.0,
                                   "Total Cost": 3675.71,
                                   "Plan Rows": 176471,
                                   "Plan Width": 12,
@@ -246,11 +246,11 @@
                                       "Parallel Aware": true,
                                       "Relation Name": "users",
                                       "Alias": "u",
-                                      "Startup Cost": 0.00,
+                                      "Startup Cost": 0.0,
                                       "Total Cost": 4037.71,
                                       "Plan Rows": 9818,
                                       "Plan Width": 18,
-                                      "Actual Startup Time": 0.010,
+                                      "Actual Startup Time": 0.01,
                                       "Actual Total Time": 8.158,
                                       "Actual Rows": 6878,
                                       "Actual Loops": 2,
@@ -284,8 +284,7 @@
       ]
     },
     "Planning Time": 0.414,
-    "Triggers": [
-    ],
+    "Triggers": [],
     "Execution Time": 68.246
   }
 ]

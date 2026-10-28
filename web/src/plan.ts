@@ -110,7 +110,14 @@ function num(v: unknown): number | null {
 function jsonTitle(n: Json): string {
   let type = String(n['Node Type']);
   if (type === 'Aggregate') {
-    type = n['Strategy'] === 'Sorted' ? 'GroupAggregate' : n['Strategy'] === 'Hashed' ? 'HashAggregate' : n['Strategy'] === 'Mixed' ? 'MixedAggregate' : 'Aggregate';
+    type =
+      n['Strategy'] === 'Sorted'
+        ? 'GroupAggregate'
+        : n['Strategy'] === 'Hashed'
+          ? 'HashAggregate'
+          : n['Strategy'] === 'Mixed'
+            ? 'MixedAggregate'
+            : 'Aggregate';
   }
   if (type === 'ModifyTable' && n['Operation']) type = String(n['Operation']);
   if (n['Join Type'] && n['Join Type'] !== 'Inner' && type.endsWith('Join')) {
@@ -140,18 +147,30 @@ function jsonNode(n: Json): PlanNode {
   }
   if (Array.isArray(n['Workers'])) {
     (n['Workers'] as Json[]).forEach((w) => {
-      const parts = Object.entries(w).filter(([k]) => k !== 'Worker Number').map(([k, v]) => `${k}: ${v}`);
+      const parts = Object.entries(w)
+        .filter(([k]) => k !== 'Worker Number')
+        .map(([k, v]) => `${k}: ${v}`);
       details.push([`Worker ${w['Worker Number']}`, parts.join(', ')]);
     });
   }
   return {
     title: jsonTitle(n),
-    relation: typeof n['Relation Name'] === 'string' ? (n['Schema'] ? `${n['Schema']}.${n['Relation Name']}` : (n['Relation Name'] as string)) : null,
+    relation:
+      typeof n['Relation Name'] === 'string'
+        ? n['Schema']
+          ? `${n['Schema']}.${n['Relation Name']}`
+          : (n['Relation Name'] as string)
+        : null,
     startupCost: num(n['Startup Cost']),
     totalCost: num(n['Total Cost']),
     planRows: num(n['Plan Rows']),
     actual: hasActual
-      ? { startup: num(n['Actual Startup Time']) ?? 0, total: num(n['Actual Total Time']) ?? 0, rows: num(n['Actual Rows']) ?? 0, loops: loops! }
+      ? {
+          startup: num(n['Actual Startup Time']) ?? 0,
+          total: num(n['Actual Total Time']) ?? 0,
+          rows: num(n['Actual Rows']) ?? 0,
+          loops: loops!,
+        }
       : null,
     neverExecuted: loops === 0,
     buffers: hasBuffers

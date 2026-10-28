@@ -30,7 +30,11 @@ describe('applicable', () => {
   });
 
   it('並べ替えた順を使い、その順にないものは最後に足す', () => {
-    expect(names(applicable(sets, { added: ['テナント3'], removed: [], order: ['注文の検索', '基本'] }))).toEqual(['注文の検索', '基本', 'テナント3']);
+    expect(names(applicable(sets, { added: ['テナント3'], removed: [], order: ['注文の検索', '基本'] }))).toEqual([
+      '注文の検索',
+      '基本',
+      'テナント3',
+    ]);
     expect(moved(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a']);
     expect(moved(['a', 'b', 'c'], 2, 0)).toEqual(['c', 'a', 'b']);
   });

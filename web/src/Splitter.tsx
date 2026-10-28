@@ -76,10 +76,11 @@ export function usePaneWidths() {
 
   // 窓を狭めたときに、右のペインがはみ出さないよう詰める
   useEffect(() => {
-    const onResize = () => setWidths((w) => {
-      const m = measure();
-      return clampWidths(w, m.total, m);
-    });
+    const onResize = () =>
+      setWidths((w) => {
+        const m = measure();
+        return clampWidths(w, m.total, m);
+      });
     window.addEventListener('resize', onResize);
     // 前回より狭い窓で開いたときのため、最初にも詰める
     onResize();
@@ -97,15 +98,7 @@ export function usePaneWidths() {
 /**
  * 仕切り。ドラッグで左のペインの幅を変える。矢印キーでも動かせ、ダブルクリックで既定の幅に戻す。
  */
-export function Splitter({
-  pane,
-  label,
-  panes,
-}: {
-  pane: keyof PaneWidths;
-  label: string;
-  panes: ReturnType<typeof usePaneWidths>;
-}) {
+export function Splitter({ pane, label, panes }: { pane: keyof PaneWidths; label: string; panes: ReturnType<typeof usePaneWidths> }) {
   const drag = useRef<{ x: number; width: number } | null>(null);
   const current = () => panes.widths[pane] ?? panes.measure()[pane];
   const set = (width: number | null) => panes.apply({ ...panes.widths, [pane]: width });

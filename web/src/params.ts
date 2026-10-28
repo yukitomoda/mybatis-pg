@@ -139,11 +139,7 @@ export function mergeValues(base: PValue | undefined, override: PValue | undefin
 }
 
 /** レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値） */
-export function effectiveValue(
-  schema: ParamSchema | null,
-  base: PValue | undefined,
-  override: PValue | undefined,
-): PValue | undefined {
+export function effectiveValue(schema: ParamSchema | null, base: PValue | undefined, override: PValue | undefined): PValue | undefined {
   const merged = mergeValues(base, override);
   return schema ? withDefaults(schema, merged) : merged;
 }
@@ -299,13 +295,20 @@ export function invalidNumbers(value: PValue | undefined, path: Path = []): Issu
     case 'number':
       return isValidNumber(value.v) ? [] : [{ path: pathLabel(path), message: `数値として解釈できません: "${value.v}"` }];
     case 'timestamp':
-      return isValidTimestamp(value.v) ? [] : [{ path: pathLabel(path), message: `日時として解釈できません: "${value.v}"（例: 2026-01-03 23:35:00）` }];
+      return isValidTimestamp(value.v)
+        ? []
+        : [{ path: pathLabel(path), message: `日時として解釈できません: "${value.v}"（例: 2026-01-03 23:35:00）` }];
     case 'date':
       return isValidDate(value.v) ? [] : [{ path: pathLabel(path), message: `日付として解釈できません: "${value.v}"（例: 2026-01-03）` }];
     case 'pg':
       return isValidPgType(value.type)
         ? []
-        : [{ path: pathLabel(path), message: `PostgreSQL の型の名前を入力してください（例: jsonb、uuid、public.status、int4[]）: "${value.type}"` }];
+        : [
+            {
+              path: pathLabel(path),
+              message: `PostgreSQL の型の名前を入力してください（例: jsonb、uuid、public.status、int4[]）: "${value.type}"`,
+            },
+          ];
     case 'list':
       return value.items.flatMap((item, i) => invalidNumbers(item, [...path, i]));
     case 'object':
@@ -385,12 +388,7 @@ export function toJson(value: PValue | undefined, indent = '  ', depth = 0): str
       return '[' + value.items.map((item) => pad + toJson(item, indent, depth + 1)).join(',') + end + ']';
     case 'object':
       if (value.fields.length === 0) return '{}';
-      return (
-        '{' +
-        value.fields.map(([k, v]) => pad + JSON.stringify(k) + sep + toJson(v, indent, depth + 1)).join(',') +
-        end +
-        '}'
-      );
+      return '{' + value.fields.map(([k, v]) => pad + JSON.stringify(k) + sep + toJson(v, indent, depth + 1)).join(',') + end + '}';
   }
 }
 

@@ -171,16 +171,24 @@ export function ExplainPanel({
           ANALYZE（実行して測る）
         </label>
         <label className="check" title="読んだブロック数（キャッシュから / ディスクから）を出す">
-          <input type="checkbox" checked={options.buffers} disabled={!options.analyze} onChange={(e) => set({ buffers: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={options.buffers}
+            disabled={!options.analyze}
+            onChange={(e) => set({ buffers: e.target.checked })}
+          />
           BUFFERS
         </label>
         <label className="check" title="更新系の SQL はエラーにする">
           <input type="checkbox" checked={options.readOnly} onChange={(e) => set({ readOnly: e.target.checked })} />
           読み取り専用
         </label>
-        <label className="check" title="JDBC は同じ SQL を 6 回目以降、サーバ側で準備した文として実行し、値に依らない計画（汎用プラン）を使うことがある。そのときの計画を見る（5 回分は計画を作るだけで実行しない）">
-          <input type="checkbox" checked={options.sixthExecution} onChange={(e) => set({ sixthExecution: e.target.checked })} />
-          6 回目の計画（汎用プランの確認）
+        <label
+          className="check"
+          title="JDBC は同じ SQL を 6 回目以降、サーバ側で準備した文として実行し、値に依らない計画（汎用プラン）を使うことがある。そのときの計画を見る（5 回分は計画を作るだけで実行しない）"
+        >
+          <input type="checkbox" checked={options.sixthExecution} onChange={(e) => set({ sixthExecution: e.target.checked })} />6
+          回目の計画（汎用プランの確認）
         </label>
         <label className="check" title="ANALYZE を繰り返して、実行時間のばらつきを見る。表示する計画は中央値の回のもの">
           繰り返し
@@ -437,7 +445,9 @@ function PlanView({ shown, onKeep, idPrefix = 'main' }: { shown: Shown; onKeep?:
   /** 指摘のノードを開いて、見える位置まで動かす */
   const reveal = (path: string) => {
     setOpen((prev) => new Set(prev).add(path));
-    requestAnimationFrame(() => document.getElementById(`plan-node-${idPrefix}-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    requestAnimationFrame(() =>
+      document.getElementById(`plan-node-${idPrefix}-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+    );
   };
 
   return (
@@ -468,7 +478,8 @@ function PlanView({ shown, onKeep, idPrefix = 'main' }: { shown: Shown; onKeep?:
           {shown.generic ? (
             <>
               <strong>6 回目以降は汎用プラン（パラメータの値を使わない計画）が選ばれます。</strong>
-              アプリで同じ SQL を繰り返し実行すると、この計画で動きます。値によって最適な計画が違う場合（特定の値だけ行が多いなど）は、遅くなることがあります。
+              アプリで同じ SQL
+              を繰り返し実行すると、この計画で動きます。値によって最適な計画が違う場合（特定の値だけ行が多いなど）は、遅くなることがあります。
               値ごとの計画と比べるには、このオプションを外して EXPLAIN してください。
               {findings.some((f) => f.title.startsWith('実際の行数が見積もり')) && (
                 <p className="generic-misestimate">
@@ -506,7 +517,18 @@ function PlanView({ shown, onKeep, idPrefix = 'main' }: { shown: Shown; onKeep?:
           <tbody>
             {rows.map(({ node, depth, path }) => (
               <Fragment key={path}>
-                <PlanRow path={path} idPrefix={idPrefix} mark={marks.get(path)} node={node} timing={times.get(node)!} depth={depth} total={total} analyzed={plan.analyzed} open={open.has(path)} onToggle={() => toggle(path)} />
+                <PlanRow
+                  path={path}
+                  idPrefix={idPrefix}
+                  mark={marks.get(path)}
+                  node={node}
+                  timing={times.get(node)!}
+                  depth={depth}
+                  total={total}
+                  analyzed={plan.analyzed}
+                  open={open.has(path)}
+                  onToggle={() => toggle(path)}
+                />
                 {open.has(path) && (
                   <tr className="plan-details">
                     <td colSpan={columns}>
@@ -569,7 +591,10 @@ function PlanRow({
             </span>
           </td>
           <td className="num">{node.actual ? `${fmtMs(timing.inclusive)} ms` : '-'}</td>
-          <td className={off ? 'num misestimate' : 'num'} title={ratio === null ? undefined : `実績は見積もりの ${ratio >= 1 ? ratio.toFixed(1) + ' 倍' : '1/' + (1 / ratio).toFixed(1)}`}>
+          <td
+            className={off ? 'num misestimate' : 'num'}
+            title={ratio === null ? undefined : `実績は見積もりの ${ratio >= 1 ? ratio.toFixed(1) + ' 倍' : '1/' + (1 / ratio).toFixed(1)}`}
+          >
             {node.actual ? fmtInt(node.actual.rows) : '-'} / {node.planRows !== null ? fmtInt(node.planRows) : '-'}
             {off && <span className="warn-mark"> ⚠</span>}
           </td>
@@ -577,8 +602,13 @@ function PlanRow({
           <td className="num">
             {node.buffers ? (
               <>
-                {fmtInt(node.buffers.hit)} / <span className={node.buffers.read > 0 ? 'disk-read' : undefined}>{fmtInt(node.buffers.read)}</span>
-                {(node.buffers.tempRead > 0 || node.buffers.tempWritten > 0) && <span className="badge temp" title={`一時ファイル 読み ${node.buffers.tempRead} / 書き ${node.buffers.tempWritten}`}>一時</span>}
+                {fmtInt(node.buffers.hit)} /{' '}
+                <span className={node.buffers.read > 0 ? 'disk-read' : undefined}>{fmtInt(node.buffers.read)}</span>
+                {(node.buffers.tempRead > 0 || node.buffers.tempWritten > 0) && (
+                  <span className="badge temp" title={`一時ファイル 読み ${node.buffers.tempRead} / 書き ${node.buffers.tempWritten}`}>
+                    一時
+                  </span>
+                )}
               </>
             ) : (
               '-'
@@ -656,7 +686,9 @@ function Tables({ conn, plan, auto }: { conn: Connections; plan: Plan; auto: boo
           </button>
         )}
       </summary>
-      {!auto && !info && <p className="hint">貼り付けた計画の表の情報を、選んでいる接続先から読みます（本番とはデータ量が違うことに注意）。</p>}
+      {!auto && !info && (
+        <p className="hint">貼り付けた計画の表の情報を、選んでいる接続先から読みます（本番とはデータ量が違うことに注意）。</p>
+      )}
       {error && <pre className="render-error">{error}</pre>}
       {info?.notFound.length ? <p className="hint">見つからない表: {info.notFound.join(', ')}</p> : null}
       {info?.tables.map((t) => (
@@ -690,11 +722,13 @@ function TableCard({ t }: { t: TableInfo }) {
         <dt>統計の更新</dt>
         <dd className={stale ? 'warn-text' : undefined}>
           {fmtWhen(t.lastAnalyze)}
-          {stale && ` ⚠ ${t.lastAnalyze ? `${STALE_DAYS} 日以上前です` : '一度も更新されていません'}。見積もりがずれる原因になります（ANALYZE ${t.name}）`}
+          {stale &&
+            ` ⚠ ${t.lastAnalyze ? `${STALE_DAYS} 日以上前です` : '一度も更新されていません'}。見積もりがずれる原因になります（ANALYZE ${t.name}）`}
         </dd>
         <dt>読まれた回数</dt>
         <dd>
-          全件読み込み {t.seqScans === null ? '-' : fmtInt(t.seqScans)} 回 / インデックス {t.indexScans === null ? '-' : fmtInt(t.indexScans)} 回
+          全件読み込み {t.seqScans === null ? '-' : fmtInt(t.seqScans)} 回 / インデックス{' '}
+          {t.indexScans === null ? '-' : fmtInt(t.indexScans)} 回
         </dd>
       </dl>
       <table className="index-table">
@@ -726,7 +760,10 @@ function TableCard({ t }: { t: TableInfo }) {
                 <code>{i.definition.replace(/^CREATE (UNIQUE )?INDEX \S+ ON \S+ (USING btree )?/, '')}</code>
               </td>
               <td className="num">{fmtBytes(i.bytes)}</td>
-              <td className={i.scans === 0 ? 'num warn-text' : 'num'} title={i.scans === 0 ? '使われていません（統計を取り始めてから一度も）' : undefined}>
+              <td
+                className={i.scans === 0 ? 'num warn-text' : 'num'}
+                title={i.scans === 0 ? '使われていません（統計を取り始めてから一度も）' : undefined}
+              >
                 {i.scans === null ? '-' : fmtInt(i.scans)}
               </td>
             </tr>
@@ -740,7 +777,8 @@ function TableCard({ t }: { t: TableInfo }) {
 /** 繰り返したときの実行時間（最小・中央値・最大と各回） */
 function Runs({ runs }: { runs: number[] }) {
   const sorted = [...runs].sort((a, b) => a - b);
-  const median = sorted.length % 2 === 1 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const median =
+    sorted.length % 2 === 1 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
   return (
     <span className="runs" title={`各回: ${runs.map((r) => fmtMs(r)).join(', ')} ms（1 回目はキャッシュに乗っていないことがある）`}>
       {runs.length} 回: 最小 {fmtMs(sorted[0])} / 中央値 <strong>{fmtMs(median)}</strong> / 最大 {fmtMs(sorted[sorted.length - 1])} ms
@@ -785,7 +823,10 @@ function Details({ node, depth }: { node: PlanNode; depth: number }) {
   if (node.actual) items.push(['実績の時間（1 ループあたり）', `${node.actual.startup}..${node.actual.total} ms`]);
   if (node.buffers) {
     const b = node.buffers;
-    items.push(['バッファ', `キャッシュ ${b.hit}、ディスク ${b.read}、更新 ${b.dirtied}、書き出し ${b.written}、一時ファイル 読み ${b.tempRead} / 書き ${b.tempWritten}`]);
+    items.push([
+      'バッファ',
+      `キャッシュ ${b.hit}、ディスク ${b.read}、更新 ${b.dirtied}、書き出し ${b.written}、一時ファイル 読み ${b.tempRead} / 書き ${b.tempWritten}`,
+    ]);
   }
   return (
     <dl className="plan-detail-list" style={{ marginLeft: `${1.4 + depth * 1.1}rem` }}>

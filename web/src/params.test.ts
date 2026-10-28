@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamSchema, PValue } from './params';
-import { convertType, defaultType, fromJson, getAt, invalidNumbers, missingParams, inheritedAt, mergeValues, overrideAt, setAt, toJson, withDefaults } from './params';
+import {
+  convertType,
+  defaultType,
+  fromJson,
+  getAt,
+  invalidNumbers,
+  missingParams,
+  inheritedAt,
+  mergeValues,
+  overrideAt,
+  setAt,
+  toJson,
+  withDefaults,
+} from './params';
 import { tidySql } from './sql';
 
 const node = (name: string, extra: Partial<ParamSchema> = {}): ParamSchema => ({
@@ -55,7 +68,21 @@ describe('木の操作', () => {
 
 describe('検査', () => {
   it('数値として不正な入力を位置付きで返す', () => {
-    const v: PValue = { t: 'object', fields: [['ids', { t: 'list', items: [{ t: 'number', v: '1' }, { t: 'number', v: '1,000' }] }]] };
+    const v: PValue = {
+      t: 'object',
+      fields: [
+        [
+          'ids',
+          {
+            t: 'list',
+            items: [
+              { t: 'number', v: '1' },
+              { t: 'number', v: '1,000' },
+            ],
+          },
+        ],
+      ],
+    };
     expect(invalidNumbers(v)).toEqual([{ path: 'ids[1]', message: '数値として解釈できません: "1,000"' }]);
   });
 
@@ -174,7 +201,9 @@ describe('日時・日付', () => {
   });
 
   it('形の誤りを知らせ、文字の型どうしでは入力を引き継ぐ', () => {
-    const v = fromJson('{"a":{"$type":"timestamp","value":"2026/01/03"},"b":{"$type":"date","value":"2026-01-03 10:00"},"c":{"$type":"timestamp","value":"2026-01-03T10:00:00.123"}}');
+    const v = fromJson(
+      '{"a":{"$type":"timestamp","value":"2026/01/03"},"b":{"$type":"date","value":"2026-01-03 10:00"},"c":{"$type":"timestamp","value":"2026-01-03T10:00:00.123"}}',
+    );
     expect(invalidNumbers(v).map((i) => i.path)).toEqual(['a', 'b']);
     expect(convertType({ t: 'string', v: '2026-01-03' }, 'date')).toEqual({ t: 'date', v: '2026-01-03' });
     expect(defaultType(node('x', { typeHints: ['TIMESTAMP'] }))).toBe('timestamp');

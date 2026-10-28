@@ -68,7 +68,9 @@ export function BulkCheck({
   const [sort, setSort] = useState<SortKey>('cost');
   const cancelled = useRef(false);
 
-  const [schemas, setSchemas] = useState<{ version: string; trees: Record<string, ParamSchema>; errors: Record<string, string> } | null>(null);
+  const [schemas, setSchemas] = useState<{ version: string; trees: Record<string, ParamSchema>; errors: Record<string, string> } | null>(
+    null,
+  );
   const [schemaError, setSchemaError] = useState<string | null>(null);
   // 個別の値はクエリ画面で変わるので、表示するたびに読み直す
   const [shown, setShown] = useState(0);
@@ -217,11 +219,21 @@ export function BulkCheck({
         <span className="hint">保存してある個別の値・共通パラメータで、statement をまとめて EXPLAIN します</span>
       </header>
       <div className="bulk-body">
-        <BulkPicker statements={statements} status={status} selected={selection} onChange={select} onOpen={onOpenParams} disabled={running} />
+        <BulkPicker
+          statements={statements}
+          status={status}
+          selected={selection}
+          onChange={select}
+          onOpen={onOpenParams}
+          disabled={running}
+        />
         <div className="bulk-main">
           <div className="execute-bar">
             <ConnectionPicker conn={conn} />
-            <label className="check" title="SELECT だけを実際に実行して測る（読み取り専用のトランザクションで、ロールバックする）。更新系は計画だけ">
+            <label
+              className="check"
+              title="SELECT だけを実際に実行して測る（読み取り専用のトランザクションで、ロールバックする）。更新系は計画だけ"
+            >
               <input type="checkbox" checked={analyze} onChange={(e) => setAnalyze(e.target.checked)} disabled={running} />
               ANALYZE（SELECT だけ実行して測る）
             </label>
@@ -239,7 +251,10 @@ export function BulkCheck({
           {schemaError && <p className="error-text">{schemaError}</p>}
           {confirming && (
             <div className="notes warn bulk-confirm" role="alertdialog" aria-label="値が足りない statement の確認">
-              <p>選んだうち {notReady.length} 件は値が足りません。未設定の項目は NULL として扱われるため、エラーになったり実際とは違う計画になったりします。</p>
+              <p>
+                選んだうち {notReady.length} 件は値が足りません。未設定の項目は NULL
+                として扱われるため、エラーになったり実際とは違う計画になったりします。
+              </p>
               <ul>
                 {notReady.slice(0, 10).map((s) => (
                   <li key={s.id}>

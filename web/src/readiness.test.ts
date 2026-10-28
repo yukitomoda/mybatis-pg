@@ -19,9 +19,13 @@ describe('readiness', () => {
   it('共通パラメータで値がそろえば実行できる', () => {
     expect(isReady(readiness('x.never.saved', schema, [set('{"tenantId":1,"since":"2026-01-01"}')], {}))).toBe(true);
     // その statement で外していれば、そろわない
-    expect(isReady(readiness('x.never.saved', schema, [set('{"tenantId":1,"since":"2026-01-01"}')], { 'x.never.saved': { added: [], removed: ['g'] } }))).toBe(
-      false,
-    );
+    expect(
+      isReady(
+        readiness('x.never.saved', schema, [set('{"tenantId":1,"since":"2026-01-01"}')], {
+          'x.never.saved': { added: [], removed: ['g'] },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it('foreach で回すリストが空なら実行できない', () => {

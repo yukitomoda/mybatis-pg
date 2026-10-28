@@ -71,7 +71,12 @@ export function diagnose(plan: Plan): Finding[] {
     const loops = node.actual?.loops ?? 1;
 
     if (plan.analyzed && node.actual && share >= HOT_SHARE) {
-      add('info', '時間の多くをこのノードが占めています', `自身の時間 ${t.self.toFixed(1)} ms（全体の ${Math.round(share * 100)}%）`, 'まずこのノードを速くできないかを考えます。下の指摘があれば、それが手がかりになります。');
+      add(
+        'info',
+        '時間の多くをこのノードが占めています',
+        `自身の時間 ${t.self.toFixed(1)} ms（全体の ${Math.round(share * 100)}%）`,
+        'まずこのノードを速くできないかを考えます。下の指摘があれば、それが手がかりになります。',
+      );
     }
 
     // 見積もりのずれ
@@ -129,7 +134,7 @@ export function diagnose(plan: Plan): Finding[] {
         'medium',
         '並べ替えがメモリに収まらず、ディスクを使っています',
         `Sort Method: ${sortMethod}${space ? `（${space} kB）` : ''}`,
-        'work_mem を増やすと、メモリの中で並べ替えられるかもしれません（SET work_mem = \'64MB\' などで試せます）。ORDER BY の列のインデックスで、並べ替え自体を省けることもあります。',
+        "work_mem を増やすと、メモリの中で並べ替えられるかもしれません（SET work_mem = '64MB' などで試せます）。ORDER BY の列のインデックスで、並べ替え自体を省けることもあります。",
       );
     }
 
@@ -151,7 +156,9 @@ export function diagnose(plan: Plan): Finding[] {
       add(
         'medium',
         'ビットマップがメモリに収まらず、ブロック単位で読み直しています',
-        [heapBlocks && `Heap Blocks: ${heapBlocks}`, recheck !== null && `Rows Removed by Index Recheck: ${fmt(recheck * loops)}`].filter(Boolean).join('、'),
+        [heapBlocks && `Heap Blocks: ${heapBlocks}`, recheck !== null && `Rows Removed by Index Recheck: ${fmt(recheck * loops)}`]
+          .filter(Boolean)
+          .join('、'),
         'work_mem を増やすと、行単位で読めるようになるかもしれません。',
       );
     }

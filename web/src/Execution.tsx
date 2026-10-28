@@ -77,7 +77,12 @@ export function ConnectionPicker({ conn }: { conn: Connections }) {
   const needsUnlock = !!current && current.passwordSaved && !current.hasPassword && conn.vault?.exists && !conn.vault.unlocked;
   return (
     <>
-      <select aria-label="接続先" value={current?.id ?? ''} onChange={(e) => conn.select(e.target.value)} disabled={connections.length === 0}>
+      <select
+        aria-label="接続先"
+        value={current?.id ?? ''}
+        onChange={(e) => conn.select(e.target.value)}
+        disabled={connections.length === 0}
+      >
         {connections.length === 0 && <option value="">接続先がありません</option>}
         {connections.map((c) => (
           <option key={c.id} value={c.id}>
@@ -186,7 +191,8 @@ function VaultPanel({ conn }: { conn: Connections }) {
           }}
         >
           <p className="hint">
-            マスターパスワードを設定すると、接続先のパスワードを暗号化して保存できます。起動するたびに、マスターパスワードを 1 回入れて開きます。
+            マスターパスワードを設定すると、接続先のパスワードを暗号化して保存できます。起動するたびに、マスターパスワードを 1
+            回入れて開きます。
           </p>
           {newPassword}
           <button type="submit" disabled={password.length < vault.minLength || password !== confirm}>
@@ -200,7 +206,9 @@ function VaultPanel({ conn }: { conn: Connections }) {
             type="button"
             className="link"
             onClick={() => {
-              if (window.confirm('マスターパスワードと、保存しているパスワードをすべて消します。よろしいですか？（接続先の設定は残ります）'))
+              if (
+                window.confirm('マスターパスワードと、保存しているパスワードをすべて消します。よろしいですか？（接続先の設定は残ります）')
+              )
                 run(() => api.vaultReset(), '保存していたパスワードを消しました');
             }}
           >
@@ -559,7 +567,11 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
                   value={password}
                   autoComplete="new-password"
                   placeholder={
-                    saved?.hasPassword ? '入力済み（変える場合だけ入力）' : saved?.passwordSaved ? '保存済み（マスターパスワードで開くと使えます）' : '未入力'
+                    saved?.hasPassword
+                      ? '入力済み（変える場合だけ入力）'
+                      : saved?.passwordSaved
+                        ? '保存済み（マスターパスワードで開くと使えます）'
+                        : '未入力'
                   }
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -578,7 +590,12 @@ export function ConnectionsScreen({ conn }: { conn: Connections }) {
             )}
             <label>
               接続パラメータ
-              <input type="text" value={form.params} placeholder="例: sslmode=require&stringtype=unspecified" onChange={(e) => set('params', e.target.value)} />
+              <input
+                type="text"
+                value={form.params}
+                placeholder="例: sslmode=require&stringtype=unspecified"
+                onChange={(e) => set('params', e.target.value)}
+              />
             </label>
           </fieldset>
           {!fromProject && (

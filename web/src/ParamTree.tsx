@@ -6,7 +6,21 @@ import type { GenContext } from './GenInput';
 import { GenPicker, GenPreview } from './GenInput';
 import type { ParamSchema, Path, PType, PValue } from './params';
 import type { TextType } from './params';
-import { TYPE_LABELS, convertType, isValidDate, isValidPgType, isValidTimestamp, defaultType, effectiveValue, emptyValue, getAt, inheritedAt, isValidNumber, overrideAt, pathLabel } from './params';
+import {
+  TYPE_LABELS,
+  convertType,
+  isValidDate,
+  isValidPgType,
+  isValidTimestamp,
+  defaultType,
+  effectiveValue,
+  emptyValue,
+  getAt,
+  inheritedAt,
+  isValidNumber,
+  overrideAt,
+  pathLabel,
+} from './params';
 
 interface Props {
   schema: ParamSchema;
@@ -122,7 +136,10 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const canSuggest = !!ctx.suggest?.has(path);
   // XML で参照されているのに値がない（多くは入力のし忘れ）
   const missing =
-    !ctx.free && shown === undefined && schema !== null && (schema.usages.length > 0 || schema.properties.length > 0 || schema.element !== null);
+    !ctx.free &&
+    shown === undefined &&
+    schema !== null &&
+    (schema.usages.length > 0 || schema.properties.length > 0 || schema.element !== null);
 
   return (
     <>
@@ -156,11 +173,22 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
         </span>
         <span className="usages">
           {origin && (
-            <span className={fromGlobal ? 'badge global' : 'badge muted'} title={fromGlobal ? `共通パラメータ「${origin}」の値` : '既定の値'}>
+            <span
+              className={fromGlobal ? 'badge global' : 'badge muted'}
+              title={fromGlobal ? `共通パラメータ「${origin}」の値` : '既定の値'}
+            >
               {origin}
             </span>
           )}
-          {unreferenced ? <span className="badge muted">未参照</span> : schema?.usages.map((u) => <span key={u} className="badge">{USAGE_LABELS[u]}</span>)}
+          {unreferenced ? (
+            <span className="badge muted">未参照</span>
+          ) : (
+            schema?.usages.map((u) => (
+              <span key={u} className="badge">
+                {USAGE_LABELS[u]}
+              </span>
+            ))
+          )}
         </span>
         <select
           aria-label={`${name} の型`}
@@ -296,9 +324,11 @@ function Editor({
           />
           <TextEditor name={name} text={pg.v} kind="string" unset={false} onChange={(v) => set({ ...pg, v })} genKey={genKey} gen={gen} />
           <datalist id="pg-types">
-            {['jsonb', 'json', 'uuid', 'inet', 'interval', 'timestamptz', 'time', 'bytea', 'text[]', 'int4[]', 'int8[]', 'uuid[]'].map((t) => (
-              <option key={t} value={t} />
-            ))}
+            {['jsonb', 'json', 'uuid', 'inet', 'interval', 'timestamptz', 'time', 'bytea', 'text[]', 'int4[]', 'int8[]', 'uuid[]'].map(
+              (t) => (
+                <option key={t} value={t} />
+              ),
+            )}
           </datalist>
         </div>
       );
@@ -411,7 +441,8 @@ function AddField({ depth, existing, onAdd }: { depth: number; existing: Set<str
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const trimmed = name.trim();
-  const error = trimmed === '' ? null : existing.has(trimmed) ? 'すでにあります' : /^[A-Za-z_$][\w$]*$/.test(trimmed) ? null : '名前が不正です';
+  const error =
+    trimmed === '' ? null : existing.has(trimmed) ? 'すでにあります' : /^[A-Za-z_$][\w$]*$/.test(trimmed) ? null : '名前が不正です';
   const submit = () => {
     if (trimmed === '' || error) return;
     onAdd(trimmed);
@@ -427,7 +458,14 @@ function AddField({ depth, existing, onAdd }: { depth: number; existing: Set<str
             submit();
           }}
         >
-          <input autoFocus type="text" aria-label="追加する項目名" placeholder="項目名" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            autoFocus
+            type="text"
+            aria-label="追加する項目名"
+            placeholder="項目名"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <button type="submit" disabled={trimmed === '' || error !== null}>
             追加
           </button>

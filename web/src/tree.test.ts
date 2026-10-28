@@ -46,11 +46,14 @@ describe('buildTree', () => {
   });
 
   it('絶対パスや、直下のファイルも扱える', () => {
-    expect(show(buildTree([{ id: 'p.a', file: '/opt/m/A.xml' }, { id: 'p.b', file: '/opt/n/B.xml' }]))).toEqual([
-      '/opt/',
-      '  m/A.xml: p.a',
-      '  n/B.xml: p.b',
-    ]);
+    expect(
+      show(
+        buildTree([
+          { id: 'p.a', file: '/opt/m/A.xml' },
+          { id: 'p.b', file: '/opt/n/B.xml' },
+        ]),
+      ),
+    ).toEqual(['/opt/', '  m/A.xml: p.a', '  n/B.xml: p.b']);
     expect(show(buildTree([{ id: 'p.a', file: 'A.xml' }]))).toEqual(['A.xml: p.a']);
   });
 });

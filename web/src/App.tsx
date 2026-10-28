@@ -1,50 +1,30 @@
-import { RelationsScreen } from "./Relations";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  Api,
-  LoadError,
-  OpenTarget,
-  PlaygroundEntry,
-  RenderResponse,
-  SourceColumn,
-  TemplateResponse,
-} from "./api";
-import { ApiError, createApi, takeToken } from "./api";
-import { BulkCheck } from "./Bulk";
-import { ExecutePanel, useConnections } from "./Execution";
-import { ExplainPanel } from "./Explain";
-import { SuggestPanel } from "./Suggest";
-import { countParts, PartsPanel } from "./Subquery";
-import type { GenCache } from "./gen";
-import { forget, resolveTemplates } from "./gen";
-import type { GenContext } from "./GenInput";
-import type { Drafts } from "./drafts";
-import { draftParam, useDrafts } from "./drafts";
-import { FileEditor } from "./FileEditor";
-import {
-  CopyToGlobal,
-  GlobalsScreen,
-  StatementGlobals,
-  useGlobals,
-} from "./Globals";
-import { ConnectionsScreen } from "./Execution";
-import { applicable, combine, originAt } from "./globalModel";
-import { ParamTree } from "./ParamTree";
-import { Splitter, usePaneWidths } from "./Splitter";
-import type { ParamSchema, Path, PValue } from "./params";
-import {
-  effectiveValue,
-  fromJson,
-  invalidNumbers,
-  missingParams,
-  pathLabel,
-  toJson,
-} from "./params";
-import { loadParams, saveParams } from "./paramStore";
-import { tidySql } from "./sql";
-import { tokenize } from "./template";
-import type { StatementEntry, TreeNode } from "./tree";
-import { buildTree, filterEntries, pathTo, shortId } from "./tree";
+import { RelationsScreen } from './Relations';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, SourceColumn, TemplateResponse } from './api';
+import { ApiError, createApi, takeToken } from './api';
+import { BulkCheck } from './Bulk';
+import { ExecutePanel, useConnections } from './Execution';
+import { ExplainPanel } from './Explain';
+import { SuggestPanel } from './Suggest';
+import { countParts, PartsPanel } from './Subquery';
+import type { GenCache } from './gen';
+import { forget, resolveTemplates } from './gen';
+import type { GenContext } from './GenInput';
+import type { Drafts } from './drafts';
+import { draftParam, useDrafts } from './drafts';
+import { FileEditor } from './FileEditor';
+import { CopyToGlobal, GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
+import { ConnectionsScreen } from './Execution';
+import { applicable, combine, originAt } from './globalModel';
+import { ParamTree } from './ParamTree';
+import { Splitter, usePaneWidths } from './Splitter';
+import type { ParamSchema, Path, PValue } from './params';
+import { effectiveValue, fromJson, invalidNumbers, missingParams, pathLabel, toJson } from './params';
+import { loadParams, saveParams } from './paramStore';
+import { tidySql } from './sql';
+import { tokenize } from './template';
+import type { StatementEntry, TreeNode } from './tree';
+import { buildTree, filterEntries, pathTo, shortId } from './tree';
 
 export function App() {
   const [token] = useState(() => takeToken());
@@ -54,8 +34,7 @@ export function App() {
       <div className="fatal">
         <h1>トークンがありません</h1>
         <p>
-          サーバの起動時に表示された URL（<code>?token=...</code>{" "}
-          付き）から開いてください。
+          サーバの起動時に表示された URL（<code>?token=...</code> 付き）から開いてください。
         </p>
       </div>
     );
@@ -65,20 +44,15 @@ export function App() {
 
 // ---- 保存 ----
 
-type Tab = "sql" | "execute" | "explain" | "subquery" | "template";
-const TAB_KEY = "mybatis-pg.tab";
+type Tab = 'sql' | 'execute' | 'explain' | 'subquery' | 'template';
+const TAB_KEY = 'mybatis-pg.tab';
 
 function loadTab(): Tab {
   try {
     const saved = localStorage.getItem(TAB_KEY);
-    return saved === "execute" ||
-      saved === "explain" ||
-      saved === "subquery" ||
-      saved === "template"
-      ? saved
-      : "sql";
+    return saved === 'execute' || saved === 'explain' || saved === 'subquery' || saved === 'template' ? saved : 'sql';
   } catch {
-    return "sql";
+    return 'sql';
   }
 }
 
@@ -92,14 +66,14 @@ function saveTab(tab: Tab) {
 
 // ---- 画面の切り替えと URL ----
 
-type Screen = "query" | "globals" | "bulk" | "relations" | "connections";
+type Screen = 'query' | 'globals' | 'bulk' | 'relations' | 'connections';
 
 const SCREENS: [Screen, string][] = [
-  ["query", "クエリ"],
-  ["globals", "共通パラメータ"],
-  ["bulk", "一括チェック"],
-  ["relations", "リレーション"],
-  ["connections", "接続先"],
+  ['query', 'クエリ'],
+  ['globals', '共通パラメータ'],
+  ['bulk', '一括チェック'],
+  ['relations', 'リレーション'],
+  ['connections', '接続先'],
 ];
 
 /**
@@ -113,22 +87,19 @@ function parseHash(): {
   column: string | null;
 } {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  if (!hash) return { screen: "query", statement: null, column: null };
-  if (!hash.startsWith("/"))
-    return { screen: "query", statement: hash, column: null };
-  const [, screen, ...rest] = hash.split("/");
+  if (!hash) return { screen: 'query', statement: null, column: null };
+  if (!hash.startsWith('/')) return { screen: 'query', statement: hash, column: null };
+  const [, screen, ...rest] = hash.split('/');
   const known = SCREENS.some(([s]) => s === screen);
   return {
-    screen: known ? (screen as Screen) : "query",
-    statement: screen === "query" && rest.length ? rest.join("/") : null,
-    column: screen === "relations" && rest.length ? rest.join("/") : null,
+    screen: known ? (screen as Screen) : 'query',
+    statement: screen === 'query' && rest.length ? rest.join('/') : null,
+    column: screen === 'relations' && rest.length ? rest.join('/') : null,
   };
 }
 
 function hashOf(screen: Screen, statement: string | null): string {
-  return screen === "query"
-    ? `#/query/${statement ? encodeURIComponent(statement) : ""}`
-    : `#/${screen}`;
+  return screen === 'query' ? `#/query/${statement ? encodeURIComponent(statement) : ''}` : `#/${screen}`;
 }
 
 function initialStatement(): string | null {
@@ -143,22 +114,15 @@ type Opener = { label: string; open: (target: OpenTarget) => void } | null;
 function useOpener(api: Api, onApiError: (e: unknown) => void): Opener {
   const [command, setCommand] = useState<string | null>(null);
   useEffect(() => {
-    api
-      .editor()
-      .then((r) => setCommand(r.available ? r.command : null), onApiError);
+    api.editor().then((r) => setCommand(r.available ? r.command : null), onApiError);
   }, [api]);
   if (!command) return null;
   return {
-    label: /(^|\/)code(-server)?(\s|$)/.test(command)
-      ? "VS Code で開く"
-      : "エディタで開く",
+    label: /(^|\/)code(-server)?(\s|$)/.test(command) ? 'VS Code で開く' : 'エディタで開く',
     open: (target) =>
       api.open(target).catch((e) => {
         onApiError(e);
-        window.alert(
-          "ファイルを開けません\n" +
-            (e instanceof Error ? e.message : String(e)),
-        );
+        window.alert('ファイルを開けません\n' + (e instanceof Error ? e.message : String(e)));
       }),
   };
 }
@@ -179,19 +143,17 @@ function Workspace({ api }: { api: Api }) {
   const [schema, setSchema] = useState<ParamSchema | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [value, setValue] = useState<PValue | undefined>(() =>
-    selected ? loadParams(selected) : undefined,
-  );
+  const [value, setValue] = useState<PValue | undefined>(() => (selected ? loadParams(selected) : undefined));
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
   /** テンプレートのタブを開いたことがあるか（エディタは開くまで読み込まない） */
   const [templateSeen, setTemplateSeen] = useState(false);
-  if (tab === "template" && !templateSeen) setTemplateSeen(true);
+  if (tab === 'template' && !templateSeen) setTemplateSeen(true);
   /** statement の一覧（左のペイン）を開いているか（ブラウザに覚えておく） */
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try {
-      return localStorage.getItem(SIDEBAR_KEY) !== "closed";
+      return localStorage.getItem(SIDEBAR_KEY) !== 'closed';
     } catch {
       return true;
     }
@@ -199,29 +161,23 @@ function Workspace({ api }: { api: Api }) {
   const toggleSidebar = (open: boolean) => {
     setSidebarOpen(open);
     try {
-      localStorage.setItem(SIDEBAR_KEY, open ? "open" : "closed");
+      localStorage.setItem(SIDEBAR_KEY, open ? 'open' : 'closed');
     } catch {
       // 覚えられない環境では、開いている間だけ
     }
   };
   /** パラメータ欄のタブ: 個別の値か、共通パラメータか */
-  const [paramTab, setParamTab] = useState<"local" | "global">("local");
+  const [paramTab, setParamTab] = useState<'local' | 'global'>('local');
   /** 個別の値を共通パラメータにコピーする欄を開いている */
   const [copying, setCopying] = useState(false);
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
   /** リレーションの画面で見る列（クエリの画面のパラメータから飛んだとき） */
-  const [relationFocus, setRelationFocus] = useState<string | null>(
-    () => parseHash().column,
-  );
+  const [relationFocus, setRelationFocus] = useState<string | null>(() => parseHash().column);
   const openRelation = (column: string) => {
     setRelationFocus(column);
-    setScreen("relations");
-    window.history.pushState(
-      null,
-      "",
-      `#/relations/${encodeURIComponent(column)}`,
-    );
+    setScreen('relations');
+    window.history.pushState(null, '', `#/relations/${encodeURIComponent(column)}`);
   };
   /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
   const [globalFocus, setGlobalFocus] = useState<string | null>(null);
@@ -229,15 +185,13 @@ function Workspace({ api }: { api: Api }) {
 
   const handleError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) {
-      setFatal(
-        "トークンが一致しません。サーバを起動し直した場合は、新しく表示された URL から開き直してください。",
-      );
+      setFatal('トークンが一致しません。サーバを起動し直した場合は、新しく表示された URL から開き直してください。');
     }
   };
   const drafts = useDrafts(api, generation, handleError);
 
   const opener = useOpener(api, handleError);
-  const conn = useConnections(api, handleError, () => go("connections"));
+  const conn = useConnections(api, handleError, () => go('connections'));
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -283,20 +237,13 @@ function Workspace({ api }: { api: Api }) {
    * 選んでいる statement が最後にあったファイル。XML の誤りで statement が一時的に一覧から消えても、
    * そのファイルをエディタで開いたままにして、誤りを直せるようにする
    */
-  const [lastFile, setLastFile] = useState<{ id: string; file: string } | null>(
-    loadLastFile,
-  );
+  const [lastFile, setLastFile] = useState<{ id: string; file: string } | null>(loadLastFile);
   if (target && (lastFile?.id !== target.id || lastFile.file !== target.file)) {
     setLastFile({ id: target.id, file: target.file });
     saveLastFile({ id: target.id, file: target.file });
   }
-  const editorFile =
-    target?.file ??
-    (lastFile && lastFile.id === selected ? lastFile.file : null);
-  const brokenFile =
-    !target &&
-    editorFile !== null &&
-    playgrounds.some((p) => p.file === editorFile && p.errors.length > 0);
+  const editorFile = target?.file ?? (lastFile && lastFile.id === selected ? lastFile.file : null);
+  const brokenFile = !target && editorFile !== null && playgrounds.some((p) => p.file === editorFile && p.errors.length > 0);
   // 編集中の mapper XML があれば、組み立て・実行・EXPLAIN にその内容を使う
   const draftP = draftParam(drafts.get(target?.file));
   // プレイグラウンドは自動で保存するので、保存するたびに組み立て直す
@@ -304,10 +251,9 @@ function Workspace({ api }: { api: Api }) {
 
   /** statement が見つからないときの説明（XML を読み込めないためか、消えたためか。表示するときに決める） */
   const notFoundMessage = brokenFile
-    ? "XML を読み込めないため、この statement を使えません。テンプレートのタブで XML を直してください"
-    : "この statement は見つかりません（削除または改名された可能性があります）";
-  const describe = (message: string | null) =>
-    message === NOT_FOUND ? notFoundMessage : message;
+    ? 'XML を読み込めないため、この statement を使えません。テンプレートのタブで XML を直してください'
+    : 'この statement は見つかりません（削除または改名された可能性があります）';
+  const describe = (message: string | null) => (message === NOT_FOUND ? notFoundMessage : message);
 
   // パラメータの木（XML が変わったら取り直す）
   useEffect(() => {
@@ -328,10 +274,7 @@ function Workspace({ api }: { api: Api }) {
         if (!active) return;
         handleError(e);
         setSchema(null);
-        const message =
-          e instanceof ApiError && e.status === 404
-            ? NOT_FOUND
-            : String(e.message ?? e);
+        const message = e instanceof ApiError && e.status === 404 ? NOT_FOUND : String(e.message ?? e);
         setSchemaError(message);
         // 前の SQL が今の XML のものに見えないよう、消してエラーを出す
         setResult(null);
@@ -345,16 +288,12 @@ function Workspace({ api }: { api: Api }) {
   const globals = useGlobals(api, handleError);
   // 選んでいる statement に効く共通パラメータ（優先順位の低い順）と、それを重ねた値
   const applied = useMemo(
-    () =>
-      selected ? applicable(globals.sets, globals.statements[selected]) : [],
+    () => (selected ? applicable(globals.sets, globals.statements[selected]) : []),
     [globals.sets, globals.statements, selected],
   );
   const base = useMemo(() => combine(applied), [applied]);
   // レンダリングと実行に使う値（共通パラメータ + 個別の値 + 既定の値）
-  const effective = useMemo(
-    () => effectiveValue(schema, base, value),
-    [schema, base, value],
-  );
+  const effective = useMemo(() => effectiveValue(schema, base, value), [schema, base, value]);
   // 生成値（式）を計算した値。一度作った値は genCache に覚え、↻ で作り直す
   const genCache = useRef<GenCache>(new Map()).current;
   const [genVersion, setGenVersion] = useState(0);
@@ -369,36 +308,22 @@ function Workspace({ api }: { api: Api }) {
     }),
     [genCache, genVersion],
   );
-  const resolved = useMemo(
-    () => resolveTemplates(effective, genCache),
-    [effective, genCache, genVersion],
-  );
+  const resolved = useMemo(() => resolveTemplates(effective, genCache), [effective, genCache, genVersion]);
   const sent = resolved.value;
   const numberIssues = useMemo(() => {
     // 式の誤りがある項目は、数値の誤りとしては重ねて出さない
     const genPaths = new Set(resolved.issues.map((i) => i.path));
-    return [
-      ...resolved.issues,
-      ...invalidNumbers(sent).filter((i) => !genPaths.has(i.path)),
-    ];
+    return [...resolved.issues, ...invalidNumbers(sent).filter((i) => !genPaths.has(i.path))];
   }, [resolved, sent]);
-  const missing = useMemo(
-    () => (schema ? missingParams(schema, effective) : []),
-    [schema, effective],
-  );
+  const missing = useMemo(() => (schema ? missingParams(schema, effective) : []), [schema, effective]);
 
   /** サブクエリ・CTE があるときだけ「サブクエリ」タブを出す */
-  const hasParts = useMemo(
-    () => !!result && !renderError && countParts(result.numberedSql) > 0,
-    [result?.numberedSql, renderError],
-  );
+  const hasParts = useMemo(() => !!result && !renderError && countParts(result.numberedSql) > 0, [result?.numberedSql, renderError]);
   /** 表示するタブ。サブクエリのタブを選んでいても、サブクエリがなければ SQL タブを出す（選んだタブは覚えておく） */
-  const shown: Tab = tab === "subquery" && !hasParts ? "sql" : tab;
+  const shown: Tab = tab === 'subquery' && !hasParts ? 'sql' : tab;
 
   // 値の候補（試作）: パラメータがどの列と比べられているかを、SQL の形が変わるたびに推論する（EXPLAIN だけで、SQL は実行しない）
-  const [sources, setSources] = useState<
-    Map<string, { columns: SourceColumn[]; list: boolean }>
-  >(new Map());
+  const [sources, setSources] = useState<Map<string, { columns: SourceColumn[]; list: boolean }>>(new Map());
   /** 推論するには値を入れる必要がある ${} の項目 */
   const [sourceNeeds, setSourceNeeds] = useState<string[]>([]);
   /** リレーションを解析してあるか（していなければ、比べている列の値だけを出す） */
@@ -426,16 +351,7 @@ function Workspace({ api }: { api: Api }) {
       window.clearTimeout(timer);
       abort.abort();
     };
-  }, [
-    api,
-    selected,
-    schema,
-    result?.numberedSql,
-    renderError,
-    conn.current?.id,
-    conn.current?.hasPassword,
-    draftP?.content,
-  ]);
+  }, [api, selected, schema, result?.numberedSql, renderError, conn.current?.id, conn.current?.hasPassword, draftP?.content]);
   // 候補のパネルを開いているパラメータ。別の statement に移ったら閉じる（開いたままだと、移った途端に候補を読み始めるため）
   const [suggestOpen, setSuggestOpen] = useState<Set<string>>(new Set());
   useEffect(() => setSuggestOpen(new Set()), [selected]);
@@ -450,12 +366,7 @@ function Workspace({ api }: { api: Api }) {
           else next.delete(pathLabel(path));
           return next;
         }),
-      render: (
-        path: Path,
-        current: PValue | undefined,
-        set: (v: PValue | undefined) => void,
-        close: () => void,
-      ) => {
+      render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => {
         const s = sources.get(pathLabel(path))!;
         return (
           <SuggestPanel
@@ -498,16 +409,7 @@ function Workspace({ api }: { api: Api }) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [
-    api,
-    selected,
-    schema,
-    sent,
-    numberIssues.length,
-    generation,
-    draftP?.content,
-    playgroundKey,
-  ]);
+  }, [api, selected, schema, sent, numberIssues.length, generation, draftP?.content, playgroundKey]);
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -518,13 +420,13 @@ function Workspace({ api }: { api: Api }) {
     setValue(loadParams(id));
     setResult(null);
     setRenderError(null);
-    window.history.replaceState(null, "", hashOf("query", id));
+    window.history.replaceState(null, '', hashOf('query', id));
   };
 
   /** 画面を切り替える（ブラウザの履歴に残す） */
   const go = (next: Screen) => {
     setScreen(next);
-    window.history.pushState(null, "", hashOf(next, selected));
+    window.history.pushState(null, '', hashOf(next, selected));
   };
 
   // ブラウザの戻る・進むで、画面と statement を合わせる
@@ -532,12 +434,11 @@ function Workspace({ api }: { api: Api }) {
     const onPop = () => {
       const h = parseHash();
       setScreen(h.screen);
-      if (h.screen === "relations") setRelationFocus(h.column);
-      if (h.statement && h.statement !== selectedRef.current)
-        select(h.statement);
+      if (h.screen === 'relations') setRelationFocus(h.column);
+      if (h.statement && h.statement !== selectedRef.current) select(h.statement);
     };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   /** ファイルを「テンプレート」タブのエディタで開く（今の statement がそのファイルのものなら、そのまま） */
@@ -546,14 +447,14 @@ function Workspace({ api }: { api: Api }) {
     if (!s) setLooseFile(file);
     else if (target?.file !== file) select(s.id);
     else setLooseFile(null);
-    setTab("template");
-    saveTab("template");
+    setTab('template');
+    saveTab('template');
   };
 
   // ---- プレイグラウンド ----
   const reloadPlaygrounds = () => setPlaygroundVersion((v) => v + 1);
   const createPlayground = async () => {
-    const name = window.prompt("新しいプレイグラウンドの名前:");
+    const name = window.prompt('新しいプレイグラウンドの名前:');
     if (!name) return;
     try {
       await api.createPlayground(name);
@@ -564,8 +465,8 @@ function Workspace({ api }: { api: Api }) {
       const s = r.statements.find((x) => x.file === file);
       if (s) select(s.id);
       else setLooseFile(file);
-      setTab("template");
-      saveTab("template");
+      setTab('template');
+      saveTab('template');
     } catch (e) {
       handleError(e);
       window.alert(e instanceof Error ? e.message : String(e));
@@ -578,12 +479,11 @@ function Workspace({ api }: { api: Api }) {
       name: p.name,
       onSaved: reloadPlaygrounds,
       onRename: async () => {
-        const newName = window.prompt("新しい名前:", p.name);
+        const newName = window.prompt('新しい名前:', p.name);
         if (!newName || newName === p.name) return;
         try {
           await api.renamePlayground(p.name, newName);
-          if (looseFile === p.file)
-            setLooseFile(`playground:${newName.trim()}`);
+          if (looseFile === p.file) setLooseFile(`playground:${newName.trim()}`);
           reloadPlaygrounds();
         } catch (e) {
           handleError(e);
@@ -591,13 +491,12 @@ function Workspace({ api }: { api: Api }) {
         }
       },
       onDelete: async () => {
-        if (!window.confirm(`プレイグラウンド「${p.name}」を削除しますか？`))
-          return;
+        if (!window.confirm(`プレイグラウンド「${p.name}」を削除しますか？`)) return;
         try {
           await api.deletePlayground(p.name);
           if (target?.file === p.file) {
             setSelected(null);
-            window.history.replaceState(null, "", hashOf("query", null));
+            window.history.replaceState(null, '', hashOf('query', null));
           }
           setLooseFile(null);
           reloadPlaygrounds();
@@ -631,8 +530,8 @@ function Workspace({ api }: { api: Api }) {
           <button
             key={key}
             type="button"
-            className={screen === key ? "nav selected" : "nav"}
-            aria-current={screen === key ? "page" : undefined}
+            className={screen === key ? 'nav selected' : 'nav'}
+            aria-current={screen === key ? 'page' : undefined}
             onClick={() => go(key)}
           >
             {label}
@@ -641,12 +540,8 @@ function Workspace({ api }: { api: Api }) {
       </nav>
 
       {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
-      <div className="screen" hidden={screen !== "query"}>
-        <div
-          className={sidebarOpen ? "layout" : "layout sidebar-closed"}
-          ref={panes.layout}
-          style={panes.style}
-        >
+      <div className="screen" hidden={screen !== 'query'}>
+        <div className={sidebarOpen ? 'layout' : 'layout sidebar-closed'} ref={panes.layout} style={panes.style}>
           {!sidebarOpen ? (
             <aside className="sidebar closed">
               <button
@@ -661,13 +556,7 @@ function Workspace({ api }: { api: Api }) {
             </aside>
           ) : (
             <aside className="sidebar">
-              <DraftList
-                drafts={drafts}
-                onOpen={editFile}
-                hasStatements={(file) =>
-                  statements.some((x) => x.file === file)
-                }
-              />
+              <DraftList drafts={drafts} onOpen={editFile} hasStatements={(file) => statements.some((x) => x.file === file)} />
               <StatementTree
                 statements={statements}
                 playgrounds={playgrounds}
@@ -681,84 +570,67 @@ function Workspace({ api }: { api: Api }) {
               <LoadErrors errors={loadErrors} opener={opener} />
             </aside>
           )}
-          {sidebarOpen && (
-            <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />
-          )}
+          {sidebarOpen && <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />}
 
           <main className="params">
             <header className="panel-header">
               <h2>パラメータ</h2>
               {selected && <code className="statement-id">{selected}</code>}
             </header>
-            {!selected && (
-              <p className="hint">左の一覧から statement を選んでください。</p>
-            )}
-            {schemaError && (
-              <p className="error-text">{describe(schemaError)}</p>
-            )}
+            {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+            {schemaError && <p className="error-text">{describe(schemaError)}</p>}
             {selected && schema && (
               <>
                 <div className="tabs mode" role="tablist">
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={paramTab === "local"}
-                    className={paramTab === "local" ? "tab selected" : "tab"}
-                    onClick={() => setParamTab("local")}
+                    aria-selected={paramTab === 'local'}
+                    className={paramTab === 'local' ? 'tab selected' : 'tab'}
+                    onClick={() => setParamTab('local')}
                   >
                     個別
                   </button>
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={paramTab === "global"}
-                    className={paramTab === "global" ? "tab selected" : "tab"}
-                    onClick={() => setParamTab("global")}
+                    aria-selected={paramTab === 'global'}
+                    className={paramTab === 'global' ? 'tab selected' : 'tab'}
+                    onClick={() => setParamTab('global')}
                   >
                     共通<span className="hint">（{applied.length}）</span>
                   </button>
                 </div>
-                {paramTab === "global" && target ? (
+                {paramTab === 'global' && target ? (
                   <StatementGlobals
                     globals={globals}
                     statementId={target.id}
                     onSettings={(id) => {
                       setGlobalFocus(id);
-                      go("globals");
+                      go('globals');
                     }}
                   />
                 ) : (
                   <>
-                    {value &&
-                      value.t === "object" &&
-                      value.fields.length > 0 &&
-                      applied.length > 0 &&
-                      !copying && (
-                        <div className="param-actions">
-                          <button
-                            type="button"
-                            className="link"
-                            onClick={() => setCopying(true)}
-                            title="個別の値を、この statement に適用されている共通パラメータにコピーする"
-                          >
-                            共通にコピー
-                          </button>
-                        </div>
-                      )}
+                    {value && value.t === 'object' && value.fields.length > 0 && applied.length > 0 && !copying && (
+                      <div className="param-actions">
+                        <button
+                          type="button"
+                          className="link"
+                          onClick={() => setCopying(true)}
+                          title="個別の値を、この statement に適用されている共通パラメータにコピーする"
+                        >
+                          共通にコピー
+                        </button>
+                      </div>
+                    )}
                     {copying && value && applied.length > 0 && (
-                      <CopyToGlobal
-                        key={selected}
-                        globals={globals}
-                        applied={applied}
-                        local={value}
-                        onClose={() => setCopying(false)}
-                      />
+                      <CopyToGlobal key={selected} globals={globals} applied={applied} local={value} onClose={() => setCopying(false)} />
                     )}
                     {sourceNeeds.length > 0 && (
                       <p className="hint source-needs">
                         値の候補を出すには、
-                        {sourceNeeds.map((n) => `\${${n}}`).join("・")}{" "}
-                        に値を入れてください
+                        {sourceNeeds.map((n) => `\${${n}}`).join('・')} に値を入れてください
                       </p>
                     )}
                     <ParamTree
@@ -782,9 +654,7 @@ function Workspace({ api }: { api: Api }) {
                 )}
                 <details className="json-panel">
                   <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
-                  <pre className="sql">
-                    {toJson(sent ?? { t: "object", fields: [] })}
-                  </pre>
+                  <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
                 </details>
               </>
             )}
@@ -795,33 +665,29 @@ function Workspace({ api }: { api: Api }) {
             <div className="tabs" role="tablist">
               {(
                 [
-                  ["template", "テンプレート"],
-                  ["sql", "SQL"],
-                  ["execute", "実行"],
-                  ["explain", "EXPLAIN"],
-                  ["subquery", "サブクエリ"],
+                  ['template', 'テンプレート'],
+                  ['sql', 'SQL'],
+                  ['execute', '実行'],
+                  ['explain', 'EXPLAIN'],
+                  ['subquery', 'サブクエリ'],
                 ] as const
               )
-                .filter(([key]) => key !== "subquery" || hasParts)
+                .filter(([key]) => key !== 'subquery' || hasParts)
                 .map(([key, label]) => (
                   <button
                     key={key}
                     type="button"
                     role="tab"
                     aria-selected={shown === key}
-                    className={shown === key ? "tab selected" : "tab"}
+                    className={shown === key ? 'tab selected' : 'tab'}
                     onClick={() => {
                       setTab(key);
                       saveTab(key);
                     }}
                   >
                     {label}
-                    {key === "template" && draftP && (
-                      <span
-                        className="draft-mark"
-                        title="編集中（ファイルには保存していません）"
-                        aria-label="編集中"
-                      >
+                    {key === 'template' && draftP && (
+                      <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
                         ●
                       </span>
                     )}
@@ -829,7 +695,7 @@ function Workspace({ api }: { api: Api }) {
                 ))}
             </div>
 
-            {shown === "sql" && (
+            {shown === 'sql' && (
               <>
                 {numberIssues.length > 0 && (
                   <ul className="notes error">
@@ -842,40 +708,32 @@ function Workspace({ api }: { api: Api }) {
                 )}
                 {missing.length > 0 && (
                   <div className="notes info">
-                    未設定の項目（NULL として扱われます）:{" "}
+                    未設定の項目（NULL として扱われます）:{' '}
                     {missing.map((m) => (
                       <code key={m}>{m}</code>
                     ))}
                   </div>
                 )}
-                {renderError && (
-                  <pre className="render-error">{describe(renderError)}</pre>
-                )}
+                {renderError && <pre className="render-error">{describe(renderError)}</pre>}
                 {resolved.generated.length > 0 && (
                   <div className="notes info generated">
                     式で作った値:
                     <ul>
                       {resolved.generated.map((g) => (
                         <li key={g.path}>
-                          <code>{g.path}</code>{" "}
-                          <code className="source">{g.source}</code> →{" "}
-                          <code>{g.result}</code>
+                          <code>{g.path}</code> <code className="source">{g.source}</code> → <code>{g.result}</code>
                         </li>
                       ))}
                     </ul>
                   </div>
                 )}
                 {result && !renderError && <RenderResult result={result} />}
-                {!selected && (
-                  <p className="hint">
-                    左の一覧から statement を選んでください。
-                  </p>
-                )}
+                {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
               </>
             )}
 
             {/* 実行結果が消えないよう、切り替えても実行のタブは残しておく */}
-            <div hidden={shown !== "execute"}>
+            <div hidden={shown !== 'execute'}>
               {selected && schema ? (
                 <ExecutePanel
                   key={selected}
@@ -887,14 +745,12 @@ function Workspace({ api }: { api: Api }) {
                   onApiError={handleError}
                 />
               ) : (
-                <p className="hint">
-                  左の一覧から statement を選んでください。
-                </p>
+                <p className="hint">左の一覧から statement を選んでください。</p>
               )}
             </div>
 
             {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
-            <div hidden={shown !== "subquery"}>
+            <div hidden={shown !== 'subquery'}>
               {hasParts && selected && result && (
                 <PartsPanel
                   key={selected}
@@ -911,7 +767,7 @@ function Workspace({ api }: { api: Api }) {
             </div>
 
             {/* 取得した計画が消えないよう、切り替えても EXPLAIN のタブは残しておく */}
-            <div hidden={shown !== "explain"}>
+            <div hidden={shown !== 'explain'}>
               {selected && schema ? (
                 <ExplainPanel
                   key={selected}
@@ -923,14 +779,12 @@ function Workspace({ api }: { api: Api }) {
                   onApiError={handleError}
                 />
               ) : (
-                <p className="hint">
-                  左の一覧から statement を選んでください。
-                </p>
+                <p className="hint">左の一覧から statement を選んでください。</p>
               )}
             </div>
 
             {/* 編集中の位置や取り消しの履歴が消えないよう、切り替えてもテンプレートのタブは残しておく */}
-            <div hidden={tab !== "template"}>
+            <div hidden={tab !== 'template'}>
               {templateSeen && looseFile ? (
                 <FileEditor
                   key={looseFile}
@@ -941,7 +795,7 @@ function Workspace({ api }: { api: Api }) {
                   generation={generation}
                   onApiError={handleError}
                   opener={opener}
-                  visible={tab === "template"}
+                  visible={tab === 'template'}
                   playground={playgroundOf(looseFile)}
                   readOnly={readOnly}
                 />
@@ -955,30 +809,22 @@ function Workspace({ api }: { api: Api }) {
                     generation={generation}
                     onApiError={handleError}
                     opener={opener}
-                    visible={tab === "template"}
+                    visible={tab === 'template'}
                     playground={playgroundOf(editorFile)}
                     readOnly={readOnly}
                   />
                 ) : (
-                  <TemplateView
-                    api={api}
-                    statementId={selected}
-                    generation={generation}
-                    onApiError={handleError}
-                    opener={opener}
-                  />
+                  <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
                 )
               ) : (
-                <p className="hint">
-                  左の一覧から statement を選んでください。
-                </p>
+                <p className="hint">左の一覧から statement を選んでください。</p>
               )}
             </div>
           </section>
         </div>
       </div>
 
-      <div className="screen" hidden={screen !== "globals"}>
+      <div className="screen" hidden={screen !== 'globals'}>
         <GlobalsScreen
           api={api}
           globals={globals}
@@ -989,48 +835,48 @@ function Workspace({ api }: { api: Api }) {
         />
       </div>
 
-      <div className="screen scroll" hidden={screen !== "bulk"}>
+      <div className="screen scroll" hidden={screen !== 'bulk'}>
         <BulkCheck
           api={api}
           conn={conn}
           statements={statements}
           globalSets={globals.sets}
           globalStatements={globals.statements}
-          active={screen === "bulk"}
+          active={screen === 'bulk'}
           sourceVersion={`${generation}:${drafts.version}`}
           draftOf={(file) => draftParam(drafts.get(file))}
           onOpen={(id) => {
             select(id);
-            setTab("explain");
-            saveTab("explain");
-            setScreen("query");
-            window.history.pushState(null, "", hashOf("query", id));
+            setTab('explain');
+            saveTab('explain');
+            setScreen('query');
+            window.history.pushState(null, '', hashOf('query', id));
           }}
           onOpenParams={(id) => {
             select(id);
-            setParamTab("local");
-            setScreen("query");
-            window.history.pushState(null, "", hashOf("query", id));
+            setParamTab('local');
+            setScreen('query');
+            window.history.pushState(null, '', hashOf('query', id));
           }}
         />
       </div>
 
-      <div className="screen scroll" hidden={screen !== "relations"}>
+      <div className="screen scroll" hidden={screen !== 'relations'}>
         <RelationsScreen
           api={api}
           conn={conn}
           globalSets={globals.sets}
           focus={relationFocus}
-          active={screen === "relations"}
+          active={screen === 'relations'}
           onOpen={(id) => {
             select(id);
-            setScreen("query");
-            window.history.pushState(null, "", hashOf("query", id));
+            setScreen('query');
+            window.history.pushState(null, '', hashOf('query', id));
           }}
         />
       </div>
 
-      <div className="screen scroll" hidden={screen !== "connections"}>
+      <div className="screen scroll" hidden={screen !== 'connections'}>
         <ConnectionsScreen conn={conn} />
       </div>
     </div>
@@ -1039,14 +885,12 @@ function Workspace({ api }: { api: Api }) {
 
 // ---- statement の一覧（ディレクトリ → ファイル → statement のツリー） ----
 
-const TOGGLED_KEY = "mybatis-pg.tree";
+const TOGGLED_KEY = 'mybatis-pg.tree';
 
 /** 既定（ディレクトリは開く、ファイルは閉じる）から切り替えた項目の key */
 function loadToggled(): Set<string> {
   try {
-    return new Set(
-      JSON.parse(localStorage.getItem(TOGGLED_KEY) ?? "[]") as string[],
-    );
+    return new Set(JSON.parse(localStorage.getItem(TOGGLED_KEY) ?? '[]') as string[]);
   } catch {
     return new Set();
   }
@@ -1082,17 +926,11 @@ function StatementTree({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState('');
   const [toggled, setToggled] = useState(loadToggled);
-  const filtering = filter.trim() !== "";
-  const project = useMemo(
-    () => statements.filter((s) => !s.playground),
-    [statements],
-  );
-  const tree = useMemo(
-    () => buildTree(filterEntries(project, filter)),
-    [project, filter],
-  );
+  const filtering = filter.trim() !== '';
+  const project = useMemo(() => statements.filter((s) => !s.playground), [statements]);
+  const tree = useMemo(() => buildTree(filterEntries(project, filter)), [project, filter]);
   // プレイグラウンドは、ファイルの代わりに名前で並べる（絞り込んでいるときは、当たるものだけ）
   const playgroundNodes = useMemo<TreeNode[]>(() => {
     const matched = new Set(
@@ -1103,28 +941,19 @@ function StatementTree({
     );
     return playgrounds
       .map((p): TreeNode => ({
-        kind: "file",
+        kind: 'file',
         key: p.file,
         label: p.name,
-        statements: statements.filter(
-          (s) => s.file === p.file && (!filtering || matched.has(s.id)),
-        ),
+        statements: statements.filter((s) => s.file === p.file && (!filtering || matched.has(s.id))),
       }))
       .filter(
-        (n) =>
-          !filtering ||
-          n.kind !== "file" ||
-          n.statements.length > 0 ||
-          n.label.toLowerCase().includes(filter.trim().toLowerCase()),
+        (n) => !filtering || n.kind !== 'file' || n.statements.length > 0 || n.label.toLowerCase().includes(filter.trim().toLowerCase()),
       );
   }, [statements, playgrounds, filter, filtering]);
-  const brokenPlaygrounds = new Set(
-    playgrounds.filter((p) => p.errors.length > 0).map((p) => p.file),
-  );
+  const brokenPlaygrounds = new Set(playgrounds.filter((p) => p.errors.length > 0).map((p) => p.file));
   const playgroundsOpen = filtering || !toggled.has(PLAYGROUND_KEY);
 
-  const isOpen = (n: TreeNode) =>
-    filtering || (n.kind === "dir" ? !toggled.has(n.key) : toggled.has(n.key));
+  const isOpen = (n: TreeNode) => filtering || (n.kind === 'dir' ? !toggled.has(n.key) : toggled.has(n.key));
   const update = (f: (next: Set<string>) => void) =>
     setToggled((prev) => {
       const next = new Set(prev);
@@ -1132,8 +961,7 @@ function StatementTree({
       saveToggled(next);
       return next;
     });
-  const toggle = (n: TreeNode) =>
-    update((next) => (next.has(n.key) ? next.delete(n.key) : next.add(n.key)));
+  const toggle = (n: TreeNode) => update((next) => (next.has(n.key) ? next.delete(n.key) : next.add(n.key)));
 
   // 選ばれている statement が見えるよう、そこまでの項目を開く（URL から開いたときなど）
   const loaded = statements.length > 0;
@@ -1142,12 +970,10 @@ function StatementTree({
   useEffect(() => {
     if (!selected || !loaded) return;
     const s = statements.find((x) => x.id === selected);
-    const keys = s?.playground
-      ? [s.file]
-      : pathTo(buildTree(statements.filter((x) => !x.playground)), selected);
+    const keys = s?.playground ? [s.file] : pathTo(buildTree(statements.filter((x) => !x.playground)), selected);
     update((next) => {
       for (const k of keys) {
-        if (k.endsWith("/")) next.delete(k);
+        if (k.endsWith('/')) next.delete(k);
         else next.add(k);
       }
     });
@@ -1160,38 +986,22 @@ function StatementTree({
         return (
           <li key={n.key}>
             <div className="node-line">
-              <button
-                type="button"
-                className={`node ${n.kind}`}
-                aria-expanded={open}
-                onClick={() => toggle(n)}
-                title={n.key}
-              >
-                <span className="twisty">{open ? "▾" : "▸"}</span>
-                {n.kind === "dir" ? n.label + "/" : n.label}
-                {n.kind === "file" && brokenPlaygrounds.has(n.key) && (
-                  <span
-                    className="warn-mark"
-                    title="XML を読み込めません"
-                    aria-label="読み込めません"
-                  >
+              <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
+                <span className="twisty">{open ? '▾' : '▸'}</span>
+                {n.kind === 'dir' ? n.label + '/' : n.label}
+                {n.kind === 'file' && brokenPlaygrounds.has(n.key) && (
+                  <span className="warn-mark" title="XML を読み込めません" aria-label="読み込めません">
                     ⚠
                   </span>
                 )}
-                {n.kind === "file" && drafted.has(n.key) && (
-                  <span
-                    className="draft-mark"
-                    title="編集中（ファイルには保存していません）"
-                    aria-label="編集中"
-                  >
+                {n.kind === 'file' && drafted.has(n.key) && (
+                  <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
                     ●
                   </span>
                 )}
-                {n.kind === "file" && (
-                  <span className="count">{n.statements.length}</span>
-                )}
+                {n.kind === 'file' && <span className="count">{n.statements.length}</span>}
               </button>
-              {n.kind === "file" && (
+              {n.kind === 'file' && (
                 <button
                   type="button"
                   className="icon open-file"
@@ -1203,16 +1013,14 @@ function StatementTree({
                 </button>
               )}
             </div>
-            {open && n.kind === "dir" && render(n.children)}
-            {open && n.kind === "file" && (
+            {open && n.kind === 'dir' && render(n.children)}
+            {open && n.kind === 'file' && (
               <ul>
                 {n.statements.map((s) => (
                   <li key={s.id}>
                     <button
                       type="button"
-                      className={
-                        s.id === selected ? "node stmt selected" : "node stmt"
-                      }
+                      className={s.id === selected ? 'node stmt selected' : 'node stmt'}
                       onClick={() => onSelect(s.id)}
                       title={s.id}
                     >
@@ -1265,15 +1073,9 @@ function StatementTree({
                 type="button"
                 className="node dir"
                 aria-expanded={playgroundsOpen}
-                onClick={() =>
-                  update((next) =>
-                    next.has(PLAYGROUND_KEY)
-                      ? next.delete(PLAYGROUND_KEY)
-                      : next.add(PLAYGROUND_KEY),
-                  )
-                }
+                onClick={() => update((next) => (next.has(PLAYGROUND_KEY) ? next.delete(PLAYGROUND_KEY) : next.add(PLAYGROUND_KEY)))}
               >
-                <span className="twisty">{playgroundsOpen ? "▾" : "▸"}</span>
+                <span className="twisty">{playgroundsOpen ? '▾' : '▸'}</span>
                 プレイグラウンド
               </button>
               <button
@@ -1286,22 +1088,16 @@ function StatementTree({
                 ＋
               </button>
             </div>
-            {playgroundsOpen &&
-              playgroundNodes.length > 0 &&
-              render(playgroundNodes)}
+            {playgroundsOpen && playgroundNodes.length > 0 && render(playgroundNodes)}
           </li>
         </ul>
-        {tree.length === 0 ? (
-          <p className="hint">該当する statement がありません</p>
-        ) : (
-          render(tree)
-        )}
+        {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : render(tree)}
       </nav>
     </div>
   );
 }
 
-const SIDEBAR_KEY = "mybatis-pg.sidebar";
+const SIDEBAR_KEY = 'mybatis-pg.sidebar';
 
 /**
  * 推論の結果を、パラメータの項目（cond.status など）ごとにまとめる。foreach の要素（__frch_...）は、
@@ -1315,32 +1111,19 @@ function sourceMap(
   const walk = (node: ParamSchema, path: Path) => {
     for (const child of node.properties) {
       const p = [...path, child.name as string];
-      if (
-        child.usages.includes("ITERATE") &&
-        child.element &&
-        child.element.properties.length === 0
-      )
-        lists.push(pathLabel(p));
+      if (child.usages.includes('ITERATE') && child.element && child.element.properties.length === 0) lists.push(pathLabel(p));
       walk(child, p);
     }
   };
   walk(schema, []);
   const out = new Map<string, { columns: SourceColumn[]; list: boolean }>();
   for (const s of sources) {
-    const foreach = s.property.startsWith("__frch_");
-    if (foreach && (lists.length !== 1 || s.property.includes("."))) continue;
+    const foreach = s.property.startsWith('__frch_');
+    if (foreach && (lists.length !== 1 || s.property.includes('.'))) continue;
     const key = foreach ? lists[0] : s.property;
     const entry = out.get(key) ?? { columns: [], list: foreach };
     for (const c of s.columns) {
-      if (
-        !entry.columns.some(
-          (x) =>
-            x.schema === c.schema &&
-            x.table === c.table &&
-            x.column === c.column,
-        )
-      )
-        entry.columns.push(c);
+      if (!entry.columns.some((x) => x.schema === c.schema && x.table === c.table && x.column === c.column)) entry.columns.push(c);
     }
     out.set(key, entry);
   }
@@ -1348,17 +1131,15 @@ function sourceMap(
 }
 
 /** statement が見つからないことを表す印（説明は表示するときに決める） */
-const NOT_FOUND = "\u0000not-found";
+const NOT_FOUND = '\u0000not-found';
 
-const LAST_FILE_KEY = "mybatis-pg.last-file";
+const LAST_FILE_KEY = 'mybatis-pg.last-file';
 
 /** 選んでいた statement が最後にあったファイル（読み込み直しても、XML の誤りを直せるように覚えておく） */
 function loadLastFile(): { id: string; file: string } | null {
   try {
-    const v = JSON.parse(localStorage.getItem(LAST_FILE_KEY) ?? "null");
-    return v && typeof v.id === "string" && typeof v.file === "string"
-      ? { id: v.id, file: v.file }
-      : null;
+    const v = JSON.parse(localStorage.getItem(LAST_FILE_KEY) ?? 'null');
+    return v && typeof v.id === 'string' && typeof v.file === 'string' ? { id: v.id, file: v.file } : null;
   } catch {
     return null;
   }
@@ -1373,7 +1154,7 @@ function saveLastFile(v: { id: string; file: string }) {
 }
 
 /** statement 一覧で、プレイグラウンドの欄を閉じたかを覚えておく key（ディレクトリと同じく、既定は開く） */
-const PLAYGROUND_KEY = "playground/";
+const PLAYGROUND_KEY = 'playground/';
 
 /** 編集中（下書きがある）ファイルの一覧。いらなくなった下書きを片付ける */
 function DraftList({
@@ -1387,11 +1168,11 @@ function DraftList({
 }) {
   if (drafts.list.length === 0) return null;
   const when = (t: number) =>
-    new Date(t).toLocaleString("ja-JP", {
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+    new Date(t).toLocaleString('ja-JP', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   return (
     <details className="draft-list">
@@ -1406,17 +1187,12 @@ function DraftList({
               disabled={!hasStatements(d.file)}
               onClick={() => onOpen(d.file)}
             >
-              {d.file.slice(d.file.lastIndexOf("/") + 1)}
+              {d.file.slice(d.file.lastIndexOf('/') + 1)}
             </button>
             <span className="hint">{when(d.updatedAt)}</span>
-            {!d.loaded && (
-              <span className="badge warn">ファイルがありません</span>
-            )}
+            {!d.loaded && <span className="badge warn">ファイルがありません</span>}
             {d.loaded && d.changed && (
-              <span
-                className="badge warn"
-                title="編集を始めた後に、ファイルが変更されました"
-              >
+              <span className="badge warn" title="編集を始めた後に、ファイルが変更されました">
                 ファイルが変更済み
               </span>
             )}
@@ -1424,8 +1200,7 @@ function DraftList({
               type="button"
               className="link"
               onClick={() => {
-                if (window.confirm(`${d.file} の編集を取り消しますか？`))
-                  drafts.discard([d.file]);
+                if (window.confirm(`${d.file} の編集を取り消しますか？`)) drafts.discard([d.file]);
               }}
             >
               取り消す
@@ -1438,11 +1213,7 @@ function DraftList({
           type="button"
           className="link"
           onClick={() => {
-            if (
-              window.confirm(
-                `${drafts.list.length} 件のファイルの編集をすべて取り消しますか？`,
-              )
-            )
+            if (window.confirm(`${drafts.list.length} 件のファイルの編集をすべて取り消しますか？`))
               drafts.discard(drafts.list.map((d) => d.file));
           }}
         >
@@ -1453,13 +1224,7 @@ function DraftList({
   );
 }
 
-function LoadErrors({
-  errors,
-  opener,
-}: {
-  errors: LoadError[];
-  opener: Opener;
-}) {
+function LoadErrors({ errors, opener }: { errors: LoadError[]; opener: Opener }) {
   if (errors.length === 0) return null;
   return (
     <details className="load-errors" open>
@@ -1470,12 +1235,8 @@ function LoadErrors({
             <div className="source">
               {e.source}
               {e.line !== null && `:${e.line}`}
-              {opener && e.source.endsWith(".xml") && (
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => opener.open({ file: e.source, line: e.line })}
-                >
+              {opener && e.source.endsWith('.xml') && (
+                <button type="button" className="link" onClick={() => opener.open({ file: e.source, line: e.line })}>
                   {opener.label}
                 </button>
               )}
@@ -1489,22 +1250,15 @@ function LoadErrors({
 }
 
 /** JSON での表示と、貼り付けによるまとめての書き換え */
-function JsonPanel({
-  value,
-  onApply,
-}: {
-  value: PValue | undefined;
-  onApply: (v: PValue | undefined) => void;
-}) {
+function JsonPanel({ value, onApply }: { value: PValue | undefined; onApply: (v: PValue | undefined) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const text = draft ?? toJson(value ?? { t: "object", fields: [] });
+  const text = draft ?? toJson(value ?? { t: 'object', fields: [] });
   const apply = () => {
     if (draft === null) return;
     try {
       const parsed = fromJson(draft);
-      if (parsed.t !== "object")
-        throw new Error("一番外側はオブジェクト（{ ... }）にしてください");
+      if (parsed.t !== 'object') throw new Error('一番外側はオブジェクト（{ ... }）にしてください');
       onApply(parsed.fields.length === 0 ? undefined : parsed);
       setDraft(null);
       setError(null);
@@ -1638,7 +1392,7 @@ function TemplateView({
 
   if (error) return <pre className="render-error">{error}</pre>;
   if (!template) return null;
-  const lineCount = template.xml.split("\n").length;
+  const lineCount = template.xml.split('\n').length;
   return (
     <div className="sql-block">
       <div className="sql-title">
@@ -1656,16 +1410,14 @@ function TemplateView({
       </div>
       <div className="template">
         <pre className="gutter" aria-hidden="true">
-          {Array.from({ length: lineCount }, (_, i) => template.line + i).join(
-            "\n",
-          )}
+          {Array.from({ length: lineCount }, (_, i) => template.line + i).join('\n')}
         </pre>
         <pre className="code">
           {tokenize(template.xml).map((t, i) =>
-            t.kind === "text" ? (
+            t.kind === 'text' ? (
               t.text
             ) : (
-              <span key={i} className={"t-" + t.kind}>
+              <span key={i} className={'t-' + t.kind}>
                 {t.text}
               </span>
             ),
@@ -1694,7 +1446,7 @@ function CopyButton({ text }: { text: string }) {
         }
       }}
     >
-      {copied ? "コピーしました" : "コピー"}
+      {copied ? 'コピーしました' : 'コピー'}
     </button>
   );
 }

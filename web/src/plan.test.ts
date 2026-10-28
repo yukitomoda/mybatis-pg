@@ -8,9 +8,12 @@ import { estimateRatio, flatten, parsePlan, relations, timings } from './plan';
 describe('parsePlan', () => {
   it('JSON 形式とテキスト形式で、同じ木と名前になる', () => {
     // 並列実行のため、2 回の実行で行数が少し違うことがある。木の形と名前と回数で比べる
-    const shape = (input: string) => flatten(parsePlan(input).root).map((r) => `${'  '.repeat(r.depth)}${r.node.title} loops=${r.node.actual?.loops}`);
+    const shape = (input: string) =>
+      flatten(parsePlan(input).root).map((r) => `${'  '.repeat(r.depth)}${r.node.title} loops=${r.node.actual?.loops}`);
     expect(shape(json)).toEqual(shape(text));
-    const b = flatten(parsePlan(text).root).map((r) => `${'  '.repeat(r.depth)}${r.node.title} rows=${r.node.actual?.rows} loops=${r.node.actual?.loops}`);
+    const b = flatten(parsePlan(text).root).map(
+      (r) => `${'  '.repeat(r.depth)}${r.node.title} rows=${r.node.actual?.rows} loops=${r.node.actual?.loops}`,
+    );
     expect(b).toEqual([
       'Limit rows=10 loops=1',
       '  Sort rows=10 loops=1',

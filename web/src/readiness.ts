@@ -21,7 +21,9 @@ export function readiness(id: string, schema: ParamSchema, globalSets: GlobalSet
   const missing = [...missingParams(schema, effective), ...emptyLists(schema, effective)];
   const resolved = resolveTemplates(effective, new Map());
   const genPaths = new Set(resolved.issues.map((i) => i.path));
-  const issues = [...resolved.issues, ...invalidNumbers(resolved.value).filter((i) => !genPaths.has(i.path))].map((i) => `${i.path}: ${i.message}`);
+  const issues = [...resolved.issues, ...invalidNumbers(resolved.value).filter((i) => !genPaths.has(i.path))].map(
+    (i) => `${i.path}: ${i.message}`,
+  );
   return { value: resolved.value, missing, issues };
 }
 

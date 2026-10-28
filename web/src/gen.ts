@@ -32,7 +32,13 @@ export function parseTemplate(text: string): Part[] {
       const body = text.slice(i + 2, end).trim();
       const colon = body.indexOf(':');
       const fn = (colon < 0 ? body : body.slice(0, colon)).trim();
-      const args = colon < 0 ? [] : body.slice(colon + 1).split('|').map((a) => a.trim());
+      const args =
+        colon < 0
+          ? []
+          : body
+              .slice(colon + 1)
+              .split('|')
+              .map((a) => a.trim());
       if (!fn) throw new Error(`関数名がありません: ${raw}`);
       parts.push({ raw, fn, args });
       i = end + 2;

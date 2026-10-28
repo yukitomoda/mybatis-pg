@@ -145,7 +145,17 @@ function summary(values: PValue): string {
 /**
  * 個別の値の項目を選んで、この statement に適用されている共通パラメータの 1 つにコピーする（個別の値は残す）。
  */
-export function CopyToGlobal({ globals, applied, local, onClose }: { globals: Globals; applied: GlobalSet[]; local: PValue; onClose: () => void }) {
+export function CopyToGlobal({
+  globals,
+  applied,
+  local,
+  onClose,
+}: {
+  globals: Globals;
+  applied: GlobalSet[];
+  local: PValue;
+  onClose: () => void;
+}) {
   const fields = local.t === 'object' ? local.fields : [];
   // 既定のコピー先は、一番優先される（一覧の一番下の）もの
   const [targetId, setTargetId] = useState<string>(applied[applied.length - 1]?.id ?? '');
@@ -227,7 +237,15 @@ export function CopyToGlobal({ globals, applied, local, onClose }: { globals: Gl
  * この statement に適用する共通パラメータを、優先順（下ほど優先）に並べる。
  * 追加・外す・ドラッグで並べ替えができる（この statement だけに効く）。
  */
-export function StatementGlobals({ globals, statementId, onSettings }: { globals: Globals; statementId: string; onSettings: (setId: string | null) => void }) {
+export function StatementGlobals({
+  globals,
+  statementId,
+  onSettings,
+}: {
+  globals: Globals;
+  statementId: string;
+  onSettings: (setId: string | null) => void;
+}) {
   const settings = globals.statements[statementId];
   const list = applicable(globals.sets, settings);
   const rest = globals.sets.filter((s) => !list.includes(s));
@@ -247,7 +265,13 @@ export function StatementGlobals({ globals, statementId, onSettings }: { globals
             <span className="values" title={summary(s.values)}>
               {summary(s.values)}
             </span>
-            <button type="button" className="icon" aria-label={`${s.name} を外す`} title="外す" onClick={() => save(removeFrom(settings, s))}>
+            <button
+              type="button"
+              className="icon"
+              aria-label={`${s.name} を外す`}
+              title="外す"
+              onClick={() => save(removeFrom(settings, s))}
+            >
               ×
             </button>
           </>
@@ -392,9 +416,7 @@ export function GlobalsScreen({
                         onClick={() =>
                           globals.setStatement(
                             id,
-                            selected.isDefault
-                              ? { ...st, removed: st.removed.filter((x) => x !== selected.id) }
-                              : removeFrom(st, selected),
+                            selected.isDefault ? { ...st, removed: st.removed.filter((x) => x !== selected.id) } : removeFrom(st, selected),
                           )
                         }
                       >
@@ -409,7 +431,9 @@ export function GlobalsScreen({
         </>
       ) : (
         <section className="globals-values">
-          <p className="hint">{sets.length === 0 ? '共通パラメータを作ると、ここで値を設定できます。' : '左の一覧から共通パラメータを選んでください。'}</p>
+          <p className="hint">
+            {sets.length === 0 ? '共通パラメータを作ると、ここで値を設定できます。' : '左の一覧から共通パラメータを選んでください。'}
+          </p>
         </section>
       )}
     </div>
@@ -430,7 +454,19 @@ function initialValue(n: ParameterName): PValue {
 const MAX_CANDIDATES = 30;
 
 /** 共通パラメータの値の編集。全 statement で使われている項目を候補として出す */
-function GlobalValues({ api, set, globals, generation, gen }: { api: Api; set: GlobalSet; globals: Globals; generation: number; gen: GenContext }) {
+function GlobalValues({
+  api,
+  set,
+  globals,
+  generation,
+  gen,
+}: {
+  api: Api;
+  set: GlobalSet;
+  globals: Globals;
+  generation: number;
+  gen: GenContext;
+}) {
   const [names, setNames] = useState<ParameterName[]>([]);
 
   useEffect(() => {

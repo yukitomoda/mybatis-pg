@@ -47,6 +47,8 @@ jobs:
           path: web/.npm
           key: npm-${{ hashFiles('web/package-lock.json') }}
       - run: npm ci --cache .npm --prefer-offline --no-audit --no-fund
+      # 整形が Prettier の設定（web/.prettierrc.json）どおりか。直すには npm run format
+      - run: npm run format:check
       - run: npx vitest run
       # 型チェックと本番ビルド。出力先は ../target/classes/web
       - run: npm run build

@@ -51,12 +51,13 @@ export function summarize(plan: Plan): Summary {
     hit: b ? b.hit : null,
     read: b ? b.read : null,
     temp: b ? b.tempRead + b.tempWritten : null,
-    hotNodes: plan.analyzed && total > 0
-      ? rows
-          .map(({ node }) => ({ title: node.title, share: times.get(node)!.self / total }))
-          .filter((h) => h.share >= 0.1)
-          .sort((x, y) => y.share - x.share)
-      : [],
+    hotNodes:
+      plan.analyzed && total > 0
+        ? rows
+            .map(({ node }) => ({ title: node.title, share: times.get(node)!.self / total }))
+            .filter((h) => h.share >= 0.1)
+            .sort((x, y) => y.share - x.share)
+        : [],
     scans: rows.map(({ node }) => node.title).filter((t) => /Scan/.test(t)),
     findings: counts,
   };

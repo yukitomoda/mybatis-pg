@@ -140,7 +140,12 @@ export function BulkPicker({
                     return (
                       <li key={s.id}>
                         <label className={problem ? 'pick-line stmt not-ready' : 'pick-line stmt'} title={s.id}>
-                          <input type="checkbox" checked={selected.has(s.id)} disabled={!r} onChange={(e) => set([s.id], e.target.checked)} />
+                          <input
+                            type="checkbox"
+                            checked={selected.has(s.id)}
+                            disabled={!r}
+                            onChange={(e) => set([s.id], e.target.checked)}
+                          />
                           <span className="node stmt">{shortId(s.id)}</span>
                           {problem && (
                             <button

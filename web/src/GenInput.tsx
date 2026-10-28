@@ -45,7 +45,10 @@ export function GenPicker({ numeric, onInsert, onClose }: { numeric: boolean; on
   const [args, setArgs] = useState<string[]>([]);
   const panel = useRef<HTMLDivElement>(null);
   const spec = choices.find((f) => f.name === name) ?? choices[0];
-  const expr = buildExpr(spec.name, spec.args.map((_, i) => args[i] ?? ''));
+  const expr = buildExpr(
+    spec.name,
+    spec.args.map((_, i) => args[i] ?? ''),
+  );
 
   // プレビューは一時的に計算する（画面の値には影響しない）
   let preview: string;
