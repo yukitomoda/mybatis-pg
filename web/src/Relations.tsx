@@ -412,6 +412,9 @@ function TableRelations({
 
   return (
     <>
+      <h2 className="relations-detail-title">
+        <code>{table}</code>
+      </h2>
       {columns.length === 0 && <p className="hint">この表の列は、解析で見つかったつながりやパラメータがありません。</p>}
       {columns.map((col) => {
         const ls = mine.filter((l) => l.a === col || l.b === col);

@@ -2453,9 +2453,26 @@ button.icon.suggest-toggle {
   cursor: pointer;
 }
 
-.relations-tables li button.selected,
 .relations-tables li button:hover {
   background: var(--code-bg);
+}
+
+/* 選んでいるものは、背景と左端の線と太字で目立たせる */
+.relations-tables li button.selected {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 700;
+}
+
+/* 詳細の見出し（見ている表の名前）。列の名前より大きくし、下に線を引いて列のまとめと分ける */
+.relations-detail-title {
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--accent);
+}
+
+.relations-detail-title code {
+  font-size: 18px;
 }
 
 .relations-tables .count {
