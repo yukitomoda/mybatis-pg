@@ -1858,6 +1858,39 @@ public final class ToolServer {
       body.put("origins", origins);
       body.put("unique", new ArrayList<>(store.keys.entrySet().stream().filter(e -> Relations.unique(store, e.getKey()))
           .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toList())));
+      // 解析で検出したもの（判断の根拠を見るため）: 列ごとの一意の順位、statement ごとの結合の組とパラメータ
+      body.put("keys", new LinkedHashMap<>(store.keys));
+      List<Map<String, Object>> details = new ArrayList<>();
+      // パラメータ名ごとの、statement・項目・比べている列・源流と判断した列
+      Map<String, List<Map<String, Object>>> names = new java.util.TreeMap<>();
+      for (Map.Entry<String, Relations.Entry> e : store.statements.entrySet()) {
+        Relations.Entry en = e.getValue();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", e.getKey());
+        List<List<String>> joins = new ArrayList<>();
+        for (String[] j : en.joins) {
+          joins.add(java.util.Arrays.asList(j));
+        }
+        m.put("joins", joins);
+        m.put("params", en.params == null ? new LinkedHashMap<>() : en.params);
+        m.put("error", en.error);
+        details.add(m);
+        if (en.params != null) {
+          for (Map.Entry<String, List<String>> pe : en.params.entrySet()) {
+            String name = Relations.paramName(pe.getKey());
+            Map<String, Object> u = new LinkedHashMap<>();
+            u.put("statement", e.getKey());
+            u.put("property", pe.getKey());
+            u.put("compared", pe.getValue());
+            // 名前が短いものは、ほかの statement の候補には使わない（それでも一覧には出す）
+            u.put("decided", graph.decided(pe.getValue()));
+            names.computeIfAbsent(name, k -> new ArrayList<>()).add(u);
+          }
+        }
+      }
+      body.put("statementDetails", details);
+      body.put("names", names);
+      body.put("minName", Relations.MIN_NAME);
     }
     sendJson(ex, 200, body);
   }

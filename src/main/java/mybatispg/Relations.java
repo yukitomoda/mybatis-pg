@@ -747,7 +747,7 @@ final class Relations {
     }
 
     /** 比べている列から、源流と判断する列（たどった源流、なければ一意の列。どちらもなければ null） */
-    private String decided(List<String> compared) {
+    String decided(List<String> compared) {
       Origin best = null;
       for (String col : compared) {
         for (Origin o : origins(col)) {

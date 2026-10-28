@@ -2571,3 +2571,78 @@ button.icon.suggest-relation:hover {
     max-height: 40vh;
   }
 }
+
+/* リレーションの画面の見方の切り替え */
+.relations-views {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.relations-views button {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: none;
+  padding: 0.2rem 0.4rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.relations-views button.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 列ごとのまとめ */
+.relations-column {
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0 0.6rem;
+}
+
+.relations-column.focus {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.relations-column h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.relations-origin,
+.relations-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+  margin: 0.3rem 0 0;
+  font-size: 13px;
+}
+
+.relations-label {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 7rem;
+}
+
+.relations-origin-item {
+  margin-right: 0.6rem;
+}
+
+.relation-kind {
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.relations-add-head {
+  margin-top: 1rem;
+}
+
+/* 長い名前（statement の id など）は、はみ出す分を省く */
+.relations-tables li button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

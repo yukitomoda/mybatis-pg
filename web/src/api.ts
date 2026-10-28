@@ -592,6 +592,24 @@ export interface RelationsResult {
   }[];
   /** 1 列で一意の列 */
   unique?: string[];
+  /** 列ごとの一意の順位（1 列の主キー 2、1 列の UNIQUE 3、n 列なら n × 2（UNIQUE は + 1）） */
+  keys?: Record<string, number>;
+  /** 解析で検出したもの（statement ごと） */
+  statementDetails?: RelationStatement[];
+  /** パラメータ名ごとの、statement・項目・比べている列・源流と判断した列 */
+  names?: Record<string, { statement: string; property: string; compared: string[]; decided: string | null }[]>;
+  /** 同じ名前のパラメータを同じものとみなす、名前の最短の長さ */
+  minName?: number;
+}
+
+/** 1 つの statement で、解析で検出したもの */
+export interface RelationStatement {
+  id: string;
+  /** 結合の組 [列, 列, 拾った計画の項目（Hash Cond など）] */
+  joins: string[][];
+  /** パラメータ（項目のパス）→ 比べている列 */
+  params: Record<string, string[]>;
+  error: string | null;
 }
 
 /** 解析にかかった時間 */
