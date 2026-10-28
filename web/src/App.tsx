@@ -385,20 +385,29 @@ function Workspace({ api }: { api: Api }) {
     setSources(new Map());
     setSourceNeeds([]);
   }, [selected]);
+  /** 最後に推論した statement と接続先（開いた直後は待たずに推論し、同じ statement の中で SQL の形が変わったときだけ待つ） */
+  const inferredFor = useRef<string | null>(null);
   useEffect(() => {
     const current = conn.current;
     if (!selected || !schema || !result || renderError || !current) return;
     const abort = new AbortController();
-    const timer = window.setTimeout(() => {
-      api.paramSources(selected, sent, draftP, current.id, abort.signal).then(
-        (r) => {
-          setSources(sourceMap(r.sources, schema));
-          setSourceNeeds(r.needs);
-          setSourceRelations(r.relations);
-        },
-        () => setSources(new Map()),
-      );
-    }, 600);
+    const key = `${current.id}\u0000${selected}`;
+    const first = inferredFor.current !== key;
+    const timer = window.setTimeout(
+      () => {
+        inferredFor.current = key;
+        api.paramSources(selected, sent, draftP, current.id, abort.signal).then(
+          (r) => {
+            setSources(sourceMap(r.sources, schema));
+            setSourceNeeds(r.needs);
+            setSourceRelations(r.relations);
+          },
+          () => setSources(new Map()),
+        );
+      },
+      // 入力中に何度も推論しないよう、SQL の形が変わったときは少し待つ
+      first ? 0 : 600,
+    );
     return () => {
       window.clearTimeout(timer);
       abort.abort();
