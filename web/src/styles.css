@@ -2398,6 +2398,12 @@ button.icon.suggest-toggle {
   align-items: start;
 }
 
+/* 列を上に寄せるので、仕切りだけは上から下まで伸ばす（中身がないので、伸ばさないと高さが 0 になる） */
+.relations-body > .splitter {
+  align-self: stretch;
+  min-height: 60vh;
+}
+
 .relations-tables input {
   width: 100%;
   box-sizing: border-box;
