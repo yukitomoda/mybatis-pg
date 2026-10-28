@@ -7,6 +7,7 @@ import { DragList } from './DragList';
 import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
 import { addTo, applicable, customized, NO_SETTINGS, removeFrom } from './globalModel';
 import { ParamTree } from './ParamTree';
+import { SideSplitter, useSideWidth } from './Splitter';
 import type { ParamSchema, PValue } from './params';
 import { EMPTY_ROOT, getAt, setAt, toJson } from './params';
 
@@ -302,6 +303,7 @@ export function GlobalsScreen({
   /** 選んでおく共通パラメータ（クエリ画面から名前で開いたとき） */
   focusId: string | null;
 }) {
+  const side = useSideWidth('globals');
   const [selectedId, setSelectedId] = useState<string | null>(focusId);
   useEffect(() => {
     if (focusId) setSelectedId(focusId);
@@ -317,7 +319,7 @@ export function GlobalsScreen({
     : [];
 
   return (
-    <div className="globals-screen">
+    <div className="globals-screen" style={side.style}>
       <aside className="globals-list">
         <div className="globals-list-head">
           <h2>共通パラメータ</h2>
@@ -341,6 +343,7 @@ export function GlobalsScreen({
         {sets.length === 0 && <p className="hint">まだありません。「新規」で作ってください。</p>}
         {globals.error && <p className="error-text">{globals.error}</p>}
       </aside>
+      <SideSplitter label="共通パラメータの一覧の幅" side={side} />
 
       {selected ? (
         <>

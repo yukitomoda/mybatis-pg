@@ -1572,7 +1572,8 @@ button.bulk-open {
 
 .globals-screen {
   display: grid;
-  grid-template-columns: minmax(12rem, 16rem) minmax(24rem, 1.2fr) minmax(24rem, 1fr);
+  /* 一覧の幅は、仕切りで変えられる（--side-width） */
+  grid-template-columns: var(--side-width, minmax(12rem, 16rem)) 6px minmax(24rem, 1.2fr) minmax(24rem, 1fr);
   height: 100%;
 }
 
@@ -1580,6 +1581,17 @@ button.bulk-open {
   overflow: auto;
   min-width: 0;
   padding: 0.75rem;
+}
+
+/* 仕切りは余白を付けない（.splitter と同じ） */
+.globals-screen > .splitter {
+  padding: 0 2.5px;
+  overflow: visible;
+}
+
+.globals-screen > .splitter:hover,
+.globals-screen > .splitter:focus-visible {
+  padding: 0 1.5px;
 }
 
 .globals-list {
@@ -2381,8 +2393,9 @@ button.icon.suggest-toggle {
 
 .relations-body {
   display: grid;
-  grid-template-columns: minmax(12rem, 18rem) 1fr;
-  gap: 1rem;
+  /* 表の一覧の幅は、仕切りで変えられる（--side-width） */
+  grid-template-columns: var(--side-width, minmax(12rem, 18rem)) 6px 1fr;
+  gap: 0 0.5rem;
   margin-top: 0.75rem;
   align-items: start;
 }
@@ -2508,4 +2521,20 @@ button.icon.suggest-relation:hover {
 
 .suggest-relation svg {
   display: block;
+}
+
+/* 狭い画面では仕切りを隠すので、仕切りの列を除いて並べる */
+@media (max-width: 960px) {
+  .globals-screen {
+    grid-template-columns: var(--side-width, minmax(12rem, 16rem)) minmax(24rem, 1.2fr) minmax(24rem, 1fr);
+  }
+  .relations-body {
+    grid-template-columns: var(--side-width, minmax(12rem, 18rem)) 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .relations-body {
+    grid-template-columns: 1fr;
+  }
 }

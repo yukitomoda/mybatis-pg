@@ -146,3 +146,92 @@ export function Splitter({
     />
   );
 }
+
+// ---- 2 つのペインの左の幅を変える仕切り（共通パラメータ・リレーションの画面など） ----
+
+const SIDE_KEY = 'mybatis-pg.side-widths';
+
+function loadSide(key: string): number | null {
+  try {
+    const v = (JSON.parse(localStorage.getItem(SIDE_KEY) ?? '{}') as Record<string, unknown>)[key];
+    return typeof v === 'number' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSide(key: string, width: number | null) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SIDE_KEY) ?? '{}') as Record<string, number>;
+    if (width === null) delete all[key];
+    else all[key] = width;
+    localStorage.setItem(SIDE_KEY, JSON.stringify(all));
+  } catch {
+    // 保存できない環境では、この表示中だけ覚える
+  }
+}
+
+/**
+ * 左のペインの幅（画面ごとに覚える）。style の --side-width を、並べる要素の grid-template-columns で使う。
+ *
+ * @param key 画面の名前（覚えるときの名前）
+ */
+export function useSideWidth(key: string) {
+  const [width, setWidth] = useState<number | null>(() => loadSide(key));
+  const set = (w: number | null) => {
+    setWidth(w);
+    saveSide(key, w);
+  };
+  const style = { '--side-width': width === null ? undefined : `${width}px` } as CSSProperties;
+  return { width, set, style };
+}
+
+/**
+ * 仕切り。左隣の要素の幅を、ドラッグ（矢印キーでも）で変える。ダブルクリックで既定の幅に戻す。
+ * 右に MIN_RESULT を残す。
+ */
+export function SideSplitter({ label, side }: { label: string; side: ReturnType<typeof useSideWidth> }) {
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const el = useRef<HTMLDivElement>(null);
+  const current = () => side.width ?? el.current?.previousElementSibling?.getBoundingClientRect().width ?? MIN_SIDEBAR;
+  const set = (w: number | null) => {
+    if (w === null) return side.set(null);
+    const total = el.current?.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
+    side.set(Math.round(Math.max(MIN_SIDEBAR, Math.min(w, total - SPLITTER - MIN_RESULT))));
+  };
+  const end = (e: PointerEvent<HTMLDivElement>) => {
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    document.body.classList.remove('resizing');
+  };
+  return (
+    <div
+      ref={el}
+      className="splitter"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      tabIndex={0}
+      title="ドラッグで幅を変える（ダブルクリックで元に戻す）"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { x: e.clientX, width: current() };
+        document.body.classList.add('resizing');
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        set(drag.current.width + e.clientX - drag.current.x);
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onDoubleClick={() => set(null)}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft') set(current() - STEP);
+        else if (e.key === 'ArrowRight') set(current() + STEP);
+        else return;
+        e.preventDefault();
+      }}
+    />
+  );
+}

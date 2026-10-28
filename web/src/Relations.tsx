@@ -8,6 +8,7 @@ import type {
 } from "./api";
 import type { Connections } from "./Execution";
 import { ConnectionPicker, message } from "./Execution";
+import { SideSplitter, useSideWidth } from "./Splitter";
 import type { GlobalSet } from "./globalModel";
 import { resolveTemplates } from "./gen";
 
@@ -60,6 +61,7 @@ export function RelationsScreen({
   /** 開いたときに見る列（schema.table.column。クエリの画面のパラメータから飛んできたとき） */
   focus: string | null;
 }) {
+  const side = useSideWidth("relations");
   const connectionId = conn.current?.id;
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -256,7 +258,7 @@ export function RelationsScreen({
         </details>
       )}
       {connectionId && !running && (
-        <div className="relations-body">
+        <div className="relations-body" style={side.style}>
           <div className="relations-tables">
             <input
               type="search"
@@ -279,6 +281,7 @@ export function RelationsScreen({
               ))}
             </ul>
           </div>
+          <SideSplitter label="表の一覧の幅" side={side} />
           <div className="relations-detail">
             {table ? (
               <TableRelations
