@@ -141,6 +141,16 @@ function hashOf(screen: Screen, statement: string | null, global: string | null 
   return `#/${screen}`;
 }
 
+/** パラメータの名前（cond.customerId なら customerId、list[0] なら list） */
+function paramNameOf(label: string): string {
+  return (
+    label
+      .replace(/\[\d+\]/g, '')
+      .split('.')
+      .pop() ?? label
+  );
+}
+
 /** アドレスを変えて、履歴に積む（今と同じなら積まない） */
 function pushHash(hash: string) {
   if (window.location.hash !== hash) window.history.pushState(null, '', hash);
@@ -435,6 +445,8 @@ function Workspace({ api }: { api: Api }) {
             columns={s.columns}
             relations={sourceRelations}
             onOpenRelation={openRelation}
+            paramName={paramNameOf(pathLabel(path))}
+            onOpenRelationName={(name) => navigateRelation({ ...NO_RELATION, view: 'names', name })}
             list={s.list}
             current={current}
             onPick={(v) => {

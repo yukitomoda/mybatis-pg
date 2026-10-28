@@ -83,6 +83,8 @@ export function SuggestPanel({
   columns,
   relations,
   onOpenRelation,
+  paramName,
+  onOpenRelationName,
   list,
   current,
   onPick,
@@ -93,6 +95,10 @@ export function SuggestPanel({
   relations: boolean;
   /** リレーションの画面で、列（schema.table.column）を開く */
   onOpenRelation: (column: string) => void;
+  /** パラメータの名前（同じ名前のパラメータから出した候補の根拠を見るため） */
+  paramName: string;
+  /** リレーションの画面の「パラメータ名」で、名前を開く */
+  onOpenRelationName: (name: string) => void;
   /** リストの項目（foreach）。選んだ値を要素として足す */
   list: boolean;
   current: PValue | undefined;
@@ -209,6 +215,7 @@ export function SuggestPanel({
       : null;
 
   const hasOrigin = columns.some((x) => x.role === 'origin');
+  const relationTitle = column.role === 'name' ? '同じ名前のパラメータを見る' : hasOrigin ? 'リレーションを見る' : 'リレーションを追加';
   return (
     <div className="suggest-panel">
       <div className="suggest-head">
@@ -239,15 +246,24 @@ export function SuggestPanel({
             {column.condition}
           </code>
         )}
-        {/* 比べている列のリレーション（なければ、その列を子にして追加する） */}
+        {/* 選んでいる候補の根拠を見る。同じ名前のパラメータからなら「パラメータ名」、源流ならたどり始めた比べている列、
+            比べている列ならその列（リレーションがなければ、その列を子にして追加する） */}
         <button
           type="button"
           className="icon suggest-relation"
-          title={hasOrigin ? 'リレーションを見る' : 'リレーションを追加'}
-          aria-label={hasOrigin ? 'リレーションを見る' : 'リレーションを追加'}
+          title={relationTitle}
+          aria-label={relationTitle}
           onClick={() => {
-            const c = columns.find((x) => x.role === 'compared') ?? column;
-            onOpenRelation(`${c.schema}.${c.table}.${c.column}`);
+            if (column.role === 'name') {
+              onOpenRelationName(paramName);
+              return;
+            }
+            const compared = columns.filter((x) => x.role === 'compared');
+            const start =
+              column.role === 'origin'
+                ? (compared.find((x) => `${x.table}.${x.column}` === column.via[0]) ?? compared[0] ?? column)
+                : column;
+            onOpenRelation(`${start.schema}.${start.table}.${start.column}`);
           }}
         >
           <svg width="13" height="11" viewBox="0 0 18 14" aria-hidden="true">
