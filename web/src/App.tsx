@@ -76,30 +76,74 @@ const SCREENS: [Screen, string][] = [
   ['connections', '接続先'],
 ];
 
-/**
- * URL の # の後ろを読む。#/query/statement の id、#/globals、#/bulk、#/connections。
- * 以前の形（#statement の id）はクエリ画面として読む。
- */
-function parseHash(): {
-  screen: Screen;
-  statement: string | null;
-  /** #/relations/schema.table.column の列 */
+/** リレーションの画面で見ているもの */
+export type RelationLoc = {
+  view: 'tables' | 'statements' | 'names';
+  table: string | null;
+  /** 強調する列（schema.table.column） */
   column: string | null;
-} {
+  statement: string | null;
+  name: string | null;
+};
+
+const NO_RELATION: RelationLoc = { view: 'tables', table: null, column: null, statement: null, name: null };
+
+/** schema.table.column の表の部分 */
+const tableOfColumn = (col: string) => col.slice(0, col.lastIndexOf('.'));
+
+/**
+ * URL の # の後ろを読む。#/query/statement の id、#/globals/共通パラメータの id、#/bulk、#/connections、
+ * #/relations（/table/表、/column/列、/statement/statement の id、/name/パラメータ名）。
+ * 以前の形（#statement の id、#/relations/列）も読む。
+ */
+function parseHash(): { screen: Screen; statement: string | null; global: string | null; relation: RelationLoc } {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  if (!hash) return { screen: 'query', statement: null, column: null };
-  if (!hash.startsWith('/')) return { screen: 'query', statement: hash, column: null };
+  const none = { statement: null, global: null, relation: NO_RELATION };
+  if (!hash) return { screen: 'query', ...none };
+  if (!hash.startsWith('/')) return { screen: 'query', ...none, statement: hash };
   const [, screen, ...rest] = hash.split('/');
   const known = SCREENS.some(([s]) => s === screen);
-  return {
-    screen: known ? (screen as Screen) : 'query',
-    statement: screen === 'query' && rest.length ? rest.join('/') : null,
-    column: screen === 'relations' && rest.length ? rest.join('/') : null,
-  };
+  const arg = rest.join('/');
+  if (screen === 'query') return { screen: 'query', ...none, statement: arg || null };
+  if (screen === 'globals') return { screen: 'globals', ...none, global: arg || null };
+  if (screen === 'relations') {
+    const [kind, ...more] = rest;
+    const value = more.join('/') || null;
+    const relation: RelationLoc =
+      kind === 'table'
+        ? { ...NO_RELATION, table: value }
+        : kind === 'column'
+          ? { ...NO_RELATION, table: value && tableOfColumn(value), column: value }
+          : kind === 'statements' || kind === 'statement'
+            ? { ...NO_RELATION, view: 'statements', statement: value }
+            : kind === 'names' || kind === 'name'
+              ? { ...NO_RELATION, view: 'names', name: value }
+              : arg
+                ? { ...NO_RELATION, table: tableOfColumn(arg), column: arg }
+                : NO_RELATION;
+    return { screen: 'relations', ...none, relation };
+  }
+  return { screen: known ? (screen as Screen) : 'query', ...none };
 }
 
-function hashOf(screen: Screen, statement: string | null): string {
-  return screen === 'query' ? `#/query/${statement ? encodeURIComponent(statement) : ''}` : `#/${screen}`;
+const enc = encodeURIComponent;
+
+function hashOf(screen: Screen, statement: string | null, global: string | null = null, relation: RelationLoc = NO_RELATION): string {
+  if (screen === 'query') return `#/query/${statement ? enc(statement) : ''}`;
+  if (screen === 'globals') return global ? `#/globals/${enc(global)}` : '#/globals';
+  if (screen === 'relations') {
+    const r = relation;
+    if (r.view === 'statements') return r.statement ? `#/relations/statement/${enc(r.statement)}` : '#/relations/statements';
+    if (r.view === 'names') return r.name ? `#/relations/name/${enc(r.name)}` : '#/relations/names';
+    if (r.column) return `#/relations/column/${enc(r.column)}`;
+    return r.table ? `#/relations/table/${enc(r.table)}` : '#/relations';
+  }
+  return `#/${screen}`;
+}
+
+/** アドレスを変えて、履歴に積む（今と同じなら積まない） */
+function pushHash(hash: string) {
+  if (window.location.hash !== hash) window.history.pushState(null, '', hash);
 }
 
 function initialStatement(): string | null {
@@ -172,15 +216,23 @@ function Workspace({ api }: { api: Api }) {
   const [copying, setCopying] = useState(false);
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
-  /** リレーションの画面で見る列（クエリの画面のパラメータから飛んだとき） */
-  const [relationFocus, setRelationFocus] = useState<string | null>(() => parseHash().column);
-  const openRelation = (column: string) => {
-    setRelationFocus(column);
+  /** リレーションの画面で見ているもの（アドレスに残し、戻る・進むで戻す） */
+  const [relationLoc, setRelationLoc] = useState<RelationLoc>(() => parseHash().relation);
+  const navigateRelation = (loc: RelationLoc) => {
+    setRelationLoc(loc);
     setScreen('relations');
-    window.history.pushState(null, '', `#/relations/${encodeURIComponent(column)}`);
+    pushHash(hashOf('relations', null, null, loc));
   };
+  /** クエリの画面のパラメータから、比べている列のリレーションを開く */
+  const openRelation = (column: string) => navigateRelation({ ...NO_RELATION, table: tableOfColumn(column), column });
   /** 共通パラメータの画面で選んでおくもの（クエリ画面で名前を押したとき） */
-  const [globalFocus, setGlobalFocus] = useState<string | null>(null);
+  /** 共通パラメータの画面で選んでいる設定（アドレスに残し、戻る・進むで戻す） */
+  const [globalFocus, setGlobalFocus] = useState<string | null>(() => parseHash().global);
+  const selectGlobal = (id: string | null) => {
+    setGlobalFocus(id);
+    setScreen('globals');
+    pushHash(hashOf('globals', null, id));
+  };
   /** パラメータ欄で編集するもの: 個別の値か、共通パラメータか */
 
   const handleError = (e: unknown) => {
@@ -413,20 +465,21 @@ function Workspace({ api }: { api: Api }) {
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  const select = (id: string) => {
+  /** statement を選ぶ。history: push は履歴に積む（既定）、none は積まない（戻る・進むで選んだとき） */
+  const select = (id: string, history: 'push' | 'none' = 'push') => {
     setSelected(id);
     setCopying(false);
     setLooseFile(null);
     setValue(loadParams(id));
     setResult(null);
     setRenderError(null);
-    window.history.replaceState(null, '', hashOf('query', id));
+    if (history === 'push') pushHash(hashOf('query', id));
   };
 
-  /** 画面を切り替える（ブラウザの履歴に残す） */
+  /** 画面を切り替える（ブラウザの履歴に残す。画面の中で選んでいるものも残す） */
   const go = (next: Screen) => {
     setScreen(next);
-    window.history.pushState(null, '', hashOf(next, selected));
+    pushHash(hashOf(next, selected, globalFocus, relationLoc));
   };
 
   // ブラウザの戻る・進むで、画面と statement を合わせる
@@ -434,8 +487,9 @@ function Workspace({ api }: { api: Api }) {
     const onPop = () => {
       const h = parseHash();
       setScreen(h.screen);
-      if (h.screen === 'relations') setRelationFocus(h.column);
-      if (h.statement && h.statement !== selectedRef.current) select(h.statement);
+      if (h.screen === 'relations') setRelationLoc(h.relation);
+      if (h.screen === 'globals') setGlobalFocus(h.global);
+      if (h.statement && h.statement !== selectedRef.current) select(h.statement, 'none');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -602,14 +656,7 @@ function Workspace({ api }: { api: Api }) {
                   </button>
                 </div>
                 {paramTab === 'global' && target ? (
-                  <StatementGlobals
-                    globals={globals}
-                    statementId={target.id}
-                    onSettings={(id) => {
-                      setGlobalFocus(id);
-                      go('globals');
-                    }}
-                  />
+                  <StatementGlobals globals={globals} statementId={target.id} onSettings={(id) => selectGlobal(id)} />
                 ) : (
                   <>
                     {value && value.t === 'object' && value.fields.length > 0 && applied.length > 0 && !copying && (
@@ -831,7 +878,8 @@ function Workspace({ api }: { api: Api }) {
           generation={generation}
           gen={gen}
           renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
-          focusId={globalFocus}
+          selectedId={globalFocus}
+          onSelect={selectGlobal}
         />
       </div>
 
@@ -846,17 +894,15 @@ function Workspace({ api }: { api: Api }) {
           sourceVersion={`${generation}:${drafts.version}`}
           draftOf={(file) => draftParam(drafts.get(file))}
           onOpen={(id) => {
-            select(id);
             setTab('explain');
             saveTab('explain');
             setScreen('query');
-            window.history.pushState(null, '', hashOf('query', id));
+            select(id);
           }}
           onOpenParams={(id) => {
-            select(id);
             setParamTab('local');
             setScreen('query');
-            window.history.pushState(null, '', hashOf('query', id));
+            select(id);
           }}
         />
       </div>
@@ -866,12 +912,12 @@ function Workspace({ api }: { api: Api }) {
           api={api}
           conn={conn}
           globalSets={globals.sets}
-          focus={relationFocus}
+          loc={relationLoc}
+          onNavigate={navigateRelation}
           active={screen === 'relations'}
           onOpen={(id) => {
-            select(id);
             setScreen('query');
-            window.history.pushState(null, '', hashOf('query', id));
+            select(id);
           }}
         />
       </div>

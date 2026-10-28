@@ -316,7 +316,8 @@ export function GlobalsScreen({
   generation,
   gen,
   renderJson,
-  focusId,
+  selectedId,
+  onSelect,
 }: {
   api: Api;
   globals: Globals;
@@ -324,14 +325,12 @@ export function GlobalsScreen({
   gen: GenContext;
   /** 値の JSON 欄（App の JsonPanel を使う） */
   renderJson: (value: PValue | undefined, onApply: (v: PValue | undefined) => void) => ReactNode;
-  /** 選んでおく共通パラメータ（クエリ画面から名前で開いたとき） */
-  focusId: string | null;
+  /** 選んでいる共通パラメータ（アドレスに残し、ブラウザの戻る・進むで戻すため、呼び出し側で持つ） */
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
 }) {
   const side = useSideWidth('globals');
-  const [selectedId, setSelectedId] = useState<string | null>(focusId);
-  useEffect(() => {
-    if (focusId) setSelectedId(focusId);
-  }, [focusId]);
+  const setSelectedId = onSelect;
   const { sets } = globals;
   const selected = sets.find((s) => s.id === selectedId) ?? null;
   // 既定で入れるものはそれを外している statement、そうでないものはそれを追加している statement

@@ -1,6 +1,7 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
 import { useEffect, useMemo, useState } from 'react';
 import type { Api, RelationLink, RelationStatement, RelationsResult, RelationsTiming } from './api';
+import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import { SideSplitter, useSideWidth } from './Splitter';
@@ -44,7 +45,8 @@ export function RelationsScreen({
   globalSets,
   active,
   onOpen,
-  focus,
+  loc,
+  onNavigate,
 }: {
   api: Api;
   conn: Connections;
@@ -52,35 +54,23 @@ export function RelationsScreen({
   globalSets: GlobalSet[];
   active: boolean;
   onOpen: (id: string) => void;
-  /** 開いたときに見る列（schema.table.column。クエリの画面のパラメータから飛んできたとき） */
-  focus: string | null;
+  /** 見ているもの（アドレスに残し、ブラウザの戻る・進むで戻すため、呼び出し側で持つ） */
+  loc: RelationLoc;
+  onNavigate: (loc: RelationLoc) => void;
 }) {
   const side = useSideWidth('relations');
   const connectionId = conn.current?.id;
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [table, setTable] = useState<string | null>(null);
-  /** 見方: 表と列・statement・パラメータ名 */
-  const [view, setView] = useState<'tables' | 'statements' | 'names'>('tables');
-  /** 強調する列（パラメータから飛んできたとき、列を押したとき） */
-  const [column, setColumn] = useState<string | null>(focus);
-  const [statement, setStatement] = useState<string | null>(null);
-  const [name, setName] = useState<string | null>(null);
-  // パラメータから飛んできたら、その列の表を開く
-  useEffect(() => {
-    if (focus) {
-      setView('tables');
-      setTable(tableOf(focus));
-      setColumn(focus);
-    }
-  }, [focus]);
+  const { view, table, column, statement, name } = loc;
+  const focus = column;
+  const setTable = (t: string) => onNavigate({ ...loc, view: 'tables', table: t, column: null });
+  const setView = (v: RelationLoc['view']) => onNavigate({ ...loc, view: v });
+  const setStatement = (id: string) => onNavigate({ ...loc, view: 'statements', statement: id });
+  const setName = (n: string) => onNavigate({ ...loc, view: 'names', name: n });
   /** 列の表を開く */
-  const goColumn = (col: string) => {
-    setView('tables');
-    setTable(tableOf(col));
-    setColumn(col);
-  };
+  const goColumn = (col: string) => onNavigate({ ...loc, view: 'tables', table: tableOf(col), column: col });
   /** 手で設定したリレーションを変えて、読み直す */
   const change = (c: Parameters<Api['changeManualRelation']>[0]): Promise<void> =>
     api.changeManualRelation(c).then(load, (e) => setError(message(e)));
@@ -522,7 +512,12 @@ function TableRelations({
         connectionId={connectionId}
         allTables={allTables}
         table={table}
-        initialColumn={focus && tableOf(focus) === table ? focus.slice(focus.lastIndexOf('.') + 1) : null}
+        initialColumn={
+          // 強調した列にまだ親がないとき（クエリの画面から「リレーションを追加」で来たときなど）は、その列を入れて開いておく
+          focus && tableOf(focus) === table && !mine.some((l) => l.a === focus && l.kind === 'parent')
+            ? focus.slice(focus.lastIndexOf('.') + 1)
+            : null
+        }
         onAdd={(child, parent) => onChange({ action: 'add', child, parent })}
       />
       <AddLink
