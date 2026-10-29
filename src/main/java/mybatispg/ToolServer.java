@@ -1470,14 +1470,17 @@ public final class ToolServer {
       r = QueryExecutor.queryPart(part.sql(), part::setParameters, () -> connections.open(connectionId), maxRows, timeout);
     } catch (QueryExecutor.ExecutionException e) {
       Map<String, Object> err = error(e.getMessage());
-      err.put("historyId", record("part", string(req, "label"), req, statementId, connectionId, sql, null, null, null, null, null, 0,
-          e.getMessage()));
+      // 「すべての部分を実行」（部分ごとの件数を見る）は、履歴に残さない（"history": false）
+      boolean keep = !req.has("history") || req.get("history").getAsBoolean();
+      err.put("historyId", keep ? record("part", string(req, "label"), req, statementId, connectionId, sql, null, null, null, null, null, 0,
+          e.getMessage()) : null);
       sendJson(ex, 422, err);
       return;
     }
     Map<String, Object> body = new LinkedHashMap<>();
-    body.put("historyId", record("part", string(req, "label"), req, statementId, connectionId, sql,
-        java.util.Collections.singletonList(r.table), null, null, null, r.total, r.elapsedMillis, null));
+    boolean keep = !req.has("history") || req.get("history").getAsBoolean();
+    body.put("historyId", keep ? record("part", string(req, "label"), req, statementId, connectionId, sql,
+        java.util.Collections.singletonList(r.table), null, null, null, r.total, r.elapsedMillis, null) : null);
     body.put("columns", r.table.columns);
     body.put("columnTypes", r.table.columnTypes);
     body.put("rows", r.table.rows);

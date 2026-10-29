@@ -1,5 +1,4 @@
 // パラメータのツリー入力。XML から抜き出した項目を並べ、値の入力・型の選択・手での追加ができる
-import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { hasTemplate } from './gen';
 import type { GenContext } from './GenInput';
@@ -40,15 +39,19 @@ interface Props {
   originOf?: (path: Path) => string | null;
   /** 値の候補（試作）。項目ごとに出せるか、出すときの中身 */
   suggest?: Suggest;
+  /** 項目の入力欄にフォーカスしたとき（結果ビューで、表の値を入れる先にする） */
+  onFocusPath?: (path: Path) => void;
+  /** 一瞬色を付ける項目（結果ビューから値を入れたとき）の pathLabel */
+  flash?: string | null;
 }
 
-/** 値の候補を出す（パラメータが比べられている列から、値を選んで入れる） */
+/** 値の候補を出す（結果ビューで、パラメータが比べられている列の値を見る） */
 export interface Suggest {
   has: (path: Path) => boolean;
-  /** 候補のパネルを開いているか（開閉は呼び出し側で持つ。statement を切り替えたら閉じるため） */
-  isOpen: (path: Path) => boolean;
-  setOpen: (path: Path, open: boolean) => void;
-  render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => ReactNode;
+  /** 結果ビューで、この項目の値の候補を見ているか */
+  active: (path: Path) => boolean;
+  /** 結果ビューで、この項目の値の候補を開く */
+  open: (path: Path) => void;
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -72,9 +75,22 @@ interface Context {
   gen: GenContext;
   update: (path: Path, v: PValue | undefined) => void;
   suggest?: Suggest;
+  onFocusPath?: (path: Path) => void;
+  flash?: string | null;
 }
 
-export function ParamTree({ schema, value, onChange, global, free = false, gen, originOf = () => null, suggest }: Props) {
+export function ParamTree({
+  schema,
+  value,
+  onChange,
+  global,
+  free = false,
+  gen,
+  originOf = () => null,
+  suggest,
+  onFocusPath,
+  flash,
+}: Props) {
   const layered = !free;
   const effective = layered ? effectiveValue(schema, global, value) : value;
   const inherited = layered ? effectiveValue(schema, global, undefined) : undefined;
@@ -82,7 +98,7 @@ export function ParamTree({ schema, value, onChange, global, free = false, gen, 
     const next = layered ? overrideAt(value, effective, path, v) : overrideAt(value, value, path, v);
     onChange(next && next.t === 'object' && next.fields.length === 0 ? undefined : next);
   };
-  const ctx: Context = { local: value, effective, inherited, global, originOf, layered, free, gen, update, suggest };
+  const ctx: Context = { local: value, effective, inherited, global, originOf, layered, free, gen, update, suggest, onFocusPath, flash };
   return (
     <div className="tree" role="tree">
       <Children ctx={ctx} schema={free ? null : schema} path={[]} depth={0} />
@@ -131,8 +147,7 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
   const origin = local === undefined && shown !== undefined ? (fromGlobal ? (ctx.originOf(path) ?? '共通') : '既定') : null;
   const type = shown?.t;
   const set = (v: PValue | undefined) => ctx.update(path, v);
-  const suggesting = !!ctx.suggest?.isOpen(path);
-  const setSuggesting = (open: boolean) => ctx.suggest?.setOpen(path, open);
+  const suggesting = !!ctx.suggest?.active(path);
   const canSuggest = !!ctx.suggest?.has(path);
   // XML で参照されているのに値がない（多くは入力のし忘れ）
   const missing =
@@ -143,7 +158,10 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
 
   return (
     <>
-      <div className={`row${unreferenced ? ' unreferenced' : ''}${origin ? ' inherited' : ''}${missing ? ' missing' : ''}`}>
+      <div
+        className={`row${unreferenced ? ' unreferenced' : ''}${origin ? ' inherited' : ''}${missing ? ' missing' : ''}${ctx.flash === pathLabel(path) ? ' flash' : ''}`}
+        onFocus={ctx.onFocusPath ? () => ctx.onFocusPath!(path) : undefined}
+      >
         <span
           className="name"
           style={{ paddingLeft: `${depth * 1.25}rem` }}
@@ -161,8 +179,8 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
               className={suggesting ? 'icon suggest-toggle open' : 'icon suggest-toggle'}
               title="値の候補（この項目と比べている列の値）"
               aria-label={`${name} の値の候補`}
-              aria-expanded={suggesting}
-              onClick={() => setSuggesting(!suggesting)}
+              aria-pressed={suggesting}
+              onClick={() => ctx.suggest!.open(path)}
             >
               <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
                 <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -224,7 +242,6 @@ function Row({ ctx, name, schema, path, depth, removable }: NodeProps & { name: 
           )
         )}
       </div>
-      {suggesting && canSuggest && <div className="suggest-row">{ctx.suggest!.render(path, shown, set, () => setSuggesting(false))}</div>}
       {(type === 'object' || (type === undefined && schema && schema.properties.length > 0)) && (
         <>
           <Children ctx={ctx} schema={schema} path={path} depth={depth + 1} />

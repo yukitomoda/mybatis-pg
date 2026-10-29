@@ -1,6 +1,7 @@
 // DB での実行と、接続先の設定
 import { useEffect, useRef, useState } from 'react';
-import type { Api, ConnectionInput, ConnectionProfile, DraftParam, ExecuteResponse, ResultTable, VaultStatus } from './api';
+import type { Api, ConnectionInput, ConnectionProfile, DraftParam, VaultStatus } from './api';
+import { ApiError } from './api';
 import type { PValue } from './params';
 
 const CONNECTION_KEY = 'mybatis-pg.connection';
@@ -265,6 +266,7 @@ export function ExecutePanel({
   draft,
   ready,
   onApiError,
+  onResult,
 }: {
   conn: Connections;
   statementId: string;
@@ -274,10 +276,12 @@ export function ExecutePanel({
   /** 入力に誤りがなく、SQL を組み立てられる状態 */
   ready: boolean;
   onApiError: (e: unknown) => void;
+  /** 実行した（結果は結果ビューで見る）。履歴に残せなかったときは null */
+  onResult: (historyId: string | null) => void;
 }) {
   const [commit, setCommit] = useState(false);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ExecuteResponse | null>(null);
+  /** 結果ビューで見られないとき（履歴に残せなかったとき）だけ、ここにエラーを出す */
   const [error, setError] = useState<string | null>(null);
   const current = conn.current;
 
@@ -287,11 +291,13 @@ export function ExecutePanel({
     setRunning(true);
     setError(null);
     try {
-      setResult(await conn.api.execute(statementId, value, current.id, commit, MAX_ROWS, draft));
+      const r = await conn.api.execute(statementId, value, current.id, commit, MAX_ROWS, draft);
+      onResult(r.historyId);
     } catch (e) {
       onApiError(e);
-      setResult(null);
-      setError(message(e));
+      const id = e instanceof ApiError ? e.historyId : null;
+      if (id) onResult(id);
+      else setError(message(e));
     } finally {
       setRunning(false);
       setCommit(false);
@@ -313,70 +319,6 @@ export function ExecutePanel({
       {!ready && current && <p className="hint">SQL を組み立てられないため実行できません。SQL タブに出ているエラーを直してください。</p>}
 
       {error && <pre className="render-error">{error}</pre>}
-      {result && !error && <ExecuteResult result={result} />}
-    </div>
-  );
-}
-
-function ExecuteResult({ result }: { result: ExecuteResponse }) {
-  return (
-    <div className="execute-result">
-      <p className={result.committed ? 'outcome committed' : 'outcome'}>
-        {result.committed ? 'コミットしました' : 'ロールバックしました'}
-        <span className="hint">（{result.elapsedMillis} ms）</span>
-        {result.updateCounts.length > 0 && <span>更新件数: {result.updateCounts.join(', ')}</span>}
-      </p>
-      {result.warnings.length > 0 && (
-        <ul className="notes warn">
-          {result.warnings.map((w, i) => (
-            <li key={i}>{w}</li>
-          ))}
-        </ul>
-      )}
-      {result.resultSets.map((t, i) => (
-        <ResultGrid key={i} table={t} />
-      ))}
-    </div>
-  );
-}
-
-export function ResultGrid({ table }: { table: ResultTable }) {
-  return (
-    <div className="result-grid">
-      <p className="hint">
-        {table.rows.length} 行{table.truncated && `（先頭 ${table.rows.length} 行のみ表示）`}
-      </p>
-      <div className="grid-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th className="rownum">#</th>
-              {table.columns.map((c, i) => (
-                <th key={i} title={table.columnTypes[i]}>
-                  {c}
-                  <span className="type">{table.columnTypes[i]}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {table.rows.map((row, r) => (
-              <tr key={r}>
-                <td className="rownum">{r + 1}</td>
-                {row.map((v, c) =>
-                  v === null ? (
-                    <td key={c} className="null">
-                      NULL
-                    </td>
-                  ) : (
-                    <td key={c}>{v}</td>
-                  ),
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

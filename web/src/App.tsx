@@ -5,7 +5,9 @@ import { ApiError, createApi, takeToken } from './api';
 import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
-import { SuggestPanel } from './Suggest';
+import { CandidatePane } from './Suggest';
+import { cellToParam } from './DataTable';
+import { ResultView, useResultView } from './ResultView';
 import { countParts, PartsPanel } from './Subquery';
 import type { GenCache } from './gen';
 import { forget, resolveTemplates } from './gen';
@@ -19,7 +21,7 @@ import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
 import type { ParamSchema, Path, PValue } from './params';
-import { effectiveValue, fromJson, invalidNumbers, missingParams, pathLabel, toJson } from './params';
+import { effectiveValue, fromJson, getAt, invalidNumbers, missingParams, pathLabel, setAt, toJson } from './params';
 import { loadParams, saveParams } from './paramStore';
 import { tidySql } from './sql';
 import { tokenize } from './template';
@@ -423,41 +425,47 @@ function Workspace({ api }: { api: Api }) {
       abort.abort();
     };
   }, [api, selected, schema, result?.numberedSql, renderError, conn.current?.id, conn.current?.hasPassword, draftP?.content]);
-  // 候補のパネルを開いているパラメータ。別の statement に移ったら閉じる（開いたままだと、移った途端に候補を読み始めるため）
-  const [suggestOpen, setSuggestOpen] = useState<Set<string>>(new Set());
-  useEffect(() => setSuggestOpen(new Set()), [selected]);
+  // 結果ビュー: 実行の結果と値の候補を、浮いたウィンドウにまとめて出す
+  const rv = useResultView(api);
+  /** 結果ビューの表の値を入れる先（最後にフォーカスしたパラメータの欄）。statement を切り替えたら解除する */
+  const [insertTarget, setInsertTarget] = useState<{ statementId: string; path: Path } | null>(null);
+  useEffect(() => setInsertTarget(null), [selected]);
+  /** 値を入れた項目に一瞬色を付ける */
+  const [flash, setFlash] = useState<string | null>(null);
+  const insertCell = (text: string | null, type: string) => {
+    if (!insertTarget || insertTarget.statementId !== selected) return;
+    const v = cellToParam(text, type);
+    const current = getAt(effective, insertTarget.path);
+    // リスト（foreach）の項目なら、要素として足す
+    const list = current?.t === 'list' || sources.get(pathLabel(insertTarget.path))?.list;
+    const next = list ? { t: 'list' as const, items: [...(current?.t === 'list' ? current.items : []), v] } : v;
+    changeValue(setAt(value, insertTarget.path, next));
+    setFlash(pathLabel(insertTarget.path));
+    window.setTimeout(() => setFlash(null), 900);
+  };
+  // 値の候補: 虫眼鏡を押すと、そのパラメータを値を入れる先にして、結果ビューに候補を出す
+  const candidateKey = (path: Path) => `${selected}\u0000${pathLabel(path)}`;
   const suggest = useMemo(
     () => ({
       has: (path: Path) => sources.has(pathLabel(path)),
-      isOpen: (path: Path) => suggestOpen.has(pathLabel(path)),
-      setOpen: (path: Path, open: boolean) =>
-        setSuggestOpen((prev) => {
-          const next = new Set(prev);
-          if (open) next.add(pathLabel(path));
-          else next.delete(pathLabel(path));
-          return next;
-        }),
-      render: (path: Path, current: PValue | undefined, set: (v: PValue | undefined) => void, close: () => void) => {
-        const s = sources.get(pathLabel(path))!;
-        return (
-          <SuggestPanel
-            conn={conn}
-            columns={s.columns}
-            relations={sourceRelations}
-            onOpenRelation={openRelation}
-            paramName={paramNameOf(pathLabel(path))}
-            onOpenRelationName={(name) => navigateRelation({ ...NO_RELATION, view: 'names', name })}
-            list={s.list}
-            current={current}
-            onPick={(v) => {
-              set(v);
-              if (!s.list) close();
-            }}
-          />
-        );
+      active: (path: Path) => rv.open && !rv.minimized && rv.selection?.kind === 'candidate' && rv.selection.key === candidateKey(path),
+      open: (path: Path) => {
+        const src = sources.get(pathLabel(path));
+        if (!selected || !src) return;
+        setInsertTarget({ statementId: selected, path });
+        rv.showCandidate({
+          key: candidateKey(path),
+          statementId: selected,
+          path,
+          label: pathLabel(path),
+          paramName: paramNameOf(pathLabel(path)),
+          columns: src.columns,
+          list: src.list,
+          relations: sourceRelations,
+        });
       },
     }),
-    [sources, conn, sourceRelations, suggestOpen],
+    [sources, selected, sourceRelations, rv.open, rv.minimized, rv.selection],
   );
 
   // 入力や XML が変わるたびにレンダリングする
@@ -612,6 +620,14 @@ function Workspace({ api }: { api: Api }) {
             {label}
           </button>
         ))}
+        <button
+          type="button"
+          className={rv.open && !rv.minimized ? 'nav result-view-toggle selected' : 'nav result-view-toggle'}
+          onClick={rv.toggle}
+          title="実行の結果と値の候補をまとめて見る"
+        >
+          結果ビュー{rv.fresh && <span className="badge warn">新しい結果</span>}
+        </button>
       </nav>
 
       {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
@@ -709,6 +725,8 @@ function Workspace({ api }: { api: Api }) {
                       originOf={(path) => originAt(applied, path)}
                       gen={gen}
                       suggest={suggest}
+                      onFocusPath={(path) => selected && setInsertTarget({ statementId: selected, path })}
+                      flash={flash}
                     />
                     {warnings.length > 0 && (
                       <ul className="notes warn">
@@ -811,6 +829,7 @@ function Workspace({ api }: { api: Api }) {
                   draft={draftP}
                   ready={numberIssues.length === 0 && !renderError}
                   onApiError={handleError}
+                  onResult={(id) => id && rv.showHistory(id)}
                 />
               ) : (
                 <p className="hint">左の一覧から statement を選んでください。</p>
@@ -830,6 +849,7 @@ function Workspace({ api }: { api: Api }) {
                   gen={gen}
                   missing={missing}
                   onApiError={handleError}
+                  onResult={(id) => rv.showHistory(id)}
                 />
               )}
             </div>
@@ -946,6 +966,45 @@ function Workspace({ api }: { api: Api }) {
       <div className="screen scroll" hidden={screen !== 'connections'}>
         <ConnectionsScreen conn={conn} />
       </div>
+
+      <ResultView
+        rv={rv}
+        api={api}
+        target={
+          insertTarget && insertTarget.statementId === selected
+            ? `${pathLabel(insertTarget.path)}（${shortId(insertTarget.statementId)}）`
+            : null
+        }
+        onClearTarget={() => setInsertTarget(null)}
+        onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
+        onOpenStatement={(id) => {
+          setScreen('query');
+          select(id);
+        }}
+        onRestoreParams={(id, parameters) => {
+          // 型付きの JSON をパラメータの値にして保存し、その statement を開く（開くときに保存した値を読む）
+          const v = parameters == null ? undefined : fromJson(JSON.stringify(parameters));
+          saveParams(id, v);
+          setScreen('query');
+          if (id === selected) setValue(v);
+          else select(id);
+        }}
+        renderCandidate={(c, visible) => (
+          <CandidatePane
+            key={c.key}
+            conn={conn}
+            columns={c.columns}
+            relations={c.relations}
+            onOpenRelation={openRelation}
+            paramName={c.paramName}
+            onOpenRelationName={(name) => navigateRelation({ ...NO_RELATION, view: 'names', name })}
+            list={c.list}
+            current={c.statementId === selected ? getAt(effective, c.path) : undefined}
+            visible={visible}
+            onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
+          />
+        )}
+      />
     </div>
   );
 }

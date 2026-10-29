@@ -169,6 +169,8 @@ export interface ExecuteResponse {
   updateCounts: number[];
   warnings: string[];
   committed: boolean;
+  /** 実行の履歴に残したときの id */
+  historyId: string | null;
   elapsedMillis: number;
 }
 
@@ -177,6 +179,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** 実行の履歴に残したときの id（失敗した実行も、結果ビューで見られるように） */
+    readonly historyId: string | null = null,
   ) {
     super(message);
   }
@@ -278,12 +282,15 @@ export function createApi(token: string) {
     const text = await res.text();
     if (!res.ok) {
       let message = text || res.statusText;
+      let historyId: string | null = null;
       try {
-        message = (JSON.parse(text) as { error?: string }).error ?? res.statusText;
+        const body = JSON.parse(text) as { error?: string; historyId?: string | null };
+        message = body.error ?? res.statusText;
+        historyId = body.historyId ?? null;
       } catch {
         // JSON でなければ本文をそのまま使う
       }
-      throw new ApiError(res.status, message);
+      throw new ApiError(res.status, message, historyId);
     }
     return text;
   }
@@ -473,6 +480,8 @@ export function createApi(token: string) {
     ) =>
       call<{
         columns: string[];
+        /** 列の型（セルの値をパラメータの型に直すため） */
+        columnTypes: string[];
         rows: (string | null)[][];
         currentRows: (string | null)[][];
         currentError: string | null;
@@ -532,14 +541,34 @@ export function createApi(token: string) {
      * statement の SQL の一部（サブクエリ・CTE など）を、本番と同じバインド変数で、読み取り専用で実行する（必ずロールバックする）。
      * sql は番号付き（$1, $2, ...。render の numberedSql と同じ番号）
      */
-    runPart: (statementId: string, parameters: PValue | undefined, draft: DraftParam, connectionId: string, sql: string, maxRows = 200) =>
-      call<ResultTable & { total: number | null; elapsedMillis: number }>(
+    /**
+     * @param label 部分の名前（実行の履歴に出す）
+     * @param history 実行の履歴に残すか（「すべての部分を実行」では残さない）
+     */
+    runPart: (
+      statementId: string,
+      parameters: PValue | undefined,
+      draft: DraftParam,
+      connectionId: string,
+      sql: string,
+      label: string,
+      history = true,
+      maxRows = 200,
+    ) =>
+      call<ResultTable & { total: number | null; elapsedMillis: number; historyId: string | null }>(
         'api/part',
         post(
           `{"statementId":${JSON.stringify(statementId)},"draft":${JSON.stringify(draft)},"connectionId":${JSON.stringify(connectionId)},` +
-            `"sql":${JSON.stringify(sql)},"maxRows":${maxRows},"parameters":${toJson(parameters, '')}}`,
+            `"sql":${JSON.stringify(sql)},"label":${JSON.stringify(label)},"history":${history},"maxRows":${maxRows},` +
+            `"parameters":${toJson(parameters, '')}}`,
         ),
       ),
+    /** 実行の履歴の一覧（新しい順） */
+    results: () => call<{ entries: HistorySummary[] }>('api/results', post('{}')),
+    /** 実行の履歴の 1 件 */
+    result: (id: string) => call<HistoryEntry>('api/results', post(JSON.stringify({ id }))),
+    /** 実行の履歴をすべて消す */
+    clearResults: () => call<{ ok: boolean }>('api/results', post(JSON.stringify({ clear: true }))),
     tables: (connectionId: string, tables: string[]) =>
       call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */
@@ -623,4 +652,44 @@ export interface RelationsTiming {
   planPerStatementMillis?: number;
   /** 残りの推定時間（多めに出る） */
   remainingMillis?: number;
+}
+
+/** 実行の履歴の一覧の 1 件 */
+export interface HistorySummary {
+  id: string;
+  kind: 'execute' | 'part';
+  /** 部分の名前（サブクエリの部分のとき） */
+  label: string | null;
+  statementId: string;
+  connectionName: string;
+  executedAt: number;
+  elapsedMillis: number;
+  committed: boolean | null;
+  rows: number;
+  /** 失敗したときの理由の 1 行目 */
+  error: string | null;
+}
+
+/** 実行の履歴の 1 件の中身 */
+export interface HistoryEntry {
+  id: string;
+  kind: 'execute' | 'part';
+  label: string | null;
+  statementId: string;
+  /** 編集中の下書きで実行した */
+  draft: boolean;
+  connectionId: string;
+  connectionName: string;
+  executedAt: number;
+  elapsedMillis: number;
+  /** 送った値（型付きの JSON） */
+  parameters: unknown;
+  sql: string | null;
+  resultSets: ResultTable[];
+  updateCounts: number[];
+  warnings: string[];
+  committed: boolean | null;
+  /** サブクエリの部分の全体の件数 */
+  total: number | null;
+  error: string | null;
 }

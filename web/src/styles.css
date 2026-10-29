@@ -526,14 +526,6 @@ button.run.danger {
   font-weight: normal;
 }
 
-.result-grid {
-  margin-bottom: 1rem;
-}
-
-.result-grid .hint {
-  margin: 0 0 0.3rem;
-}
-
 .grid-scroll {
   overflow: auto;
   max-height: 60vh;
@@ -2244,12 +2236,6 @@ button.icon.suggest-toggle {
   opacity: 1;
 }
 
-.suggest-row {
-  padding: 0.3rem 0.5rem 0.5rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--code-bg);
-}
-
 .suggest-head {
   display: flex;
   align-items: center;
@@ -2277,82 +2263,6 @@ button.icon.suggest-toggle {
 .suggest-method {
   margin: 0;
   font-size: 11px;
-}
-
-.suggest-table {
-  max-height: 16rem;
-  overflow: auto;
-  margin: 0.35rem 0 0.2rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel);
-}
-
-.suggest-table table {
-  border-collapse: collapse;
-  font-size: 12px;
-  font-family: var(--mono);
-}
-
-.suggest-table th,
-.suggest-table td {
-  padding: 0.15rem 0.45rem;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: left;
-}
-
-.suggest-table th {
-  position: sticky;
-  top: 0;
-  background: var(--code-bg);
-  font-weight: 600;
-}
-
-.suggest-table .num {
-  text-align: right;
-  color: var(--muted);
-}
-
-.suggest-table .target {
-  font-weight: 700;
-}
-
-.suggest-table tbody tr {
-  cursor: pointer;
-}
-
-.suggest-table tbody tr:hover td {
-  background: var(--accent-bg);
-}
-
-.suggest-table tr.current td {
-  background: var(--warn-bg);
-}
-
-/* 対象の列（パラメータと比べている列）に背景を付けて目立たせる */
-.suggest-table td.target {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.suggest-table th.target {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--code-bg));
-}
-
-.suggest-table tbody tr:hover td.target {
-  background: color-mix(in srgb, var(--accent) 22%, var(--accent-bg));
-}
-
-.suggest-table tr.current td.target {
-  background: color-mix(in srgb, var(--accent) 14%, var(--warn-bg));
-}
-
-.suggest-table .null {
-  color: var(--muted);
 }
 
 .source-needs {
@@ -2662,4 +2572,285 @@ button.icon.suggest-relation:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- 結果ビュー ---- */
+.result-view {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 360px;
+  min-height: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  /* 右下の角をドラッグして大きさを変える */
+  resize: both;
+  overflow: hidden;
+}
+
+.result-view.maximized {
+  inset: 3rem 1rem 1rem;
+  resize: none;
+}
+
+.result-view-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+}
+
+.result-view-title {
+  font-weight: 700;
+}
+
+.result-view-target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.result-view-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) 1fr;
+}
+
+.result-view-list {
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding: 0.4rem;
+}
+
+.result-view-list h4 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.4rem 0 0.2rem;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.result-view-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.result-view-list li button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.result-view-list li button:hover {
+  background: var(--code-bg);
+}
+
+.result-view-list li button.selected {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.result-view-item-title {
+  font-family: var(--mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-view-detail {
+  overflow: auto;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-view-detail h3 {
+  margin: 0 0 0.4rem;
+  font-size: 14px;
+}
+
+/* 最小化したときの、右下の帯 */
+.result-view-bar {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.result-view-bar.fresh {
+  border-color: var(--warn);
+}
+
+.result-view-toggle {
+  margin-left: auto;
+}
+
+.history-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  margin-bottom: 0.4rem;
+  font-size: 13px;
+}
+
+.history-params,
+.history-sql {
+  margin: 0.2rem 0;
+  font-size: 12px;
+}
+
+.history-params pre,
+.history-sql pre {
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.result-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.3rem 0;
+}
+
+.result-tabs button.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+/* ---- 結果の表 ---- */
+.data-table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.data-table-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.3rem 0;
+}
+
+.data-table-bar input {
+  width: 14rem;
+}
+
+.data-table-scroll {
+  overflow: auto;
+  min-height: 6rem;
+  flex: 1;
+  border: 1px solid var(--border);
+}
+
+.data-table table {
+  border-collapse: collapse;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.15rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--code-bg);
+  cursor: pointer;
+}
+
+.data-table .lead {
+  color: var(--muted);
+  text-align: right;
+}
+
+.data-table td.null {
+  color: var(--muted);
+}
+
+/* セルを押してパラメータに値を入れられる */
+.data-table td.insertable {
+  cursor: pointer;
+}
+
+.data-table td.insertable:hover {
+  outline: 1px solid var(--accent);
+  background: var(--accent-bg);
+}
+
+/* 強調する列（値の候補で、パラメータと比べている列）: この列の値を使うのが普通 */
+.data-table th.target {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--code-bg));
+}
+
+.data-table td.target {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.data-table tr.current td {
+  background: var(--warn-bg);
+}
+
+.data-table tr.current td.target {
+  background: color-mix(in srgb, var(--accent) 14%, var(--warn-bg));
+}
+
+/* 値の候補 */
+.candidate-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* 結果ビューから値を入れたパラメータの行を、一瞬光らせる */
+.params .row.flash {
+  animation: param-flash 0.9s ease-out;
+}
+
+@keyframes param-flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  to {
+    background: transparent;
+  }
 }

@@ -1,8 +1,9 @@
 // サブクエリのタブ: SQL の中のサブクエリ・CTE を木で見せ、部分ごとに本番と同じバインド変数で実行する（読み取り専用、必ずロールバック）
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DraftParam, RenderResponse, ResultTable } from './api';
+import type { DraftParam, RenderResponse } from './api';
 import type { Connections } from './Execution';
-import { ConnectionPicker, message, ResultGrid } from './Execution';
+import { ConnectionPicker, message } from './Execution';
+import { ApiError } from './api';
 import { resolveTemplates } from './gen';
 import type { GenContext } from './GenInput';
 import { ParamTree } from './ParamTree';
@@ -11,7 +12,8 @@ import { getAt, invalidNumbers, isValidNumber } from './params';
 import type { Part } from './subquery';
 import { analyze, missingIn, partLabel, partSql } from './subquery';
 
-type RunResult = { ok: true; table: ResultTable; total: number | null; elapsedMillis: number } | { ok: false; error: string };
+/** 部分を実行した結果（件数を木に出す。表は結果ビューで見る）。historyId は実行の履歴に残したときの id */
+type RunResult = { ok: true; total: number | null; historyId: string | null } | { ok: false; error: string; historyId: string | null };
 
 const KIND_HINT: Record<Part['kind'], string> = {
   main: '',
@@ -87,6 +89,7 @@ export function PartsPanel({
   gen,
   missing,
   onApiError,
+  onResult,
 }: {
   conn: Connections;
   statementId: string;
@@ -97,6 +100,8 @@ export function PartsPanel({
   /** 値が未設定の項目（パラメータ欄の未設定と同じ） */
   missing: string[];
   onApiError: (e: unknown) => void;
+  /** 部分を実行した（結果は結果ビューで見る） */
+  onResult: (historyId: string) => void;
 }) {
   // 実行はバインド変数を番号にした SQL で、位置の表示は値を埋め込んだ SQL で行う（どちらも同じ形に分かれる）
   const numbered = useMemo(() => analyze(rendered.numberedSql), [rendered.numberedSql]);
@@ -147,22 +152,26 @@ export function PartsPanel({
     return new Map(parts.map((p) => [p.key, missingIn(partSql(numbered, p, values), props, missing)]));
   }, [parts, numbered, values, rendered.bindings, missing]);
 
-  const run = async (p: Part) => {
+  /** @param history 実行の履歴に残して結果ビューで見るか（「すべての部分を実行」は件数を見るためなので残さない） */
+  const run = async (p: Part, history = true) => {
     const current = conn.current;
     if (!current) return;
     setRunning(p.key);
     try {
-      const r = await conn.api.runPart(statementId, value, draft, current.id, partSql(numbered, p, values));
-      setResults((old) => ({ ...old, [p.key]: { ok: true, table: r, total: r.total, elapsedMillis: r.elapsedMillis } }));
+      const r = await conn.api.runPart(statementId, value, draft, current.id, partSql(numbered, p, values), partLabel(p), history);
+      setResults((old) => ({ ...old, [p.key]: { ok: true, total: r.total, historyId: r.historyId } }));
+      if (r.historyId) onResult(r.historyId);
     } catch (e) {
       onApiError(e);
-      setResults((old) => ({ ...old, [p.key]: { ok: false, error: message(e) } }));
+      const id = e instanceof ApiError ? e.historyId : null;
+      setResults((old) => ({ ...old, [p.key]: { ok: false, error: message(e), historyId: id } }));
+      if (id) onResult(id);
     } finally {
       setRunning(null);
     }
   };
   const runAll = async () => {
-    for (const p of parts) if (runnable(p)) await run(p);
+    for (const p of parts) if (runnable(p)) await run(p, false);
   };
 
   // 選んだ部分が見えるよう、SQL の中の位置の欄をその部分までスクロールする
@@ -266,17 +275,8 @@ export function PartsPanel({
                 <summary>実行する SQL</summary>
                 <pre className="sql">{partSql(numbered, selected, values)}</pre>
               </details>
-              {result &&
-                (result.ok ? (
-                  <>
-                    <p className="hint">
-                      全 {result.total ?? '?'} 件・{result.elapsedMillis} ms
-                    </p>
-                    <ResultGrid table={result.table} />
-                  </>
-                ) : (
-                  <pre className="render-error">{result.error}</pre>
-                ))}
+              {/* 結果は結果ビューで見る。「すべての部分を実行」のエラーは、履歴に残さないのでここに出す */}
+              {result && !result.ok && !result.historyId && <pre className="render-error">{result.error}</pre>}
             </>
           )}
         </div>

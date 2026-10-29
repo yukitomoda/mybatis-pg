@@ -1059,13 +1059,14 @@ final class ParamSources {
       Map<String, Object> body = new LinkedHashMap<>();
       List<List<String>> candidateRows = new ArrayList<>();
       List<String> columns = new ArrayList<>();
+      List<String> columnTypes = new ArrayList<>();
       if (!values.isEmpty()) {
         // 値ごとに LIMIT 1 で取る（1 行見つかれば止まるので、行の多い値やインデックスのない列でも、その値の行をすべて読まない）
         try (PreparedStatement ps = c.prepareStatement("SELECT r.* FROM unnest((?::text[])::" + type + "[]) WITH ORDINALITY AS v(val, i)"
             + " CROSS JOIN LATERAL (SELECT * FROM " + q + " WHERE " + col + " = v.val LIMIT 1) r ORDER BY v.i")) {
           ps.setQueryTimeout(10);
           ps.setArray(1, c.createArrayOf("text", values.toArray()));
-          read(ps, columns, candidateRows, values.size());
+          read(ps, columns, columnTypes, candidateRows, values.size());
         }
       }
       List<List<String>> currentRows = new ArrayList<>();
@@ -1077,7 +1078,7 @@ final class ParamSources {
         try (PreparedStatement ps = c.prepareStatement("SELECT * FROM " + q + " WHERE " + col + " = (?::text)::" + type + " LIMIT 5")) {
           ps.setQueryTimeout(10);
           ps.setString(1, current);
-          read(ps, columns, currentRows, 5);
+          read(ps, columns, columnTypes, currentRows, 5);
         } catch (SQLException e) {
           // 入力中の値が列の型として読めないなど
           currentError = e.getMessage();
@@ -1087,6 +1088,8 @@ final class ParamSources {
         }
       }
       body.put("columns", columns);
+      // 列の型（結果ビューで、セルの値をパラメータの型に直すため）
+      body.put("columnTypes", columnTypes);
       body.put("rows", candidateRows);
       body.put("currentRows", currentRows);
       body.put("currentError", currentError);
@@ -1108,12 +1111,14 @@ final class ParamSources {
     }
   }
 
-  private static void read(PreparedStatement ps, List<String> columns, List<List<String>> out, int max) throws SQLException {
+  private static void read(PreparedStatement ps, List<String> columns, List<String> types, List<List<String>> out, int max)
+      throws SQLException {
     try (ResultSet rs = ps.executeQuery()) {
       java.sql.ResultSetMetaData meta = rs.getMetaData();
       if (columns.isEmpty()) {
         for (int i = 1; i <= meta.getColumnCount(); i++) {
           columns.add(meta.getColumnLabel(i));
+          types.add(meta.getColumnTypeName(i));
         }
       }
       while (rs.next() && out.size() < max) {

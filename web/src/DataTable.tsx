@@ -1,0 +1,135 @@
+// 結果ビューの表: 並べ替え・絞り込み・TSV でコピー・強調する列・セルを押してパラメータに値を入れる
+import { useMemo, useState } from 'react';
+import type { PValue } from './params';
+
+const NUMBER_TYPES = /^(int2|int4|int8|smallint|integer|bigint|numeric|decimal|float4|float8|real|double precision|serial|bigserial|oid)\b/;
+const STRING_TYPES = /^(text|varchar|character|bpchar|char|name|citext|"char")\b/;
+
+/**
+ * セルの値（文字）を、列の型に合わせてパラメータの値にする。型は JDBC の名前（int4、timestamptz など）でも、
+ * format_type の名前（integer、timestamp without time zone など）でもよい。
+ */
+export function cellToParam(text: string | null, type: string): PValue {
+  if (text === null) return { t: 'null' };
+  const t = type.toLowerCase();
+  if (NUMBER_TYPES.test(t)) return { t: 'number', v: text };
+  if (t.startsWith('timestamp')) return { t: 'timestamp', v: text.replace(/(\.\d+)?([+-]\d{2}(:\d{2})?)?$/, '') };
+  if (t === 'date') return { t: 'date', v: text };
+  if (t === 'bool' || t === 'boolean') return { t: 'boolean', v: text === 't' || text === 'true' };
+  if (STRING_TYPES.test(t)) return { t: 'string', v: text };
+  // 列挙型・uuid・jsonb など: その型でバインドする（配列の _int4 は int4[]）
+  return { t: 'pg', type: t.startsWith('_') ? `${t.slice(1)}[]` : type, v: text };
+}
+
+const isNumberType = (type: string | undefined) => !!type && NUMBER_TYPES.test(type.toLowerCase());
+
+export function DataTable({
+  columns,
+  types,
+  rows,
+  lead,
+  rowClass,
+  highlight,
+  onCell,
+}: {
+  columns: string[];
+  /** 列の型（なければ空文字） */
+  types: string[];
+  rows: (string | null)[][];
+  /** 先頭に足す列（値の候補の「件数」など）。見出しと、行ごとの文字 */
+  lead?: { header: string; cells: string[] };
+  /** 行ごとの class（値の候補の「入力中」の行など） */
+  rowClass?: (index: number) => string | undefined;
+  /** 強調する列（値の候補で、パラメータと比べている列） */
+  highlight?: string | null;
+  /** セルを押したとき（パラメータに値を入れる）。なければ押せない */
+  onCell?: (text: string | null, type: string) => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // 絞り込みと並べ替え（元の行の番号を持つ）
+  const order = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    let idx = rows.map((_, i) => i);
+    if (q) idx = idx.filter((i) => rows[i].some((v) => v !== null && v.toLowerCase().includes(q)));
+    if (sort) {
+      const num = isNumberType(types[sort.col]);
+      idx = [...idx].sort((a, b) => {
+        const x = rows[a][sort.col];
+        const y = rows[b][sort.col];
+        // NULL は最後
+        if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+        const c = num ? Number(x) - Number(y) : x.localeCompare(y, 'ja');
+        return sort.desc ? -c : c;
+      });
+    }
+    return idx;
+  }, [rows, types, filter, sort]);
+
+  const copy = () => {
+    const esc = (v: string | null) => (v === null ? '' : v.replace(/[\t\n\r]/g, ' '));
+    const text = [columns.join('\t'), ...order.map((i) => rows[i].map(esc).join('\t'))].join('\n');
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
+  };
+  const target = highlight ? columns.indexOf(highlight) : -1;
+
+  return (
+    <div className="data-table">
+      <div className="data-table-bar">
+        <input type="search" placeholder="絞り込む" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <span className="hint">{order.length === rows.length ? `${rows.length} 行` : `${order.length} / ${rows.length} 行`}</span>
+        <button type="button" className="link" onClick={copy} title="見えている行を、タブ区切りでコピーします（Excel に貼れます）">
+          {copied ? 'コピーしました' : 'TSV でコピー'}
+        </button>
+      </div>
+      <div className="data-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {lead && <th className="lead">{lead.header}</th>}
+              {columns.map((c, i) => (
+                <th
+                  key={i}
+                  className={i === target ? 'target' : undefined}
+                  title={types[i] ? `${types[i]}（押すと並べ替え）` : '押すと並べ替え'}
+                  onClick={() => setSort(sort?.col === i ? (sort.desc ? null : { col: i, desc: true }) : { col: i, desc: false })}
+                >
+                  {c}
+                  {sort?.col === i && <span className="sort-mark">{sort.desc ? ' ▼' : ' ▲'}</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {order.map((r) => (
+              <tr key={r} className={rowClass?.(r)}>
+                {lead && <td className="lead">{lead.cells[r]}</td>}
+                {rows[r].map((v, c) => (
+                  <td
+                    key={c}
+                    className={
+                      [c === target ? 'target' : '', v === null ? 'null' : '', onCell ? 'insertable' : ''].filter(Boolean).join(' ') ||
+                      undefined
+                    }
+                    title={v ?? 'NULL'}
+                    onClick={onCell ? () => onCell(v, types[c] ?? '') : undefined}
+                  >
+                    {v ?? 'NULL'}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
