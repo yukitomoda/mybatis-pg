@@ -413,6 +413,11 @@ public final class ToolServer {
           analyzeRelations(ex);
         }
         break;
+      case "/api/results":
+        if (requireMethod(ex, method, "POST")) {
+          history(ex);
+        }
+        break;
       case "/api/param-sources":
         if (requireMethod(ex, method, "POST")) {
           paramSources(ex);
@@ -1068,7 +1073,10 @@ public final class ToolServer {
       r = QueryExecutor.execute(renderer, statementId, parameters, () -> connections.open(connectionId), options);
     } catch (QueryExecutor.ExecutionException | RuntimeException e) {
       // SQL のエラー、接続できない、OGNL の評価エラーなど
-      sendJson(ex, 422, error(e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e)));
+      String message = e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e);
+      Map<String, Object> err = error(message);
+      err.put("historyId", record("execute", null, req, statementId, connectionId, null, null, null, null, null, null, 0, message));
+      sendJson(ex, 422, err);
       return;
     }
     Map<String, Object> body = new LinkedHashMap<>();
@@ -1078,6 +1086,81 @@ public final class ToolServer {
     body.put("warnings", r.warnings);
     body.put("committed", r.committed);
     body.put("elapsedMillis", r.elapsedMillis);
+    body.put("historyId", record("execute", null, req, statementId, connectionId, r.sql, r.resultSets, r.updateCounts, r.warnings, r.committed,
+        null, r.elapsedMillis, null));
+    sendJson(ex, 200, body);
+  }
+
+  // ---- 実行の履歴（結果ビュー） ----
+
+  /** 実行の履歴（~/.mybatis-pg/results/プロジェクト）。保存先を決めなければ、メモリに持つ */
+  private ResultHistory results;
+
+  public void useResults(Path dir) {
+    results = ResultHistory.open(dir, workspace.projectKey());
+  }
+
+  private synchronized ResultHistory results() {
+    if (results == null) {
+      results = ResultHistory.open(null, "");
+    }
+    return results;
+  }
+
+  /** 実行を履歴に残し、id を返す。残せなければ null（実行の結果は返す） */
+  private String record(String kind, String label, JsonObject req, String statementId, String connectionId, String sql,
+      List<QueryExecutor.ResultTable> resultSets, List<Integer> updateCounts, List<String> warnings, Boolean committed, Long total,
+      long elapsedMillis, String error) {
+    JsonObject o = new JsonObject();
+    o.addProperty("kind", kind);
+    o.addProperty("label", label);
+    o.addProperty("statementId", statementId);
+    o.addProperty("draft", req.has("draft") && !req.get("draft").isJsonNull());
+    o.addProperty("connectionId", connectionId);
+    ConnectionStore.Profile p = connections.get(connectionId);
+    o.addProperty("connectionName", p == null ? connectionId : p.name);
+    o.addProperty("executedAt", System.currentTimeMillis());
+    o.addProperty("elapsedMillis", elapsedMillis);
+    o.add("parameters", req.has("parameters") ? req.get("parameters") : null);
+    o.addProperty("sql", sql);
+    o.add("resultSets", resultSets == null ? new com.google.gson.JsonArray() : Json.GSON.toJsonTree(resultSets));
+    o.add("updateCounts", updateCounts == null ? new com.google.gson.JsonArray() : Json.GSON.toJsonTree(updateCounts));
+    o.add("warnings", warnings == null ? new com.google.gson.JsonArray() : Json.GSON.toJsonTree(warnings));
+    o.addProperty("committed", committed);
+    o.addProperty("total", total);
+    o.addProperty("error", error);
+    try {
+      return results().add(o);
+    } catch (IOException e) {
+      return null;
+    }
+  }
+
+  /** 実行の履歴: {} なら一覧（新しい順、結果の行は含めない）、{"id"} ならその 1 件、{"clear": true} ならすべて消す */
+  private void history(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    if (req.has("clear") && req.get("clear").getAsBoolean()) {
+      results().clear();
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("ok", true);
+      sendJson(ex, 200, body);
+      return;
+    }
+    String id = string(req, "id");
+    if (id != null) {
+      JsonObject o = results().get(id);
+      if (o == null) {
+        sendJson(ex, 404, error("履歴がありません: " + id));
+        return;
+      }
+      sendJson(ex, 200, o);
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("entries", results().list());
     sendJson(ex, 200, body);
   }
 
@@ -1386,10 +1469,15 @@ public final class ToolServer {
     try {
       r = QueryExecutor.queryPart(part.sql(), part::setParameters, () -> connections.open(connectionId), maxRows, timeout);
     } catch (QueryExecutor.ExecutionException e) {
-      sendJson(ex, 422, error(e.getMessage()));
+      Map<String, Object> err = error(e.getMessage());
+      err.put("historyId", record("part", string(req, "label"), req, statementId, connectionId, sql, null, null, null, null, null, 0,
+          e.getMessage()));
+      sendJson(ex, 422, err);
       return;
     }
     Map<String, Object> body = new LinkedHashMap<>();
+    body.put("historyId", record("part", string(req, "label"), req, statementId, connectionId, sql,
+        java.util.Collections.singletonList(r.table), null, null, null, r.total, r.elapsedMillis, null));
     body.put("columns", r.table.columns);
     body.put("columnTypes", r.table.columnTypes);
     body.put("rows", r.table.rows);

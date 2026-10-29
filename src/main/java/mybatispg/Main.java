@@ -154,6 +154,10 @@ public final class Main {
     Path playgroundDir = configDir.resolve("playground");
     server.usePlaygrounds(PlaygroundStore.open(playgroundDir, workspace.projectKey()));
     System.out.println("プレイグラウンド: " + playgroundDir);
+    // 実行の履歴（結果ビュー。プロジェクトごとに直近の 50 件）
+    Path resultsDir = configDir.resolve("results");
+    server.useResults(resultsDir);
+    System.out.println("実行の履歴: " + resultsDir);
     // リレーションの解析の結果（プロジェクトと接続先ごと）
     Path relationsDir = configDir.resolve("relations");
     server.useRelations(relationsDir);
