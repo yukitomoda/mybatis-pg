@@ -1,5 +1,5 @@
 // 結果ビューの表: 並べ替え・絞り込み・TSV でコピー・強調する列・セルを押してパラメータに値を入れる
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PValue } from './params';
 
 const NUMBER_TYPES = /^(int2|int4|int8|smallint|integer|bigint|numeric|decimal|float4|float8|real|double precision|serial|bigserial|oid)\b/;
@@ -86,9 +86,10 @@ export function DataTable({
       <div className="data-table-bar">
         <input type="search" placeholder="絞り込む" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <span className="hint">{order.length === rows.length ? `${rows.length} 行` : `${order.length} / ${rows.length} 行`}</span>
-        <button type="button" className="link" onClick={copy} title="見えている行を、タブ区切りでコピーします（Excel に貼れます）">
-          {copied ? 'コピーしました' : 'TSV でコピー'}
-        </button>
+        {copied && <span className="hint">コピーしました</span>}
+        <TableMenu
+          items={[{ label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: copy }]}
+        />
       </div>
       <div className="data-table-scroll">
         <table>
@@ -131,5 +132,44 @@ export function DataTable({
         </table>
       </div>
     </div>
+  );
+}
+
+/** 表の操作のメニュー（⋯ を押すと開く。項目を選ぶか、外を押すと閉じる） */
+function TableMenu({ items }: { items: { label: string; title?: string; onSelect: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  return (
+    <span className="table-menu" ref={box}>
+      <button type="button" className="icon" aria-label="表の操作" aria-expanded={open} title="表の操作" onClick={() => setOpen(!open)}>
+        ⋯
+      </button>
+      {open && (
+        <span className="table-menu-list" role="menu">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              title={it.title}
+              onClick={() => {
+                setOpen(false);
+                it.onSelect();
+              }}
+            >
+              {it.label}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
