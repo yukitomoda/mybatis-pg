@@ -346,4 +346,85 @@ class RelationsTest {
     assertEquals("users.id name", b.get(1).table + "." + b.get(1).column + " " + b.get(1).role);
     assertTrue(got.get("id").isEmpty());
   }
+
+  @Test
+  void 複数の列でできた主キーのすべての列と結ばれていれば親子_源流は祖先までたどる() throws Exception {
+    Relations.Store store = Relations.Store.open(null, "proj", "conn");
+    // categories(id) ← post(categoryId, postId) ← comment(categoryId, postId, commentId)
+    store.tableKeys.put("app.categories", Collections.singletonList(new Relations.TableKey(true, Arrays.asList("id"))));
+    store.tableKeys.put("app.post", Collections.singletonList(new Relations.TableKey(true, Arrays.asList("categoryid", "postid"))));
+    store.tableKeys.put("app.comment", Collections.singletonList(new Relations.TableKey(true, Arrays.asList("categoryid", "postid", "commentid"))));
+    store.tableKeys.put("app.post_meta", Collections.singletonList(new Relations.TableKey(true, Arrays.asList("categoryid", "postid"))));
+    store.keys.put("app.categories.id", 2);
+    store.keys.put("app.post.categoryid", 4);
+    store.keys.put("app.post.postid", 4);
+    store.keys.put("app.comment.categoryid", 6);
+    store.keys.put("app.comment.postid", 6);
+    store.keys.put("app.post_meta.categoryid", 4);
+    store.keys.put("app.post_meta.postid", 4);
+    List<String[]> both = new ArrayList<>();
+    both.add(new String[] {"app.comment.categoryid", "app.post.categoryid", "Hash Cond"});
+    both.add(new String[] {"app.comment.postid", "app.post.postid", "Hash Cond"});
+    store.statements.put("m.comments", new Relations.Entry("h1", both, null));
+    store.statements.put("m.posts", new Relations.Entry("h2",
+        Collections.singletonList(new String[] {"app.post.categoryid", "app.categories.id", "Hash Cond"}), null));
+    // 鍵の一部だけ（categoryid だけ）では親子にしない
+    store.statements.put("m.partial", new Relations.Entry("h3",
+        Collections.singletonList(new String[] {"app.post_meta.categoryid", "app.comment.categoryid", "Hash Cond"}), null));
+    // 子の側の結ばれた列が子の鍵そのもの（post_meta の主キー）なら 1 対 1
+    List<String[]> meta = new ArrayList<>();
+    meta.add(new String[] {"app.post_meta.categoryid", "app.post.categoryid", "Merge Cond"});
+    meta.add(new String[] {"app.post_meta.postid", "app.post.postid", "Merge Cond"});
+    store.statements.put("m.meta", new Relations.Entry("h4", meta, null));
+
+    List<Relations.Link> links = Relations.links(store);
+    java.util.Map<String, Relations.Link> by = new java.util.HashMap<>();
+    for (Relations.Link l : links) {
+      by.put(l.a.replace("app.", "") + " " + l.b.replace("app.", ""), l);
+    }
+    Relations.Link cat = by.get("comment.categoryid post.categoryid");
+    assertEquals("parent", cat.kind);
+    assertEquals("app.post の主キー（categoryid, postid）", cat.compositeKey);
+    assertEquals("parent", by.get("comment.postid post.postid").kind);
+    // 1 列の主キーの親子はそのまま
+    assertEquals("parent", by.get("post.categoryid categories.id").kind);
+    assertEquals(null, by.get("post.categoryid categories.id").compositeKey);
+    // 鍵の一部だけなら兄弟のまま
+    Relations.Link partial = links.stream().filter(l -> l.statements.contains("m.partial")).findFirst().get();
+    assertEquals("sibling", partial.kind);
+    // 子の鍵そのものなら 1 対 1
+    Relations.Link oneToOne = links.stream().filter(l -> l.statements.contains("m.meta") && l.a.endsWith("postid")).findFirst().get();
+    assertEquals("one-to-one", oneToOne.kind);
+
+    // 源流: comment.categoryid → post.categoryid → categories.id（祖先までたどる）。comment.postid → post.postid（それより上の親はない）
+    List<Relations.Origin> o1 = Relations.origins(store, links, "app.comment.categoryid");
+    assertEquals("app.categories.id", o1.get(0).column);
+    assertEquals(Arrays.asList("app.comment.categoryid", "app.post.categoryid"), o1.get(0).path);
+    List<Relations.Origin> o2 = Relations.origins(store, links, "app.comment.postid");
+    assertEquals("app.post.postid", o2.get(0).column);
+  }
+
+  @Test
+  void 取り出し方の版が変わったら_残した計画からDBにつながずに取り出し直す(@TempDir Path dir) throws Exception {
+    String plan = "[{\"Plan\": {\"Node Type\": \"Hash Join\", \"Hash Cond\": \"(h.user_id = u.id)\", \"Plans\": ["
+        + " {\"Node Type\": \"Seq Scan\", \"Relation Name\": \"post_histories\", \"Schema\": \"app\", \"Alias\": \"h\"},"
+        + " {\"Node Type\": \"Seq Scan\", \"Relation Name\": \"users\", \"Schema\": \"app\", \"Alias\": \"u\"}]}}]";
+    Relations.Store store = Relations.Store.open(dir, "proj", "conn");
+    Relations.SavedPlan saved = new Relations.SavedPlan(plan, Collections.<String>emptyList(), Collections.<String>emptyList());
+    store.savePlan("m.a", saved);
+    // 前の取り出し方で取り出した結果（結合の組が空だった）として保存する
+    store.statements.put("m.a", new Relations.Entry("h1", new ArrayList<String[]>(), null,
+        new java.util.LinkedHashMap<String, List<String>>(), true, new ArrayList<String>()));
+    store.extractor = Relations.EXTRACTOR - 1;
+    store.save();
+
+    Relations.Store reopened = Relations.Store.open(dir, "proj", "conn");
+    Relations.Entry e = reopened.statements.get("m.a");
+    assertEquals(1, e.joins.size());
+    assertEquals("app.post_histories.user_id", e.joins.get(0)[0]);
+    assertEquals(Arrays.asList("app.post_histories", "app.users"), e.tables);
+    assertEquals(Relations.EXTRACTOR, reopened.extractor);
+    // 計画を残していない前の版の結果（planned が null）は、そのまま
+    assertEquals("h1", e.hash);
+  }
 }

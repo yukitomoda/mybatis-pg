@@ -597,6 +597,8 @@ export interface RelationLink {
   manual: boolean;
   /** 手で無効にした */
   disabled: boolean;
+  /** 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵（schema.table の主キー（a, b））。そうでなければ null */
+  compositeKey?: string | null;
 }
 
 export interface RelationsResult {

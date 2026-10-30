@@ -2031,6 +2031,8 @@ public final class ToolServer {
         m.put("statements", new ArrayList<>(l.statements));
         m.put("manual", l.manual);
         m.put("disabled", l.disabled);
+        // 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵
+        m.put("compositeKey", l.compositeKey);
         links.add(m);
       }
       body.put("links", links);

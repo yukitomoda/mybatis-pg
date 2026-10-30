@@ -384,6 +384,12 @@ export function describeLink(
   // 1 列で一意でない列の書き方（複数の列で一意なら、そのことも書く）
   const notSingle = (c: string) => (keys[c] !== undefined ? ` 1 列では一意でない（${keyLabel(keys[c])}）` : '一意でない');
   if (l.manual) return l.a === col ? { label: '→ 親', reason: '手で設定' } : { label: '← 子', reason: '手で設定' };
+  // 複数の列でできた鍵: 親の鍵のすべての列と、同じ SQL で結合している
+  if (l.compositeKey) {
+    const reason = `${l.compositeKey.replace(/^[^.]+\./, '')}のすべての列と、同じ SQL で結合している`;
+    if (l.kind === 'one-to-one') return { label: '＝ 1 対 1', reason: `${reason}（どちらも鍵そのもの）` };
+    return l.a === col ? { label: '→ 親', reason } : { label: '← 子', reason };
+  }
   if (l.kind === 'parent' && l.a === col) return { label: '→ 親', reason: `${s(other)} が${key(other)}、この列は${notSingle(col)}` };
   if (l.kind === 'parent') return { label: '← 子', reason: `この列が${key(col)}、${s(other)} は${notSingle(other)}` };
   if (l.kind === 'one-to-one') return { label: '＝ 1 対 1', reason: `どちらも 1 列で一意（${key(col)}・${key(other)}）` };

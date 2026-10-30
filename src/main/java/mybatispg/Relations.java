@@ -58,6 +58,11 @@ final class Relations {
 
   /** 解析の仕方の版。変えたら、保存してある結果を使わずに解析し直す */
   static final int ANALYZER = 4;
+  /**
+   * 残した計画からの取り出し方（結合の組・パラメータと比べている列・出てくる表）の版。変えたら、ファイルを開いたときに、
+   * 残した計画から取り出し直す（DB にはつながない）。親子の決め方など、保存したものから読むたびに組み立てるものは、版を変えなくてよい
+   */
+  static final int EXTRACTOR = 1;
   /** 結合の条件を探す計画の項目 */
   private static final String[] JOIN_KEYS = {"Hash Cond", "Merge Cond", "Join Filter", "Index Cond", "Recheck Cond", "Filter"};
   private static final String IDENT = "(?:\"(?:[^\"]|\"\")+\"|[A-Za-z_][A-Za-z0-9_$]*)";
@@ -173,16 +178,89 @@ final class Relations {
      * パラメータの名前が同じなら同じものを指すとみなして、値の候補に使う。前の版の結果で、記録していなければ null（解析し直す）
      */
     final Map<String, List<String>> params;
+    /** 計画を残したか（true: 残した、false: 計画を作れない文か、作れなかった、null: 前の版の結果で、残していない） */
+    final Boolean planned;
+    /** 計画に出てくる表（schema.table） */
+    final List<String> tables;
 
     Entry(String hash, List<String[]> joins, String error) {
-      this(hash, joins, error, new LinkedHashMap<String, List<String>>());
+      this(hash, joins, error, new LinkedHashMap<String, List<String>>(), false, new ArrayList<String>());
     }
 
     Entry(String hash, List<String[]> joins, String error, Map<String, List<String>> params) {
+      this(hash, joins, error, params, false, new ArrayList<String>());
+    }
+
+    Entry(String hash, List<String[]> joins, String error, Map<String, List<String>> params, Boolean planned, List<String> tables) {
       this.hash = hash;
       this.joins = joins;
       this.error = error;
       this.params = params;
+      this.planned = planned;
+      this.tables = tables;
+    }
+  }
+
+  /** 残した計画（DB から取った元のもの）。取り出し方を変えたときに、ここから取り出し直す */
+  static final class SavedPlan {
+    final String plan;
+    /** パラメータに入れた目印（番号順。目印のないものは null） */
+    final List<String> markers;
+    /** パラメータの項目（番号順） */
+    final List<String> properties;
+
+    SavedPlan(String plan, List<String> markers, List<String> properties) {
+      this.plan = plan;
+      this.markers = markers;
+      this.properties = properties;
+    }
+  }
+
+  /** 残した計画から、結合の組・パラメータと比べている列・出てくる表を取り出す */
+  static Entry extract(String hash, SavedPlan p) {
+    // パラメータと比べている列（目印の値で探す。foreach の要素は、名前が statement ごとの仮のものなので記録しない）
+    Map<String, List<String>> params = new LinkedHashMap<>();
+    for (Map.Entry<Integer, List<ParamSources.Source>> pe : ParamSources.fromPlan(p.plan, p.markers).entrySet()) {
+      String property = p.properties.get(pe.getKey() - 1);
+      if (property.startsWith("__frch_")) {
+        continue;
+      }
+      List<String> cols = params.computeIfAbsent(property, k -> new ArrayList<>());
+      for (ParamSources.Source src : pe.getValue()) {
+        String col = key(src.schema, src.table, src.column);
+        if (!cols.contains(col)) {
+          cols.add(col);
+        }
+      }
+    }
+    return new Entry(hash, joins(p.plan), null, params, true, tables(p.plan));
+  }
+
+  /** 計画に出てくる表（schema.table） */
+  static List<String> tables(String planJson) {
+    JsonElement root = JsonParser.parseString(planJson);
+    JsonObject top = root.isJsonArray() ? root.getAsJsonArray().get(0).getAsJsonObject() : root.getAsJsonObject();
+    Map<String, String[]> aliases = new HashMap<>();
+    walk(top.getAsJsonObject("Plan"), aliases, new ArrayList<String[]>());
+    Set<String> out = new java.util.TreeSet<>();
+    for (String[] r : aliases.values()) {
+      out.add(r[0] + "." + r[1]);
+    }
+    return new ArrayList<>(out);
+  }
+
+  /** 表の主キーか UNIQUE の列 */
+  static final class TableKey {
+    final boolean primary;
+    final List<String> columns;
+
+    TableKey(boolean primary, List<String> columns) {
+      this.primary = primary;
+      this.columns = columns;
+    }
+
+    String describe() {
+      return (primary ? "主キー" : "UNIQUE") + "（" + String.join(", ", columns) + "）";
     }
   }
 
@@ -194,9 +272,13 @@ final class Relations {
     private final String connectionId;
     final Map<String, Entry> statements = new TreeMap<>();
     final Map<String, Integer> keys = new TreeMap<>();
+    /** 表（schema.table）ごとの、主キーと UNIQUE（条件付き・式のものは除く）の列 */
+    final Map<String, List<TableKey>> tableKeys = new TreeMap<>();
     long updatedAt;
     /** 最後の解析を最後まで終えたか（一時停止したら false） */
     boolean complete;
+    /** 保存した結果の取り出し方の版 */
+    int extractor;
 
     private Store(Path file, String project, String connectionId) {
       this.file = file;
@@ -219,8 +301,99 @@ final class Relations {
           s.statements.clear();
           s.keys.clear();
         }
+        // 取り出し方が変わっていれば、残した計画から取り出し直す（DB にはつながない）
+        if (!s.statements.isEmpty() && s.extractor != EXTRACTOR) {
+          s.reextract();
+          s.save();
+        }
       }
       return s;
+    }
+
+    /** 残した計画のディレクトリ（null なら残さない） */
+    private Path plansDir() {
+      if (file == null) {
+        return null;
+      }
+      String name = file.getFileName().toString();
+      return file.resolveSibling(name.substring(0, name.length() - ".json".length()) + ".plans");
+    }
+
+    private Path planFile(String statementId) {
+      Path dir = plansDir();
+      return dir == null ? null : dir.resolve(hash(statementId).substring(0, 24) + ".json.gz");
+    }
+
+    /** 計画を残す（DB から取った元のものを、加工せずに） */
+    void savePlan(String statementId, SavedPlan p) throws IOException {
+      Path f = planFile(statementId);
+      if (f == null) {
+        memoryPlans.put(statementId, p);
+        return;
+      }
+      Files.createDirectories(f.getParent());
+      JsonObject o = new JsonObject();
+      o.addProperty("plan", p.plan);
+      o.add("markers", Json.GSON.toJsonTree(p.markers));
+      o.add("properties", Json.GSON.toJsonTree(p.properties));
+      try (Writer out = new java.io.OutputStreamWriter(new java.util.zip.GZIPOutputStream(Files.newOutputStream(f)), StandardCharsets.UTF_8)) {
+        Json.GSON.toJson(o, out);
+      }
+    }
+
+    /** 残した計画（なければ null） */
+    SavedPlan loadPlan(String statementId) {
+      Path f = planFile(statementId);
+      if (f == null) {
+        return memoryPlans.get(statementId);
+      }
+      if (!Files.isRegularFile(f)) {
+        return null;
+      }
+      try (Reader in = new java.io.InputStreamReader(new java.util.zip.GZIPInputStream(Files.newInputStream(f)), StandardCharsets.UTF_8)) {
+        JsonObject o = JsonParser.parseReader(in).getAsJsonObject();
+        List<String> markers = new ArrayList<>();
+        for (JsonElement m : o.getAsJsonArray("markers")) {
+          markers.add(m.isJsonNull() ? null : m.getAsString());
+        }
+        List<String> properties = new ArrayList<>();
+        for (JsonElement m : o.getAsJsonArray("properties")) {
+          properties.add(m.getAsString());
+        }
+        return new SavedPlan(o.get("plan").getAsString(), markers, properties);
+      } catch (IOException | RuntimeException e) {
+        return null;
+      }
+    }
+
+    void deletePlan(String statementId) {
+      Path f = planFile(statementId);
+      memoryPlans.remove(statementId);
+      if (f != null) {
+        try {
+          Files.deleteIfExists(f);
+        } catch (IOException ignored) {
+          // 残っていても、使わない
+        }
+      }
+    }
+
+    /** ファイルに残さないとき（テスト用）の、残した計画 */
+    private final Map<String, SavedPlan> memoryPlans = new HashMap<>();
+
+    /** 残した計画から、結合の組などを取り出し直す（DB にはつながない）。計画を残していないものは、そのまま */
+    synchronized void reextract() {
+      for (Map.Entry<String, Entry> e : statements.entrySet()) {
+        if (!Boolean.TRUE.equals(e.getValue().planned)) {
+          continue;
+        }
+        SavedPlan p = loadPlan(e.getKey());
+        if (p != null) {
+          e.setValue(extract(e.getValue().hash, p));
+        }
+      }
+      extractor = EXTRACTOR;
+      deriveKeys(this);
     }
 
     private void read(JsonObject o) {
@@ -229,6 +402,7 @@ final class Relations {
         return;
       }
       updatedAt = o.has("updatedAt") ? o.get("updatedAt").getAsLong() : 0;
+      extractor = o.has("extractor") ? o.get("extractor").getAsInt() : 0;
       complete = !o.has("complete") || o.get("complete").getAsBoolean();
       for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("statements").entrySet()) {
         JsonObject st = e.getValue().getAsJsonObject();
@@ -248,12 +422,33 @@ final class Relations {
             params.put(pe.getKey(), cols);
           }
         }
+        List<String> tables = new ArrayList<>();
+        if (st.has("tables")) {
+          for (JsonElement t : st.getAsJsonArray("tables")) {
+            tables.add(t.getAsString());
+          }
+        }
+        Boolean planned = st.has("planned") ? st.get("planned").getAsBoolean() : null;
         statements.put(e.getKey(), new Entry(st.get("hash").getAsString(), joins, st.has("error") ? st.get("error").getAsString() : null,
-            params));
+            params, planned, tables));
       }
       if (o.has("keys")) {
         for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("keys").entrySet()) {
           keys.put(e.getKey(), e.getValue().getAsInt());
+        }
+      }
+      if (o.has("tableKeys")) {
+        for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("tableKeys").entrySet()) {
+          List<TableKey> list = new ArrayList<>();
+          for (JsonElement k : e.getValue().getAsJsonArray()) {
+            JsonObject ko = k.getAsJsonObject();
+            List<String> cols = new ArrayList<>();
+            for (JsonElement c : ko.getAsJsonArray("columns")) {
+              cols.add(c.getAsString());
+            }
+            list.add(new TableKey(ko.get("primary").getAsBoolean(), cols));
+          }
+          tableKeys.put(e.getKey(), list);
         }
       }
     }
@@ -269,6 +464,7 @@ final class Relations {
       o.addProperty("project", project);
       o.addProperty("connectionId", connectionId);
       o.addProperty("updatedAt", updatedAt);
+      o.addProperty("extractor", extractor);
       o.addProperty("complete", complete);
       JsonObject sts = new JsonObject();
       for (Map.Entry<String, Entry> e : statements.entrySet()) {
@@ -297,6 +493,10 @@ final class Relations {
         if (e.getValue().error != null) {
           st.addProperty("error", e.getValue().error);
         }
+        if (e.getValue().planned != null) {
+          st.addProperty("planned", e.getValue().planned);
+        }
+        st.add("tables", Json.GSON.toJsonTree(e.getValue().tables));
         sts.add(e.getKey(), st);
       }
       o.add("statements", sts);
@@ -305,6 +505,22 @@ final class Relations {
         k.addProperty(e.getKey(), e.getValue());
       }
       o.add("keys", k);
+      JsonObject tk = new JsonObject();
+      for (Map.Entry<String, List<TableKey>> e : tableKeys.entrySet()) {
+        JsonArray list = new JsonArray();
+        for (TableKey key : e.getValue()) {
+          JsonObject ko = new JsonObject();
+          ko.addProperty("primary", key.primary);
+          JsonArray cols = new JsonArray();
+          for (String c : key.columns) {
+            cols.add(c);
+          }
+          ko.add("columns", cols);
+          list.add(ko);
+        }
+        tk.add(e.getKey(), list);
+      }
+      o.add("tableKeys", tk);
       Files.createDirectories(file.getParent());
       Path tmp = Files.createTempFile(file.getParent(), "relations", ".tmp");
       try {
@@ -366,7 +582,13 @@ final class Relations {
     // 続きからのときは、解析できなかったものも飛ばす（最後まで終えた後の解析し直しでは、もう一度試す）
     boolean resume = !store.complete && !store.statements.isEmpty();
     Set<String> alive = new HashSet<>(ids);
-    store.statements.keySet().removeIf(id -> !alive.contains(id));
+    for (String id : new ArrayList<>(store.statements.keySet())) {
+      if (!alive.contains(id)) {
+        store.statements.remove(id);
+        store.deletePlan(id);
+      }
+    }
+    store.extractor = EXTRACTOR;
     int sinceSave = 0;
     boolean stopped = false;
     // ${schema}.表 の表を持つスキーマ（同じ表の組は、何度も聞かない）
@@ -399,13 +621,14 @@ final class Relations {
         }
         String h = full == null ? "" : hash(full.numberedSql);
         Entry old = store.statements.get(id);
-        if (full != null && old != null && old.hash.equals(h) && (old.error == null || resume) && old.params != null
+        // 計画を残していない前の版の結果（planned が null）は、解析し直して計画を残す
+        if (full != null && old != null && old.hash.equals(h) && (old.error == null || resume) && old.params != null && old.planned != null
             && boundProperties(full).containsAll(old.params.keySet())) {
           progress.done++;
           continue;
         }
         long t0 = System.nanoTime();
-        entry = full == null ? null : explainEntry(ses, full, h, progress);
+        entry = full == null ? null : explainEntry(ses, store, id, full, h, progress);
         if (entry == null || entry.error != null) {
           // if・when の条件の式を仮の値で評価できない（数と文字の取り違えなど）か、組み立てた SQL が壊れるときは、
           // 条件をすべて true にした renderer で組み立て直す
@@ -417,7 +640,7 @@ final class Relations {
             if (allTrue[0].hasStatement(id)) {
               SqlRenderer.Result t = allTrue[0].render(id, ParamSources.probe(schema, parameters, guess, collections::contains, false));
               if (full == null || !t.numberedSql.equals(full.numberedSql)) {
-                Entry second = explainEntry(ses, t, h, progress);
+                Entry second = explainEntry(ses, store, id, t, h, progress);
                 if (second.error == null || entry == null) {
                   entry = second;
                 }
@@ -433,7 +656,7 @@ final class Relations {
           try {
             SqlRenderer.Result min = renderer.render(id, ParamSources.probe(schema, parameters, guess, collections::contains, true));
             if (full == null || !min.numberedSql.equals(full.numberedSql)) {
-              Entry second = explainEntry(ses, min, h, progress);
+              Entry second = explainEntry(ses, store, id, min, h, progress);
               if (second.error == null) {
                 entry = second;
               }
@@ -486,7 +709,7 @@ final class Relations {
       "^(?:\\s|--[^\\n]*\\n|/\\*.*?\\*/|\\()*(select|with|insert|update|delete|values|table)\\b", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
   /** 1 つの SQL の計画を作り、結合の組を取り出す。CREATE などは、結合なし・エラーなしとして飛ばす */
-  private static Entry explainEntry(ParamSources.Session ses, SqlRenderer.Result r, String hash, Progress progress) {
+  private static Entry explainEntry(ParamSources.Session ses, Store store, String id, SqlRenderer.Result r, String hash, Progress progress) {
     if (!PLANNABLE.matcher(r.numberedSql).find()) {
       return new Entry(hash, new ArrayList<>(), null);
     }
@@ -500,22 +723,18 @@ final class Relations {
     try {
       ParamSources.Explained e = ParamSources.explainForJoins(ses, r.numberedSql, r.bindings.size(), fallbackTypes, values);
       progress.planMillis += e.planMillis;
-      // パラメータと比べている列（目印の値で探す。foreach の要素は、名前が statement ごとの仮のものなので記録しない）
-      Map<String, List<String>> params = new LinkedHashMap<>();
-      for (Map.Entry<Integer, List<ParamSources.Source>> pe : ParamSources.fromPlan(e.plan, e.markers).entrySet()) {
-        String property = r.bindings.get(pe.getKey() - 1).property;
-        if (property.startsWith("__frch_")) {
-          continue;
-        }
-        List<String> cols = params.computeIfAbsent(property, k -> new ArrayList<>());
-        for (ParamSources.Source src : pe.getValue()) {
-          String col = key(src.schema, src.table, src.column);
-          if (!cols.contains(col)) {
-            cols.add(col);
-          }
-        }
+      // 計画を残し（取り出し方を変えたときに、DB にはつながずに取り出し直すため）、そこから取り出す
+      List<String> properties = new ArrayList<>();
+      for (SqlRenderer.Binding b : r.bindings) {
+        properties.add(b.property);
       }
-      return new Entry(hash, joins(e.plan), null, params);
+      SavedPlan saved = new SavedPlan(e.plan, e.markers, properties);
+      try {
+        store.savePlan(id, saved);
+      } catch (IOException ex) {
+        // 残せなくても、解析の結果は使う
+      }
+      return extract(hash, saved);
     } catch (QueryExecutor.ExecutionException e) {
       return new Entry(hash, new ArrayList<>(), e.getMessage());
     }
@@ -546,48 +765,69 @@ final class Relations {
 
   /** 結合に出てくる列が、一意かどうか（順位）を読み直す */
   private static void updateKeys(Store store, Connection c) {
-    Set<String> cols = new LinkedHashSet<>();
+    // 計画に出てくる表と、結合に出てくる表の、主キー・UNIQUE の列を読む（列が一意かどうかも、ここから求める）
+    Set<String> keyTables = new LinkedHashSet<>();
     for (Entry e : store.statements.values()) {
+      keyTables.addAll(e.tables);
       for (String[] j : e.joins) {
-        cols.add(j[0]);
-        cols.add(j[1]);
+        keyTables.add(j[0].substring(0, j[0].lastIndexOf('.')));
+        keyTables.add(j[1].substring(0, j[1].lastIndexOf('.')));
       }
     }
-    // すべての列を 1 回で聞く（列ごとに聞くと、列の数だけ DB と往復する）
-    List<String> schemas = new ArrayList<>();
-    List<String> tables = new ArrayList<>();
-    List<String> columns = new ArrayList<>();
-    for (String col : cols) {
-      String[] p = split(col);
-      schemas.add(p[0]);
-      tables.add(p[1]);
-      columns.add(p[2]);
+    List<String> ts = new ArrayList<>();
+    List<String> tn = new ArrayList<>();
+    for (String t : keyTables) {
+      ts.add(t.substring(0, t.indexOf('.')));
+      tn.add(t.substring(t.indexOf('.') + 1));
     }
-    Map<String, Integer> keys = new TreeMap<>();
-    try (PreparedStatement ps = c.prepareStatement("SELECT x.s, x.t, x.c,"
-        + " min(i.indnkeyatts * 2 + CASE WHEN i.indisprimary THEN 0 ELSE 1 END)"
-        + " FROM unnest(?::text[], ?::text[], ?::text[]) AS x(s, t, c)"
+    Map<String, List<TableKey>> tableKeys = new TreeMap<>();
+    try (PreparedStatement ps = c.prepareStatement("SELECT n.nspname, c.relname, i.indisprimary,"
+        + " ARRAY(SELECT a.attname::text FROM unnest(i.indkey[0:i.indnkeyatts - 1]) WITH ORDINALITY AS k(attnum, ord)"
+        + " JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum ORDER BY k.ord)"
+        + " FROM unnest(?::text[], ?::text[]) AS x(s, t)"
         + " JOIN pg_namespace n ON n.nspname = x.s JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = x.t"
-        + " JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = x.c"
         + " JOIN pg_index i ON i.indrelid = c.oid AND i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL"
-        + " AND a.attnum = ANY (i.indkey[0:i.indnkeyatts - 1])"
-        + " GROUP BY x.s, x.t, x.c")) {
-      ps.setArray(1, c.createArrayOf("text", schemas.toArray()));
-      ps.setArray(2, c.createArrayOf("text", tables.toArray()));
-      ps.setArray(3, c.createArrayOf("text", columns.toArray()));
+        + " ORDER BY n.nspname, c.relname, NOT i.indisprimary, i.indnkeyatts")) {
+      ps.setArray(1, c.createArrayOf("text", ts.toArray()));
+      ps.setArray(2, c.createArrayOf("text", tn.toArray()));
       try (ResultSet rs = ps.executeQuery()) {
         while (rs.next()) {
-          keys.put(key(rs.getString(1), rs.getString(2), rs.getString(3)), rs.getInt(4));
+          List<String> kc = new ArrayList<>();
+          for (Object x : (Object[]) rs.getArray(4).getArray()) {
+            kc.add(String.valueOf(x));
+          }
+          tableKeys.computeIfAbsent(rs.getString(1) + "." + rs.getString(2), k -> new ArrayList<>()).add(new TableKey(rs.getBoolean(3), kc));
         }
       }
     } catch (SQLException e) {
-      // 一意かどうかが読めなければ、前に読んだものを使う
       return;
     } finally {
       try {
         c.rollback();
       } catch (SQLException ignored) {
         // 読むだけ
+      }
+    }
+    store.tableKeys.clear();
+    store.tableKeys.putAll(tableKeys);
+    deriveKeys(store);
+  }
+
+  /**
+   * 列ごとの一意の順位を、表の鍵から求める（1 列の主キー 2、1 列の UNIQUE 3、n 列なら n × 2、UNIQUE は + 1。列を含む鍵のうち最小）。
+   * 表の鍵を読んでいない前の版の結果では、読んであった順位をそのまま使う
+   */
+  static void deriveKeys(Store store) {
+    if (store.tableKeys.isEmpty()) {
+      return;
+    }
+    Map<String, Integer> keys = new TreeMap<>();
+    for (Map.Entry<String, List<TableKey>> e : store.tableKeys.entrySet()) {
+      for (TableKey k : e.getValue()) {
+        int rank = k.columns.size() * 2 + (k.primary ? 0 : 1);
+        for (String col : k.columns) {
+          keys.merge(e.getKey() + "." + col, rank, Math::min);
+        }
       }
     }
     store.keys.clear();
@@ -598,10 +838,12 @@ final class Relations {
 
   /** 2 つの列のつながり */
   static final class Link {
-    final String a;
-    final String b;
+    String a;
+    String b;
     /** parent: b が親、child: a が親（b が子）、one-to-one: どちらも一意、sibling: どちらも一意でない */
-    final String kind;
+    String kind;
+    /** 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵（schema.table の主キー（a, b））。そうでなければ null */
+    String compositeKey;
     final Set<String> statements = new LinkedHashSet<>();
     /** 手で追加したリレーション（a が子、b が親） */
     boolean manual;
@@ -686,7 +928,96 @@ final class Relations {
         l.statements.add(e.getKey());
       }
     }
-    return new ArrayList<>(out.values());
+    List<Link> links = new ArrayList<>(out.values());
+    applyCompositeKeys(store, links);
+    return links;
+  }
+
+  /**
+   * 複数の列でできた鍵で、兄弟になっていた列の組を親子に直す。1 つの statement の中で、表 P の主キー（か UNIQUE）のすべての列が
+   * 表 C の列と = で結ばれていれば、P を親、C を子とする（comment.(categoryId, postId) → post の主キー (categoryId, postId)）。
+   * C の側の結ばれた列が C の鍵そのものなら、1 対 1 とする。
+   */
+  static void applyCompositeKeys(Store store, List<Link> links) {
+    Map<String, Link> byPair = new HashMap<>();
+    for (Link l : links) {
+      byPair.put(pairKey(l.a, l.b), l);
+    }
+    for (Map.Entry<String, Entry> e : store.statements.entrySet()) {
+      // 表の組ごとの、この statement で = で結ばれた列の組
+      Map<String, List<String[]>> byTables = new LinkedHashMap<>();
+      for (String[] j : e.getValue().joins) {
+        String ta = tableOfColumn(j[0]);
+        String tb = tableOfColumn(j[1]);
+        if (ta.equals(tb)) {
+          continue;
+        }
+        byTables.computeIfAbsent(ta.compareTo(tb) < 0 ? ta + "\u0000" + tb : tb + "\u0000" + ta, k -> new ArrayList<>()).add(j);
+      }
+      for (Map.Entry<String, List<String[]>> g : byTables.entrySet()) {
+        String[] t = g.getKey().split("\u0000");
+        for (int d = 0; d < 2; d++) {
+          String parent = t[d];
+          String child = t[1 - d];
+          for (TableKey key : store.tableKeys.getOrDefault(parent, new ArrayList<TableKey>())) {
+            if (key.columns.size() < 2) {
+              continue;
+            }
+            // 親の鍵の列ごとに、結ばれた子の列
+            List<String[]> pairs = new ArrayList<>();
+            for (String kc : key.columns) {
+              String pcol = parent + "." + kc;
+              String ccol = null;
+              for (String[] j : g.getValue()) {
+                if (j[0].equals(pcol) && tableOfColumn(j[1]).equals(child)) {
+                  ccol = j[1];
+                } else if (j[1].equals(pcol) && tableOfColumn(j[0]).equals(child)) {
+                  ccol = j[0];
+                }
+              }
+              if (ccol == null) {
+                break;
+              }
+              pairs.add(new String[] {ccol, pcol});
+            }
+            if (pairs.size() < key.columns.size()) {
+              continue;
+            }
+            // 子の側の結ばれた列が、子の鍵そのものなら 1 対 1
+            Set<String> childCols = new HashSet<>();
+            for (String[] p : pairs) {
+              childCols.add(p[0].substring(p[0].lastIndexOf('.') + 1));
+            }
+            boolean oneToOne = false;
+            for (TableKey ck : store.tableKeys.getOrDefault(child, new ArrayList<TableKey>())) {
+              if (new HashSet<>(ck.columns).equals(childCols)) {
+                oneToOne = true;
+              }
+            }
+            for (String[] p : pairs) {
+              Link l = byPair.get(pairKey(p[0], p[1]));
+              // 1 列の鍵で決めた親子・1 対 1 はそのまま。兄弟だったものだけを直す
+              if (l == null || !l.kind.equals("sibling")) {
+                continue;
+              }
+              l.a = p[0];
+              l.b = p[1];
+              l.kind = oneToOne ? "one-to-one" : "parent";
+              l.compositeKey = parent + " の" + key.describe();
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  private static String pairKey(String a, String b) {
+    return a.compareTo(b) < 0 ? a + "\u0000" + b : b + "\u0000" + a;
+  }
+
+  private static String tableOfColumn(String col) {
+    return col.substring(0, col.lastIndexOf('.'));
   }
 
   /** 同じものを指すとみなすパラメータの名前の、最短の長さ（id や no のような短い名前は、別のものを指すことが多い） */
@@ -938,13 +1269,52 @@ final class Relations {
           continue;
         }
         if (l.kind.equals("parent") && l.a.equals(col)) {
-          if (found.add(other)) {
-            out.add(new Origin(other, next, c));
+          // 親が 1 列で一意でなければ（複数の列でできた鍵の親）、さらに親をたどる（祖先まで）
+          for (Origin o : climb(isUnique, links, other, next, c, manualParents, 0)) {
+            if (found.add(o.column)) {
+              out.add(o);
+            }
           }
         } else if (l.kind.equals("sibling") && next.size() < MAX_HOPS && visited.add(other)) {
           queue.add(new Object[] {other, next, c});
         }
       }
+    }
+    return out;
+  }
+
+  /** 祖先をたどる段数の上限 */
+  private static final int MAX_ANCESTORS = 4;
+
+  /**
+   * 親 column から、さらに親をたどる。column が 1 列で一意か、それ以上の親がなければ column が源流。
+   * 手で設定した親があれば、それを源流にする。
+   *
+   * @param path column の手前までにたどった列
+   */
+  private static List<Origin> climb(java.util.function.Predicate<String> isUnique, List<Link> links, String column, List<String> path,
+      int count, java.util.function.Function<String, List<String>> manualParents, int depth) {
+    List<Origin> out = new ArrayList<>();
+    List<String> via = new ArrayList<>(path);
+    via.add(column);
+    List<String> manual = manualParents.apply(column);
+    if (!manual.isEmpty() && !isUnique.test(column)) {
+      for (String p : manual) {
+        out.add(new Origin(p, via, count, true));
+      }
+      return out;
+    }
+    if (isUnique.test(column) || depth >= MAX_ANCESTORS) {
+      out.add(new Origin(column, path, count));
+      return out;
+    }
+    for (Link l : links) {
+      if (!l.disabled && !l.manual && l.kind.equals("parent") && l.a.equals(column) && !path.contains(l.b)) {
+        out.addAll(climb(isUnique, links, l.b, via, Math.min(count, l.statements.size()), manualParents, depth + 1));
+      }
+    }
+    if (out.isEmpty()) {
+      out.add(new Origin(column, path, count));
     }
     return out;
   }
