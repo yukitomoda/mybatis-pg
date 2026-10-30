@@ -2730,7 +2730,6 @@ button.icon.suggest-relation:hover {
 
 .history-params pre,
 .history-sql pre {
-  max-height: 12rem;
   overflow: auto;
 }
 
@@ -2887,4 +2886,24 @@ button.icon.suggest-relation:hover {
 
 .table-menu-list button:hover {
   background: var(--accent-bg);
+}
+
+/* 結果ビューの、結果・パラメータ・SQL のタブ */
+.result-view .result-tabs {
+  border-bottom: 1px solid var(--border);
+  margin: 0.3rem 0 0.4rem;
+}
+
+.result-view .result-tabs button {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+
+.result-view .result-tabs button.active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }

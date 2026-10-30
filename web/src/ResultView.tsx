@@ -352,7 +352,8 @@ function HistoryDetail({
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState(0);
+  /** 開いているタブ: 結果セットの番号、パラメータ、SQL */
+  const [tab, setTab] = useState<number | 'params' | 'sql'>(0);
   useEffect(() => {
     let active = true;
     api.result(id).then(
@@ -366,7 +367,7 @@ function HistoryDetail({
   if (error) return <p className="error-text">{error}</p>;
   if (!entry) return <p className="hint">読み込んでいます…</p>;
   const sets = entry.resultSets;
-  const t = sets[Math.min(tab, sets.length - 1)];
+  const t = typeof tab === 'number' ? sets[Math.min(tab, sets.length - 1)] : undefined;
   return (
     <div className="history-detail">
       <div className="history-source">
@@ -382,41 +383,71 @@ function HistoryDetail({
           {entry.updateCounts.length > 0 && `　更新件数 ${entry.updateCounts.join(', ')}`}
         </span>
       </div>
-      {entry.error && <pre className="render-error">{entry.error}</pre>}
-      {entry.warnings.length > 0 && (
-        <ul className="notes warn">
-          {entry.warnings.map((w, i) => (
-            <li key={i}>{w}</li>
-          ))}
-        </ul>
-      )}
-      <details className="history-params">
-        <summary>パラメータ</summary>
-        <pre className="sql">{JSON.stringify(entry.parameters ?? {}, null, 2)}</pre>
-        <button type="button" className="link" onClick={() => onRestoreParams(entry.statementId, entry.parameters)}>
-          この値をパラメータ欄に戻す
+      <div className="result-tabs" role="tablist">
+        {(sets.length <= 1 ? [0] : sets.map((_, i) => i)).map((i) => (
+          <button
+            key={i}
+            type="button"
+            role="tab"
+            aria-selected={tab === i}
+            className={tab === i ? 'active' : undefined}
+            onClick={() => setTab(i)}
+          >
+            {sets.length <= 1 ? '結果' : `結果 ${i + 1}`}
+          </button>
+        ))}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'params'}
+          className={tab === 'params' ? 'active' : undefined}
+          onClick={() => setTab('params')}
+        >
+          パラメータ
         </button>
-      </details>
-      {entry.sql && (
-        <details className="history-sql">
-          <summary>SQL</summary>
-          <pre className="sql">{entry.sql}</pre>
-        </details>
+        {entry.sql && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'sql'}
+            className={tab === 'sql' ? 'active' : undefined}
+            onClick={() => setTab('sql')}
+          >
+            SQL
+          </button>
+        )}
+      </div>
+      {typeof tab === 'number' && (
+        <>
+          {entry.error && <pre className="render-error">{entry.error}</pre>}
+          {entry.warnings.length > 0 && (
+            <ul className="notes warn">
+              {entry.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          )}
+          {t && (
+            <>
+              {t.truncated && <p className="hint">先頭 {t.rows.length} 行だけを取りました</p>}
+              <DataTable columns={t.columns} types={t.columnTypes} rows={t.rows} onCell={onCell} />
+            </>
+          )}
+          {!t && !entry.error && <p className="hint">結果の表はありません</p>}
+        </>
       )}
-      {sets.length > 1 && (
-        <div className="result-tabs">
-          {sets.map((_, i) => (
-            <button key={i} type="button" className={i === tab ? 'active' : undefined} onClick={() => setTab(i)}>
-              結果 {i + 1}
-            </button>
-          ))}
+      {tab === 'params' && (
+        <div className="history-params">
+          <button type="button" className="link" onClick={() => onRestoreParams(entry.statementId, entry.parameters)}>
+            この値をパラメータ欄に戻す
+          </button>
+          <pre className="sql">{JSON.stringify(entry.parameters ?? {}, null, 2)}</pre>
         </div>
       )}
-      {t && (
-        <>
-          {t.truncated && <p className="hint">先頭 {t.rows.length} 行だけを取りました</p>}
-          <DataTable columns={t.columns} types={t.columnTypes} rows={t.rows} onCell={onCell} />
-        </>
+      {tab === 'sql' && entry.sql && (
+        <div className="history-sql">
+          <pre className="sql">{entry.sql}</pre>
+        </div>
       )}
     </div>
   );
