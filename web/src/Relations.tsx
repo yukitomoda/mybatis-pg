@@ -143,6 +143,26 @@ export function RelationsScreen({
   }, [links, focus, allTables]);
   const shown = tables.filter(([t]) => t.toLowerCase().includes(filter.trim().toLowerCase()));
   const origins = useMemo(() => new Map((result?.origins ?? []).map((o) => [o.column, o.origins])), [result]);
+  // 表の一覧をスキーマごとのツリーにする（リレーションのある表を含むスキーマを先に、あとは名前の順。表の順は shown のまま）
+  const schemaTree = useMemo(() => {
+    const groups = new Map<string, [string, number][]>();
+    for (const [t, n] of shown) {
+      const schema = t.slice(0, t.indexOf('.'));
+      if (!groups.has(schema)) groups.set(schema, []);
+      groups.get(schema)!.push([t, n]);
+    }
+    const related = (ts: [string, number][]) => ts.some(([, n]) => n > 0);
+    return [...groups.entries()].sort((a, b) => Number(related(b[1])) - Number(related(a[1])) || a[0].localeCompare(b[0]));
+  }, [shown]);
+  /** 閉じたスキーマ（初めはすべて開く） */
+  const [closedSchemas, setClosedSchemas] = useState<Set<string>>(new Set());
+  const toggleSchema = (schema: string) =>
+    setClosedSchemas((old) => {
+      const next = new Set(old);
+      if (next.has(schema)) next.delete(schema);
+      else next.add(schema);
+      return next;
+    });
   const details = result?.statementDetails ?? [];
   const keys = result?.keys ?? {};
   const names = result?.names ?? {};
@@ -241,14 +261,35 @@ export function RelationsScreen({
             />
             <ul>
               {view === 'tables' &&
-                shown.map(([t, n]) => (
-                  <li key={t}>
-                    <button type="button" className={t === table ? 'selected' : undefined} onClick={() => setTable(t)}>
-                      <span>{oneSchema ? t.slice(t.indexOf('.') + 1) : t}</span>
-                      <span className="count">{n || ''}</span>
-                    </button>
-                  </li>
-                ))}
+                schemaTree.map(([schema, ts]) => {
+                  // 絞り込んでいる間と、選んでいる表のスキーマは開く
+                  const open = q !== '' || !closedSchemas.has(schema) || (table !== null && table.startsWith(`${schema}.`));
+                  const related = ts.filter(([, n]) => n > 0).length;
+                  return (
+                    <li key={schema} className="schema-node">
+                      <button type="button" className="schema-toggle" aria-expanded={open} onClick={() => toggleSchema(schema)}>
+                        <span>
+                          <span className="caret">{open ? '▾' : '▸'}</span> {schema}
+                        </span>
+                        <span className="count" title="リレーションのある表 / 表">
+                          {related > 0 ? `${related} / ${ts.length}` : ts.length}
+                        </span>
+                      </button>
+                      {open && (
+                        <ul>
+                          {ts.map(([t, n]) => (
+                            <li key={t}>
+                              <button type="button" className={t === table ? 'selected' : undefined} onClick={() => setTable(t)}>
+                                <span>{t.slice(t.indexOf('.') + 1)}</span>
+                                <span className="count">{n || ''}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
               {view === 'statements' &&
                 shownStatements.map((d) => (
                   <li key={d.id}>

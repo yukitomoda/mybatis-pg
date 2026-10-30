@@ -2917,3 +2917,21 @@ button.icon.suggest-relation:hover {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* リレーションの表の一覧（スキーマ → 表のツリー） */
+.relations-tables .schema-node > ul {
+  margin: 0;
+  padding-left: 0.9rem;
+  max-height: none;
+  overflow: visible;
+}
+
+.relations-tables .schema-toggle {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.relations-tables .caret {
+  display: inline-block;
+  width: 0.8rem;
+}
