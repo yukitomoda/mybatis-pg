@@ -325,6 +325,9 @@ export function keyLabel(rank: number | undefined): string | null {
   return n === 1 ? kind : `${kind}（${n} 列）`;
 }
 
+/** 主キー（複数の列でできた主キーの列も）か。順位は主キーなら偶数（UNIQUE は奇数） */
+const isPrimaryKey = (rank: number | undefined) => rank !== undefined && rank % 2 === 0;
+
 /** 1 列で一意か（親になれる列か） */
 const singleUnique = (rank: number | undefined) => rank !== undefined && rank <= 3;
 
@@ -422,10 +425,13 @@ function TableRelations({
         const ps = params.get(col) ?? [];
         const key = keyLabel(keys[col]);
         return (
-          <section key={col} className={col === focus ? 'relations-column focus' : 'relations-column'}>
+          <section
+            key={col}
+            className={['relations-column', isPrimaryKey(keys[col]) ? 'pk' : '', col === focus ? 'focus' : ''].filter(Boolean).join(' ')}
+          >
             <h3>
               <code>{name(col)}</code>
-              {key && <span className="badge">{key}</span>}
+              {key && <span className={isPrimaryKey(keys[col]) ? 'badge pk' : 'badge'}>{key}</span>}
             </h3>
             {ls.length > 0 && (
               <table className="relations-table">

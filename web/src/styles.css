@@ -2527,6 +2527,16 @@ button.icon.suggest-relation:hover {
   padding: 0.3rem 0 0.6rem;
 }
 
+/* 主キーの列は、薄い緑の背景でパッと見て分かるようにする（強調している列の青のほうが優先） */
+.relations-column.pk {
+  background: color-mix(in srgb, var(--ok) 7%, transparent);
+}
+
+.badge.pk {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
 .relations-column.focus {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
