@@ -405,32 +405,34 @@ export function RelationsScreen({
             <SideSplitter label="一覧の幅" side={side} />
             <div className={view === 'tables' && table && tableMode === 'diagram' ? 'relations-detail diagram' : 'relations-detail'}>
               {view === 'tables' && table && (
-                <div className="relations-mode" role="tablist" aria-label="表示の仕方">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tableMode === 'columns'}
-                    className={tableMode === 'columns' ? 'active' : undefined}
-                    onClick={() => setTableMode('columns')}
-                  >
-                    列
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tableMode === 'diagram'}
-                    className={tableMode === 'diagram' ? 'active' : undefined}
-                    onClick={() => setTableMode('diagram')}
-                  >
-                    図
-                  </button>
-                </div>
-              )}
-              {view === 'tables' && table && tableMode === 'diagram' && (
                 <>
                   <h2 className="relations-detail-title">
                     <code>{table}</code>
                   </h2>
+                  <div className="tabs" role="tablist" aria-label="表示の仕方">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tableMode === 'columns'}
+                      className={tableMode === 'columns' ? 'tab selected' : 'tab'}
+                      onClick={() => setTableMode('columns')}
+                    >
+                      列
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tableMode === 'diagram'}
+                      className={tableMode === 'diagram' ? 'tab selected' : 'tab'}
+                      onClick={() => setTableMode('diagram')}
+                    >
+                      図
+                    </button>
+                  </div>
+                </>
+              )}
+              {view === 'tables' && table && tableMode === 'diagram' && (
+                <>
                   <RelationDiagram center={table} links={links} keys={keys} oneSchema={oneSchema} onCenter={setTable} edgeInfo={edgeInfo} />
                 </>
               )}
@@ -691,9 +693,6 @@ function TableRelations({
 
   return (
     <>
-      <h2 className="relations-detail-title">
-        <code>{table}</code>
-      </h2>
       {columns.length === 0 && <p className="hint">この表の列は、解析で見つかったつながりやパラメータがありません。</p>}
       {columns.length > 0 && (
         <table className="relations-grid">

@@ -2201,8 +2201,6 @@ button.icon.suggest-toggle {
 /* 詳細の見出し（見ている表の名前）。列の名前より大きくし、下に線を引いて列のまとめと分ける */
 .relations-detail-title {
   margin: 0 0 0.4rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 2px solid var(--accent);
 }
 
 .relations-detail-title code {
@@ -2876,30 +2874,6 @@ body.col-resizing {
 .relations-detail.diagram {
   display: flex;
   flex-direction: column;
-}
-
-.relations-mode {
-  position: absolute;
-  top: 0.2rem;
-  right: 0;
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.relations-mode button {
-  padding: 0.15rem 0.8rem;
-  border: none;
-  border-radius: 0;
-  background: var(--panel);
-  color: var(--muted);
-}
-
-.relations-mode button.active {
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-weight: 600;
 }
 
 /* 関係図 */
