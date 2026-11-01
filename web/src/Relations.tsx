@@ -364,7 +364,7 @@ export function RelationsScreen({
                       ['tables', '表と列'],
                       ['statements', 'statement'],
                       ['names', 'パラメータ名'],
-                      ['suspicious', '気になる結合'],
+                      ['suspicious', '疑わしい結合'],
                     ] as const
                   ).map(([v, label]) => (
                     <button

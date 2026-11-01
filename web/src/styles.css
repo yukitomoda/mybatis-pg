@@ -3440,7 +3440,7 @@ div.relations-comment {
   text-align: center;
 }
 
-/* リレーション: 気になる結合 */
+/* リレーション: 疑わしい結合 */
 .relations-tables li button.ignored span:first-child {
   color: var(--muted);
   text-decoration: line-through;

@@ -85,7 +85,7 @@ export type RelationLoc = {
   column: string | null;
   statement: string | null;
   name: string | null;
-  /** 気になる結合の組（a|b） */
+  /** 疑わしい結合の組（a|b） */
   pair: string | null;
 };
 
