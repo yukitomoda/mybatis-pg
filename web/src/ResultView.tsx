@@ -40,6 +40,20 @@ function loadGeometry(): Geometry {
   return { x: window.innerWidth - w - 16, y: 64, w, h: Math.round(window.innerHeight * 0.65) };
 }
 
+/** 画面の端からあける幅 */
+const EDGE = 8;
+
+/**
+ * 位置と大きさを、画面の中に収める（広い画面で大きくした後、小さい画面で開いても、はみ出して右下のつまみに触れなくならないように）
+ */
+export function clampGeometry(g: Geometry, vw: number, vh: number): Geometry {
+  const w = Math.max(Math.min(360, vw - EDGE * 2), Math.min(g.w, vw - EDGE * 2));
+  const h = Math.max(Math.min(200, vh - EDGE * 2), Math.min(g.h, vh - EDGE * 2));
+  const x = Math.max(0, Math.min(g.x, vw - w - EDGE));
+  const y = Math.max(0, Math.min(g.y, vh - h - EDGE));
+  return { x, y, w, h };
+}
+
 function saveGeometry(g: Geometry) {
   try {
     localStorage.setItem(GEOMETRY_KEY, JSON.stringify(g));
@@ -177,6 +191,13 @@ export function ResultView({
 }) {
   const drag = useRef<{ x: number; y: number; gx: number; gy: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  // 画面の大きさが変わったら、位置と大きさを詰め直す
+  const [, setViewport] = useState(0);
+  useEffect(() => {
+    const onResize = () => setViewport((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // 端をドラッグして変えた大きさを覚える
   useEffect(() => {
@@ -212,7 +233,7 @@ export function ResultView({
       </button>
     );
   }
-  const g = rv.geometry;
+  const g = clampGeometry(rv.geometry, window.innerWidth, window.innerHeight);
   const style = rv.maximized ? undefined : { left: g.x, top: g.y, width: g.w, height: g.h };
   const end = (e: PointerEvent<HTMLDivElement>) => {
     drag.current = null;
