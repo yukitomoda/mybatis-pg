@@ -518,13 +518,15 @@ export function createApi(token: string) {
         post(`{"connectionId":${JSON.stringify(connectionId)}${parameters ? `,"parameters":${toJson(parameters, '')}` : ''}}`),
       ),
     /** 列の値の候補（多く出てくる順） */
-    columnValues: (connectionId: string, c: { schema: string; table: string; column: string }, scan = false) =>
+    columnValues: (connectionId: string, c: { schema: string; table: string; column: string }, scan = false, offset = 0, limit = 30) =>
       call<{
         type: string;
         estimatedRows: number;
         method: 'stats' | 'scan' | 'sample' | 'none';
         indexed: boolean;
         values: { value: string | null; count: number }[];
+        /** まだ続きがありそうか */
+        more: boolean;
       }>(
         'api/column-values',
         post(
@@ -534,6 +536,8 @@ export function createApi(token: string) {
             table: c.table,
             column: c.column,
             scan,
+            offset,
+            limit,
           }),
         ),
       ),

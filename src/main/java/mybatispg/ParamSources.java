@@ -919,6 +919,15 @@ final class ParamSources {
    */
   static Map<String, Object> values(String schema, String table, String column, boolean scan, QueryExecutor.ConnectionFactory connections)
       throws QueryExecutor.ExecutionException {
+    return values(schema, table, column, scan, 0, 30, connections);
+  }
+
+  /**
+   * 列の値の候補の、offset 番目から limit 件（「続き」を取るため）。応答の "more" は、まだ続きがありそうか。
+   * 統計情報の「よく出る値」を使い切ったら、scan なら表を読んで、それ以外の値を多い順に続ける。
+   */
+  static Map<String, Object> values(String schema, String table, String column, boolean scan, int offset, int limit,
+      QueryExecutor.ConnectionFactory connections) throws QueryExecutor.ExecutionException {
     Connection c;
     try {
       c = connections.open();
@@ -956,7 +965,11 @@ final class ParamSources {
       body.put("estimatedRows", Math.max(0, Math.round(reltuples)));
       List<Map<String, Object>> values = new ArrayList<>();
       // まず統計情報の「よく出る値」（表を読まない）
-      try (PreparedStatement ps = c.prepareStatement("SELECT most_common_vals::text::text[], most_common_freqs FROM pg_stats"
+      List<String> mcv = new ArrayList<>();
+      List<Long> mcvCounts = new ArrayList<>();
+      // 統計情報での、異なる値の数（正なら個数、負なら行数に対する割合。0 なら分からない）
+      double nDistinct = 0;
+      try (PreparedStatement ps = c.prepareStatement("SELECT most_common_vals::text::text[], most_common_freqs, n_distinct FROM pg_stats"
           + " WHERE schemaname = ?::name AND tablename = ?::name AND attname = ?::name")) {
         ps.setString(1, schema);
         ps.setString(2, table);
@@ -965,40 +978,65 @@ final class ParamSources {
           if (rs.next() && rs.getArray(1) != null) {
             Object[] vals = (Object[]) rs.getArray(1).getArray();
             Object[] freqs = (Object[]) rs.getArray(2).getArray();
-            for (int i = 0; i < vals.length && i < 30; i++) {
-              Map<String, Object> v = new LinkedHashMap<>();
-              v.put("value", vals[i] == null ? null : vals[i].toString());
-              v.put("count", Math.round(((Number) freqs[i]).doubleValue() * Math.max(reltuples, 0)));
-              values.add(v);
+            nDistinct = rs.getDouble(3);
+            for (int i = 0; i < vals.length; i++) {
+              mcv.add(vals[i] == null ? null : vals[i].toString());
+              mcvCounts.add(Math.round(((Number) freqs[i]).doubleValue() * Math.max(reltuples, 0)));
             }
           }
         }
       }
-      String method = "stats";
-      if (values.isEmpty() && !scan) {
-        method = "none";
-      } else if (values.isEmpty()) {
-        // 統計情報に「よく出る値」がない（ほぼ一意の列など）: 表を読んで数える。大きな表は一部だけを読む
+      for (int i = offset; i < mcv.size() && i < offset + limit; i++) {
+        Map<String, Object> v = new LinkedHashMap<>();
+        v.put("value", mcv.get(i));
+        v.put("count", mcvCounts.get(i));
+        values.add(v);
+      }
+      // 「よく出る値」で、すべての値を尽くしているか
+      boolean mcvAll = nDistinct > 0 && nDistinct <= mcv.size();
+      boolean more = offset + limit < mcv.size() || (scan && !mcv.isEmpty() && !mcvAll && offset + limit == mcv.size());
+      String method = mcv.isEmpty() ? (scan ? null : "none") : "stats";
+      if (scan && values.size() < limit && !(mcvAll && !mcv.isEmpty())) {
+        // 統計情報に「よく出る値」がない（ほぼ一意の列など）か、使い切った: 表を読んで、それ以外の値を数える。大きな表は一部だけを読む
         String q = quote(schema) + "." + quote(table);
         String col = quote(column);
         boolean sample = reltuples > 200000;
         String from = sample ? q + " TABLESAMPLE SYSTEM (" + Math.max(0.01, Math.min(100, 200000 / reltuples * 100)) + ")" : q;
-        method = sample ? "sample" : "scan";
-        try (Statement s = c.createStatement()) {
-          s.setQueryTimeout(10);
-          try (ResultSet rs = s.executeQuery("SELECT v, count(*) FROM (SELECT " + col + "::text AS v FROM " + from
-              + " WHERE " + col + " IS NOT NULL LIMIT 200000) x GROUP BY v ORDER BY 2 DESC, 1 LIMIT 30")) {
+        if (method == null) {
+          method = sample ? "sample" : "scan";
+        }
+        int need = limit - values.size();
+        int skip = Math.max(0, offset - mcv.size());
+        List<String> known = new ArrayList<>();
+        for (String v : mcv) {
+          if (v != null) {
+            known.add(v);
+          }
+        }
+        try (PreparedStatement ps = c.prepareStatement("SELECT v, count(*) FROM (SELECT " + col + "::text AS v FROM " + from
+            + " WHERE " + col + " IS NOT NULL LIMIT 200000) x WHERE v <> ALL (?::text[]) GROUP BY v ORDER BY 2 DESC, 1 OFFSET ? LIMIT ?")) {
+          ps.setQueryTimeout(10);
+          ps.setArray(1, c.createArrayOf("text", known.toArray()));
+          ps.setInt(2, skip);
+          ps.setInt(3, need + 1);
+          try (ResultSet rs = ps.executeQuery()) {
+            int got = 0;
             while (rs.next()) {
+              if (++got > need) {
+                break;
+              }
               Map<String, Object> v = new LinkedHashMap<>();
               v.put("value", rs.getString(1));
               v.put("count", rs.getLong(2));
               values.add(v);
             }
+            more = got > need;
           }
         }
       }
-      body.put("method", method);
+      body.put("method", method == null ? "none" : method);
       body.put("values", values);
+      body.put("more", more);
       c.rollback();
       return body;
     } catch (SQLException | RuntimeException e) {

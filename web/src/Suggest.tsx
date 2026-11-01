@@ -15,14 +15,18 @@ type Values = {
   /** 列から始まるインデックスがある（入力中の値の行を自動で探しても軽い） */
   indexed: boolean;
   values: { value: string | null; count: number }[];
+  /** まだ続きがありそうか */
+  more: boolean;
 };
+
+type Rows = { columns: string[]; columnTypes: string[]; rows: (string | null)[][] };
 
 /** 列の値の候補は、開いている間は覚えておく（同じ列を何度も読まない） */
 const cache = new Map<string, Promise<Values>>();
 
 const keyOf = (connectionId: string, c: SourceColumn) => `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
 
-/** 表に出す候補の数 */
+/** 表に出す候補の数（続きを取るときも、この数ずつ） */
 const MAX_ROWS = 15;
 
 /** 入力中の値を、列と比べる文字にする（なければ null） */
@@ -91,17 +95,20 @@ export function CandidatePane({
   const [values, setValues] = useState<Values | null>(null);
   const [error, setError] = useState<string | null>(null);
   const connectionId = conn.current?.id;
+  /** 再取得で、最初から取り直す件数（null なら 1 回分） */
+  const [reload, setReload] = useState<{ limit: number } | null>(null);
 
   useEffect(() => {
     if (!connectionId || !visible) return;
     let active = true;
     setValues(null);
     setError(null);
+    setExtra(null);
     const key = keyOf(connectionId, column);
     let p = cache.get(key);
     if (!p) {
       // 統計情報に値がなければ、表を読んで数える（虫眼鏡を押したときは、候補が出ることを期待しているので）
-      p = conn.api.columnValues(connectionId, column, true);
+      p = conn.api.columnValues(connectionId, column, true, 0, reload?.limit ?? MAX_ROWS);
       cache.set(key, p);
       p.catch(() => cache.delete(key));
     }
@@ -112,11 +119,45 @@ export function CandidatePane({
     return () => {
       active = false;
     };
-  }, [connectionId, column.schema, column.table, column.column, visible]);
+  }, [connectionId, column.schema, column.table, column.column, visible, reload]);
 
   // 候補の値ごとの行（表のすべての列）。候補が決まったら 1 回だけ読む
-  const [rows, setRows] = useState<{ columns: string[]; columnTypes: string[]; rows: (string | null)[][] } | null>(null);
-  const top = values ? values.values.slice(0, MAX_ROWS) : [];
+  const [rows, setRows] = useState<Rows | null>(null);
+  /** 「続きを取得」で足した値と行 */
+  const [extra, setExtra] = useState<{ values: Values['values']; rows: Rows['rows']; more: boolean } | null>(null);
+  const [fetching, setFetching] = useState<'more' | 'refetch' | null>(null);
+  const top = values ? [...values.values, ...(extra?.values ?? [])] : [];
+  const more = extra ? extra.more : (values?.more ?? false);
+  const fetchMore = () => {
+    if (!connectionId || !values) return;
+    setFetching('more');
+    conn.api
+      .columnValues(connectionId, column, true, top.length, MAX_ROWS)
+      .then(async (v) => {
+        const r =
+          v.values.length > 0
+            ? await conn.api.columnRows(
+                connectionId,
+                column,
+                v.values.map((x) => x.value),
+                null,
+              )
+            : null;
+        setExtra((old) => ({
+          values: [...(old?.values ?? []), ...v.values],
+          rows: [...(old?.rows ?? []), ...(r?.rows ?? [])],
+          more: v.more,
+        }));
+        if (!rows && r) setRows({ columns: r.columns, columnTypes: r.columnTypes, rows: [] });
+      })
+      .catch((e) => setError(message(e)))
+      .finally(() => setFetching(null));
+  };
+  const refetch = () => {
+    if (!connectionId) return;
+    cache.delete(keyOf(connectionId, column));
+    setReload({ limit: Math.min(100, Math.max(MAX_ROWS, top.length)) });
+  };
   useEffect(() => {
     setRows(null);
     if (!connectionId || !values || values.values.length === 0) return;
@@ -125,7 +166,7 @@ export function CandidatePane({
       .columnRows(
         connectionId,
         column,
-        top.map((v) => v.value),
+        values.values.map((v) => v.value),
         null,
       )
       .then(
@@ -169,7 +210,7 @@ export function CandidatePane({
   const tableTypes = rows?.columnTypes.length ? rows.columnTypes : (found?.columnTypes ?? []);
   const at = tableColumns.indexOf(column.column);
   const currentRows = found?.rows ?? [];
-  const candidateRows = [...(rows?.rows ?? [])].sort((a, b) => (counts.get(b[at]) ?? 0) - (counts.get(a[at]) ?? 0));
+  const candidateRows = [...(rows?.rows ?? []), ...(extra?.rows ?? [])].sort((a, b) => (counts.get(b[at]) ?? 0) - (counts.get(a[at]) ?? 0));
   const allRows = [...currentRows, ...candidateRows];
   const lead = [...currentRows.map(() => '入力中'), ...candidateRows.map((r) => counts.get(r[at])?.toLocaleString('ja-JP') ?? '')];
 
@@ -263,6 +304,30 @@ export function CandidatePane({
               rowClass={(i) => (i < currentRows.length ? 'current' : undefined)}
               highlight={column.column}
               onCell={onCell}
+              truncated={more}
+              actions={
+                <>
+                  {more && (
+                    <button
+                      type="button"
+                      disabled={fetching !== null}
+                      title={`次によく出る ${MAX_ROWS} 件の値と、その行を取ります`}
+                      onClick={fetchMore}
+                    >
+                      {fetching === 'more' ? '取得中…' : '続きを取得'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="link"
+                    disabled={fetching !== null || !rows}
+                    title="今ある件数を、最初から取り直します"
+                    onClick={refetch}
+                  >
+                    再取得
+                  </button>
+                </>
+              }
             />
           ) : (
             values.values.length > 0 && <p className="hint">行を読み込んでいます…</p>

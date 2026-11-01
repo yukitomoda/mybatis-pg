@@ -1802,7 +1802,7 @@ public final class ToolServer {
     }
     try {
       sendJson(ex, 200, ParamSources.rows(string(req, "schema"), string(req, "table"), string(req, "column"),
-          values.subList(0, Math.min(values.size(), 30)), string(req, "current"), () -> connections.open(connectionId)));
+          values.subList(0, Math.min(values.size(), 100)), string(req, "current"), () -> connections.open(connectionId)));
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
     }
@@ -2173,7 +2173,10 @@ public final class ToolServer {
     }
     try {
       boolean scan = req.has("scan") && req.get("scan").getAsBoolean();
-      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"), scan,
+      // 続きを取るときは offset から limit 件
+      int offset = req.has("offset") ? Math.max(0, req.get("offset").getAsInt()) : 0;
+      int limit = req.has("limit") ? Math.max(1, Math.min(100, req.get("limit").getAsInt())) : 30;
+      sendJson(ex, 200, ParamSources.values(string(req, "schema"), string(req, "table"), string(req, "column"), scan, offset, limit,
           () -> connections.open(connectionId)));
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
