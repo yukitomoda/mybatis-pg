@@ -623,12 +623,7 @@ function Workspace({ api }: { api: Api }) {
       <nav className="topbar">
         <span className="brand">mybatis-pg</span>
         {workspaceName && (
-          <button
-            type="button"
-            className="workspace-badge"
-            title="ワークスペース（押すと、ソースを変えたり、ほかのワークスペースを開いたりできます）"
-            onClick={() => go('workspace')}
-          >
+          <button type="button" className="workspace-badge" title="ワークスペース" onClick={() => go('workspace')}>
             {workspaceName}
           </button>
         )}
@@ -1278,11 +1273,9 @@ function StatementTree({
         </ul>
         {tree.length === 0 && !filtering && project.length === 0 ? (
           <p className="hint">
-            statement がありません。
             <button type="button" className="link" onClick={onOpenWorkspace}>
-              ワークスペース
+              ソースを追加
             </button>
-            で、プロジェクトや JAR を足してください。
           </p>
         ) : tree.length === 0 ? (
           <p className="hint">該当する statement がありません</p>

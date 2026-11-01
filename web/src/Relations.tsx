@@ -268,7 +268,7 @@ export function RelationsScreen({
             </button>
           )}
           {sources.length > 0 && (
-            <label className="relations-source" title="そのソースの SQL から見つけたつながりだけを出します（手で設定したものは出します）">
+            <label className="relations-source">
               ソース
               <select value={filterBySource ? sourceFilter : ''} onChange={(e) => setSourceFilter(e.target.value)}>
                 <option value="">すべて</option>
@@ -284,8 +284,7 @@ export function RelationsScreen({
         {error && <p className="error-text">{error}</p>}
         {result?.sharedFrom && (
           <p className="hint">
-            ワークスペースの設定で、「{conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom}
-            」の解析の結果を、すべての接続先で使っています（解析すると、この結果を更新します）。
+            {conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom} の結果を共有しています
           </p>
         )}
         {result?.progress && (
