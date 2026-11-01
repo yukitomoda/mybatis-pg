@@ -2524,6 +2524,15 @@ button.icon.suggest-relation:hover {
   flex-direction: column;
 }
 
+/* 詳細（実行の結果・値の候補）は結果ビューの高さに収め、表の中だけをスクロールする（見出しの行は上に残る） */
+.result-view-detail > .history-detail,
+.result-view-detail > .candidate-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .result-view-detail h3 {
   margin: 0 0 0.4rem;
   font-size: 14px;
