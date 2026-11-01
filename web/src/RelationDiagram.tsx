@@ -286,7 +286,7 @@ export function RelationDiagram({
           <svg width="28" height="8" aria-hidden="true">
             <line x1="0" y1="4" x2="28" y2="4" className="edge parent manual" />
           </svg>
-          手動　線の太さは根拠の SQL の数
+          手動
         </span>
         {hidden > 0 && <span className="hint">多すぎる {hidden} 表は省きました</span>}
       </div>
@@ -333,12 +333,7 @@ export function RelationDiagram({
               const cols = e.links.map((l) => `${l.a.slice(l.a.lastIndexOf('.') + 1)} = ${l.b.slice(l.b.lastIndexOf('.') + 1)}`).join(', ');
               return (
                 <g key={`${e.kind} ${e.from} ${e.to}`}>
-                  <path
-                    d={d}
-                    className={cls}
-                    style={{ strokeWidth: 1.2 + Math.min(2.8, Math.log2(e.statements + 1) * 0.7) }}
-                    markerStart={marker}
-                  />
+                  <path d={d} className={cls} markerStart={marker} />
                   {/* 押しやすいように、太い透明の線を重ねる */}
                   <path d={d} className="edge-hit" onClick={(ev) => setOpen({ edge: e, at: new DOMRect(ev.clientX, ev.clientY, 0, 0) })}>
                     <title>
