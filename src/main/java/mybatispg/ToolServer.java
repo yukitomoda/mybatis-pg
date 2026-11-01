@@ -69,7 +69,8 @@ public final class ToolServer {
 
   private final MapperWorkspace workspace;
   private final ConnectionStore connections;
-  private final GlobalStore globals;
+  /** 共通パラメータ（ワークスペースを開き直したら差し替える） */
+  private volatile GlobalStore globals;
   /** 下書きの保存先。起動した後に useDrafts で決める */
   private volatile DraftStore draftStore = DraftStore.inMemory();
   /** 接続先のパスワードの暗号化した保存先。起動した後に useVault で決める */
@@ -122,6 +123,183 @@ public final class ToolServer {
     ToolServer s = new ToolServer(workspace, connections, globals, port, token, publicUrls);
     s.server.start();
     return s;
+  }
+
+  // ---- ワークスペース ----
+
+  /** 設定のディレクトリ（~/.mybatis-pg）。null なら、ワークスペースは使わない（テストなど） */
+  private Path configDir;
+  private Workspaces workspaces;
+  private volatile Workspaces.Def currentWorkspace;
+
+  /**
+   * ワークスペースを使う。開いているワークスペースの鍵で、共通パラメータ・下書き・プレイグラウンド・実行の履歴・リレーションの
+   * 保存先を決め、プロジェクトのデータソースを接続先にする
+   */
+  public synchronized void useWorkspaces(Path configDir, Workspaces workspaces, Workspaces.Def current) throws IOException {
+    this.configDir = configDir;
+    this.workspaces = workspaces;
+    this.currentWorkspace = current;
+    applyStores();
+  }
+
+  /** 開いているワークスペースの鍵で、保存先を差し替える */
+  private synchronized void applyStores() throws IOException {
+    String key = workspace.projectKey();
+    globals = GlobalStore.load(configDir.resolve("globals.json"), key);
+    draftStore = DraftStore.open(configDir.resolve("drafts"), key);
+    playgrounds = PlaygroundStore.open(configDir.resolve("playground"), key);
+    results = ResultHistory.open(configDir.resolve("results"), key);
+    relationsDir = configDir.resolve("relations");
+    relationStores.clear();
+    relationLast.clear();
+    manualRelations = null;
+    connections.useProjects(workspace.projectDirs());
+  }
+
+  /** 開いているワークスペースと、ワークスペースの一覧 */
+  private Map<String, Object> workspaceSnapshot() throws IOException {
+    Map<String, Object> body = new LinkedHashMap<>();
+    Workspaces.Def def = currentWorkspace;
+    if (def == null || workspaces == null) {
+      body.put("current", null);
+      body.put("workspaces", new ArrayList<>());
+      return body;
+    }
+    Map<String, Integer> counts = workspace.fileCounts();
+    Map<String, Object> cur = new LinkedHashMap<>();
+    cur.put("id", def.id);
+    cur.put("name", def.name);
+    List<Map<String, Object>> sources = new ArrayList<>();
+    for (Workspaces.Source src : def.sources) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("id", src.id);
+      m.put("name", src.name);
+      m.put("type", src.type);
+      m.put("path", src.path);
+      m.put("enabled", src.enabled);
+      m.put("error", Workspaces.check(src));
+      m.put("files", src.enabled ? counts.get(src.name) : null);
+      sources.add(m);
+    }
+    cur.put("sources", sources);
+    body.put("current", cur);
+    List<Map<String, Object>> list = new ArrayList<>();
+    for (Workspaces.Def d : workspaces.list()) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("id", d.id);
+      m.put("name", d.name);
+      m.put("sources", d.sources.size());
+      m.put("current", d.id.equals(def.id));
+      list.add(m);
+    }
+    body.put("workspaces", list);
+    return body;
+  }
+
+  /**
+   * ワークスペースの操作。save: {"name", "sources": [{"id"?, "name", "type", "path", "enabled"}]}（開いているものを変える）、
+   * open: {"id"}、create: {"name"}（作って開く）、delete: {"id"}（開いていないもの）。応答は workspaceSnapshot
+   */
+  private void workspaceAction(HttpExchange ex, String action) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    if (workspaces == null) {
+      sendJson(ex, 400, error("ワークスペースを使っていません"));
+      return;
+    }
+    if (!"save".equals(action) && !"delete".equals(action) && !relationRuns.isEmpty()) {
+      sendJson(ex, 409, error("リレーションを解析しているので、ワークスペースを切り替えられません。一時停止してから切り替えてください"));
+      return;
+    }
+    try {
+      switch (action) {
+        case "save": {
+          Workspaces.Def def = currentWorkspace;
+          String name = string(req, "name");
+          if (name == null || name.trim().isEmpty()) {
+            sendJson(ex, 400, error("ワークスペースの名前を入れてください"));
+            return;
+          }
+          List<Workspaces.Source> sources = new ArrayList<>();
+          java.util.Set<String> names = new java.util.HashSet<>();
+          List<String> problems = new ArrayList<>();
+          if (req.has("sources")) {
+            for (JsonElement e : req.getAsJsonArray("sources")) {
+              JsonObject o = e.getAsJsonObject();
+              String type = string(o, "type");
+              String path = string(o, "path") == null ? "" : string(o, "path").trim();
+              String sname = string(o, "name") == null || string(o, "name").trim().isEmpty()
+                  ? (path.isEmpty() ? "" : Workspaces.defaultName(path)) : string(o, "name").trim();
+              Workspaces.Source src = new Workspaces.Source(string(o, "id") == null ? Workspaces.newId() : string(o, "id"), sname, type, path,
+                  !o.has("enabled") || o.get("enabled").getAsBoolean());
+              String problem = Workspaces.check(src);
+              if (problem != null) {
+                problems.add(problem);
+              } else if (sname.isEmpty() || sname.contains("/") || !names.add(sname)) {
+                problems.add("ソースの名前が空か、/ を含むか、ほかと重なっています: " + sname);
+              }
+              sources.add(src);
+            }
+          }
+          if (!problems.isEmpty()) {
+            sendJson(ex, 400, error(String.join("\n", problems)));
+            return;
+          }
+          def.name = workspaces.uniqueName(name.trim(), def.id);
+          def.sources = sources;
+          workspaces.save(def);
+          workspace.configure(def);
+          connections.useProjects(workspace.projectDirs());
+          break;
+        }
+        case "open": {
+          Workspaces.Def def = workspaces.get(string(req, "id"));
+          if (def == null) {
+            sendJson(ex, 404, error("ワークスペースがありません"));
+            return;
+          }
+          openWorkspace(def);
+          break;
+        }
+        case "create": {
+          String name = string(req, "name");
+          Workspaces.Def def = workspaces.create(name == null || name.trim().isEmpty() ? "ワークスペース" : name.trim(), null,
+              new ArrayList<Workspaces.Source>());
+          openWorkspace(def);
+          break;
+        }
+        case "delete": {
+          String id = string(req, "id");
+          if (currentWorkspace != null && currentWorkspace.id.equals(id)) {
+            sendJson(ex, 400, error("開いているワークスペースは消せません。ほかのワークスペースを開いてから消してください"));
+            return;
+          }
+          if (!workspaces.delete(id)) {
+            sendJson(ex, 404, error("ワークスペースがありません"));
+            return;
+          }
+          break;
+        }
+        default:
+          sendJson(ex, 404, error("not found"));
+          return;
+      }
+    } catch (RuntimeException e) {
+      sendJson(ex, 400, error(Errors.describe(e)));
+      return;
+    }
+    sendJson(ex, 200, workspaceSnapshot());
+  }
+
+  /** ワークスペースを開く（ソースを読み直し、保存先を差し替える） */
+  private synchronized void openWorkspace(Workspaces.Def def) throws IOException {
+    workspaces.touch(def);
+    currentWorkspace = def;
+    workspace.configure(def);
+    applyStores();
   }
 
   /** 下書きの保存先を決める */
@@ -242,6 +420,19 @@ public final class ToolServer {
     }
     String method = ex.getRequestMethod();
     switch (path) {
+      case "/api/workspace":
+        if (requireMethod(ex, method, "GET")) {
+          sendJson(ex, 200, workspaceSnapshot());
+        }
+        break;
+      case "/api/workspace/save":
+      case "/api/workspace/open":
+      case "/api/workspace/create":
+      case "/api/workspace/delete":
+        if (requireMethod(ex, method, "POST")) {
+          workspaceAction(ex, path.substring("/api/workspace/".length()));
+        }
+        break;
       case "/api/statements":
         if (requireMethod(ex, method, "GET")) {
           statements(ex);
@@ -574,6 +765,10 @@ public final class ToolServer {
     body.put("playgrounds", playgroundList);
     // JAR から読み込んだときなど、ファイルに保存できない
     body.put("readOnly", workspace.isReadOnly());
+    // ワークスペースで、保存できないソース（JAR）のファイルの頭（「ソースの名前/」）
+    body.put("readOnlyPrefixes", workspace.readOnlyPrefixes());
+    Workspaces.Def def = currentWorkspace;
+    body.put("workspace", def == null ? null : def.name);
     body.put("loadErrors", renderer.getLoadErrors());
     sendJson(ex, 200, body);
   }
@@ -1438,7 +1633,7 @@ public final class ToolServer {
       sendJson(ex, 400, error("保存するファイルが、読み込んでいる mapper XML ではありません"));
       return;
     }
-    if (workspace.isReadOnly() && !shown.startsWith(PlaygroundStore.PREFIX)) {
+    if (!shown.startsWith(PlaygroundStore.PREFIX) && workspace.isReadOnly(file)) {
       sendJson(ex, 403, error("JAR から読み込んだ mapper XML は、ファイルに保存できません"));
       return;
     }
@@ -2185,17 +2380,9 @@ public final class ToolServer {
     }
   }
 
-  /** 基準ディレクトリからの相対パスを / 区切りで返す。基準の外なら絶対パスのまま */
+  /** 画面に出すファイルのパス（基準ディレクトリからの相対パス。ソースが 2 つ以上なら「ソースの名前/相対パス」） */
   private String displayPath(String resource) {
-    Path base = workspace.baseDir();
-    Path file;
-    try {
-      file = Paths.get(resource).toAbsolutePath().normalize();
-    } catch (RuntimeException e) {
-      return resource;
-    }
-    Path shown = base != null && file.startsWith(base) && !file.equals(base) ? base.relativize(file) : file;
-    return shown.toString().replace('\\', '/');
+    return workspace.displayPath(resource);
   }
 
   /**

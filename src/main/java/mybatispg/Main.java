@@ -14,6 +14,8 @@ import java.util.List;
 /**
  * 使い方:
  * <pre>
+ * java -jar mybatis-pg.jar [オプション]                    （最後に開いたワークスペースを開く）
+ * java -jar mybatis-pg.jar [オプション] --workspace 名前
  * java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ
  * java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...
  * java -jar mybatis-pg.jar [オプション] --jar アプリのJAR（war）
@@ -27,6 +29,9 @@ public final class Main {
   /** 改名前（mybatis-xml-editor）の設定のディレクトリ */
   private static final String OLD_CONFIG_DIR = ".mybatis-xml-editor";
   private static final String USAGE = "使い方:\n"
+      + "  java -jar mybatis-pg.jar [オプション]\n"
+      + "                       最後に開いたワークスペースを開く（なければ空のワークスペースを作る。ソースは画面から足す）\n"
+      + "  java -jar mybatis-pg.jar [オプション] --workspace 名前\n"
       + "  java -jar mybatis-pg.jar [オプション] --project プロジェクトのディレクトリ\n"
       + "  java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...\n"
       + "  java -jar mybatis-pg.jar [オプション] --jar アプリのJAR（war）\n"
@@ -50,6 +55,7 @@ public final class Main {
     List<Path> sources = new ArrayList<>();
     List<String> publicUrls = new ArrayList<>();
     String editorCommand = null;
+    String workspaceName = null;
     for (int i = 0; i < args.length; i++) {
       if ("--version".equals(args[i])) {
         System.out.println("mybatis-pg " + version());
@@ -62,6 +68,8 @@ public final class Main {
         publicUrls.add(args[++i]);
       } else if ("--project".equals(args[i]) && i + 1 < args.length) {
         project = absolute(args[++i]);
+      } else if ("--workspace".equals(args[i]) && i + 1 < args.length) {
+        workspaceName = args[++i];
       } else if ("--jar".equals(args[i]) && i + 1 < args.length) {
         jar = absolute(args[++i]);
       } else if (args[i].startsWith("-")) {
@@ -72,52 +80,38 @@ public final class Main {
         sources.add(absolute(args[i]));
       }
     }
-    // --project・mapper のファイル・--jar のどれか 1 つだけを指定する
-    if ((project != null ? 1 : 0) + (sources.isEmpty() ? 0 : 1) + (jar != null ? 1 : 0) != 1) {
+    // --workspace・--project・mapper のファイル・--jar のどれか 1 つまで（どれもなければ、最後に開いたワークスペース）
+    if ((workspaceName != null ? 1 : 0) + (project != null ? 1 : 0) + (sources.isEmpty() ? 0 : 1) + (jar != null ? 1 : 0) > 1) {
       usage();
     }
     System.out.println("mybatis-pg " + version());
 
-    MapperWorkspace workspace;
-    if (jar != null) {
-      if (!Files.isRegularFile(jar)) {
-        System.err.println("ファイルがありません: " + jar);
-        System.exit(2);
-      }
-      System.out.println("JAR の中の mapper XML を読み込みます（ファイルには保存できません）: " + jar);
-      workspace = MapperWorkspace.ofJar(jar);
-    } else if (project != null) {
-      if (!Files.isDirectory(project)) {
-        System.err.println("ディレクトリがありません: " + project);
-        System.exit(2);
-      }
-      MapperLocations locations = MapperLocations.of(project);
-      if (locations.getConfigFile() != null && !locations.getPatterns().isEmpty()) {
-        System.out.println("mapper-locations: " + locations.getPatterns() + "（" + locations.getConfigFile() + "）");
-      } else {
-        System.out.println("mapper-locations の設定がないため、配下の mapper XML をすべて対象にします");
-      }
-      workspace = MapperWorkspace.ofProject(project);
-    } else {
-      workspace = MapperWorkspace.ofPaths(sources);
-    }
-    printSummary(workspace, "読み込み");
-
-    final MapperWorkspace ws = workspace;
-    Runnable reload = () -> {
-      ws.reload();
-      printSummary(ws, "再読み込み");
-    };
-    if (workspace.jar() != null) {
-      FileWatcher.startFile(workspace.jar(), reload);
-      System.out.println("監視中: " + workspace.jar());
-    } else {
-      FileWatcher.start(workspace.watchRoots(), reload);
-      System.out.println("監視中: " + workspace.watchRoots());
-    }
-
     Path configDir = Paths.get(System.getProperty("user.home"), CONFIG_DIR);
     migrateConfig(Paths.get(System.getProperty("user.home"), OLD_CONFIG_DIR), configDir);
+
+    Workspaces workspaces = Workspaces.open(configDir.resolve("workspaces"));
+    Workspaces.Def def = openDefinition(workspaces, workspaceName, project, jar, sources);
+    workspaces.touch(def);
+    System.out.println("ワークスペース: " + def.name + "（ソース " + def.sources.size() + " 件）");
+    for (Workspaces.Source src : def.sources) {
+      String problem = Workspaces.check(src);
+      System.out.println("  " + src.name + "（" + src.type + "）: " + src.path + (!src.enabled ? "（無効）" : problem != null ? "（" + problem + "）" : ""));
+      if (src.enabled && problem == null && Workspaces.PROJECT.equals(src.type)) {
+        MapperLocations locations = MapperLocations.of(Paths.get(src.path));
+        if (locations.getConfigFile() != null && !locations.getPatterns().isEmpty()) {
+          System.out.println("    mapper-locations: " + locations.getPatterns() + "（" + locations.getConfigFile() + "）");
+        } else {
+          System.out.println("    mapper-locations の設定がないため、配下の mapper XML をすべて対象にします");
+        }
+      }
+    }
+
+    MapperWorkspace workspace = MapperWorkspace.of(def);
+    printSummary(workspace, "読み込み");
+    final MapperWorkspace ws = workspace;
+    workspace.onReload(() -> printSummary(ws, "再読み込み"));
+    workspace.watch();
+    System.out.println("監視中: " + workspace.watched());
 
     // DB への操作のログ（日ごとのファイル。7 日より古いものは消す）
     Path logDir = configDir.resolve("logs");
@@ -126,11 +120,8 @@ public final class Main {
 
     // 接続先の設定（パスワードは保存しない）
     Path connectionsFile = configDir.resolve("connections.json");
+    // application.yml などの spring.datasource も接続先にする（ワークスペースのプロジェクトごと。useWorkspaces で決める）
     ConnectionStore connections = ConnectionStore.load(connectionsFile);
-    if (project != null) {
-      // application.yml などの spring.datasource も接続先にする
-      connections.useProject(project);
-    }
     System.out.println("接続先の設定: " + connectionsFile);
 
     // 共通パラメータ（プロジェクトごと）
@@ -146,6 +137,8 @@ public final class Main {
     String token = newToken();
     ToolServer server = startServer(workspace, connections, globals, port, token);
     server.useDrafts(drafts);
+    // ワークスペース（開き直したら、共通パラメータ・下書き・プレイグラウンド・履歴・リレーションの保存先を差し替える）
+    server.useWorkspaces(configDir, workspaces, def);
     // 接続先のパスワード（マスターパスワードで暗号化して保存する）
     Path secretsFile = configDir.resolve("secrets.json");
     server.useVault(PasswordVault.load(secretsFile));
@@ -176,6 +169,63 @@ public final class Main {
     for (URI url : urls) {
       System.out.println("公開 URL: " + url + "?token=" + token);
     }
+  }
+
+  /**
+   * 開くワークスペースを決める。--project・--jar・mapper のファイルを指定したら、それを 1 つだけ持つワークスペース（前の版と同じ鍵。
+   * リレーションなどをそのまま引き継ぐ）を探し、なければ作る。--workspace なら名前か id で探す。どれもなければ、最後に開いたもの
+   * （なければ空のワークスペースを作る）
+   */
+  static Workspaces.Def openDefinition(Workspaces workspaces, String name, Path project, Path jar, List<Path> sources) throws IOException {
+    if (name != null) {
+      Workspaces.Def d = workspaces.find(name);
+      if (d == null) {
+        System.err.println("ワークスペースがありません: " + name);
+        System.exit(2);
+      }
+      return d;
+    }
+    String key;
+    String title;
+    List<Workspaces.Source> list = new ArrayList<>();
+    if (jar != null) {
+      if (!Files.isRegularFile(jar)) {
+        System.err.println("ファイルがありません: " + jar);
+        System.exit(2);
+      }
+      key = jar.toString();
+      title = Workspaces.defaultName(key);
+      list.add(new Workspaces.Source(Workspaces.newId(), title, Workspaces.JAR, key, true));
+    } else if (project != null) {
+      if (!Files.isDirectory(project)) {
+        System.err.println("ディレクトリがありません: " + project);
+        System.exit(2);
+      }
+      key = project.toString();
+      title = Workspaces.defaultName(key);
+      list.add(new Workspaces.Source(Workspaces.newId(), title, Workspaces.PROJECT, key, true));
+    } else if (!sources.isEmpty()) {
+      Path base = MapperWorkspace.ofPaths(sources).baseDir();
+      key = base == null ? "" : base.toString();
+      title = base == null ? "mapper" : Workspaces.defaultName(key);
+      java.util.Set<String> used = new java.util.HashSet<>();
+      for (Path p : sources) {
+        String n = Workspaces.defaultName(p.toString());
+        for (int i = 2; !used.add(n); i++) {
+          n = Workspaces.defaultName(p.toString()) + "-" + i;
+        }
+        list.add(new Workspaces.Source(Workspaces.newId(), n, Workspaces.FILES, p.toString(), true));
+      }
+    } else {
+      Workspaces.Def last = workspaces.last();
+      return last != null ? last : workspaces.create("ワークスペース", null, new ArrayList<Workspaces.Source>());
+    }
+    Workspaces.Def found = workspaces.findByKey(key);
+    if (found != null) {
+      return found;
+    }
+    System.out.println("ワークスペースを作りました: " + title);
+    return workspaces.create(title, key, list);
   }
 
   /**

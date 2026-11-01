@@ -89,6 +89,29 @@ public final class ConnectionStore {
     this.projectSources = () -> ProjectDataSources.read(projectDir, System.getenv(), System.getProperties());
   }
 
+  /**
+   * ワークスペースのプロジェクト（名前ごとのディレクトリ）の設定のデータソースを接続先にする。
+   * プロジェクトが 1 つなら、id と名前は useProject と同じ（前の設定や解析の結果をそのまま使う）。
+   * 2 つ以上なら、重ならないように id と名前にプロジェクトの名前を付ける（project:名前/default、名前: application.yml）
+   */
+  public void useProjects(java.util.Map<String, Path> projects) {
+    if (projects.size() == 1) {
+      useProject(projects.values().iterator().next());
+      return;
+    }
+    java.util.Map<String, Path> fixed = new java.util.LinkedHashMap<>(projects);
+    this.projectSources = () -> {
+      List<ProjectDataSources.Source> out = new java.util.ArrayList<>();
+      for (java.util.Map.Entry<String, Path> e : fixed.entrySet()) {
+        for (ProjectDataSources.Source s : ProjectDataSources.read(e.getValue(), System.getenv(), System.getProperties())) {
+          out.add(new ProjectDataSources.Source(ProjectDataSources.PREFIX + e.getKey() + "/" + s.id.substring(ProjectDataSources.PREFIX.length()),
+              e.getKey() + ": " + s.name, e.getKey() + "/" + s.file, s.url, s.user, s.password, s.error));
+        }
+      }
+      return out;
+    };
+  }
+
   /** テスト用 */
   void useProjectSources(java.util.function.Supplier<List<ProjectDataSources.Source>> sources) {
     this.projectSources = sources;
