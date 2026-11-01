@@ -79,15 +79,17 @@ const SCREENS: [Screen, string][] = [
 
 /** リレーションの画面で見ているもの */
 export type RelationLoc = {
-  view: 'tables' | 'statements' | 'names';
+  view: 'tables' | 'statements' | 'names' | 'suspicious';
   table: string | null;
   /** 強調する列（schema.table.column） */
   column: string | null;
   statement: string | null;
   name: string | null;
+  /** 気になる結合の組（a|b） */
+  pair: string | null;
 };
 
-const NO_RELATION: RelationLoc = { view: 'tables', table: null, column: null, statement: null, name: null };
+const NO_RELATION: RelationLoc = { view: 'tables', table: null, column: null, statement: null, name: null, pair: null };
 
 /** schema.table.column の表の部分 */
 const tableOfColumn = (col: string) => col.slice(0, col.lastIndexOf('.'));
@@ -128,9 +130,11 @@ function parseHash(): {
             ? { ...NO_RELATION, view: 'statements', statement: value }
             : kind === 'names' || kind === 'name'
               ? { ...NO_RELATION, view: 'names', name: value }
-              : arg
-                ? { ...NO_RELATION, table: tableOfColumn(arg), column: arg }
-                : NO_RELATION;
+              : kind === 'suspicious'
+                ? { ...NO_RELATION, view: 'suspicious', pair: value }
+                : arg
+                  ? { ...NO_RELATION, table: tableOfColumn(arg), column: arg }
+                  : NO_RELATION;
     return { screen: 'relations', ...none, relation };
   }
   return { screen: known ? (screen as Screen) : 'query', ...none };
@@ -152,6 +156,7 @@ function hashOf(
     const r = relation;
     if (r.view === 'statements') return r.statement ? `#/relations/statement/${enc(r.statement)}` : '#/relations/statements';
     if (r.view === 'names') return r.name ? `#/relations/name/${enc(r.name)}` : '#/relations/names';
+    if (r.view === 'suspicious') return r.pair ? `#/relations/suspicious/${enc(r.pair)}` : '#/relations/suspicious';
     if (r.column) return `#/relations/column/${enc(r.column)}`;
     return r.table ? `#/relations/table/${enc(r.table)}` : '#/relations';
   }

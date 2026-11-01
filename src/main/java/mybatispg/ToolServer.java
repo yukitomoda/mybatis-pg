@@ -154,6 +154,7 @@ public final class ToolServer {
     relationStores.clear();
     relationLast.clear();
     relationGraphs.clear();
+    suspiciousCache.clear();
     manualRelations = null;
     connections.useProjects(workspace.projectDirs());
   }
@@ -1641,6 +1642,23 @@ public final class ToolServer {
     return "\"" + name.replace("\"", "\"\"") + "\"";
   }
 
+  /** 接続先ごとの、疑わしい結合（解析の結果の更新時刻・件数と、手で設定したものの版が変わらなければ使い回す） */
+  private final Map<String, Object[]> suspiciousCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+  private List<SuspiciousJoins.Suspicion> suspicious(String connectionId, Relations.Store store, ManualRelations manual) {
+    String key = relationKey(connectionId);
+    Object[] cached = suspiciousCache.get(key);
+    if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()
+        && (Long) cached[2] == manual.version) {
+      @SuppressWarnings("unchecked")
+      List<SuspiciousJoins.Suspicion> list = (List<SuspiciousJoins.Suspicion>) cached[3];
+      return list;
+    }
+    List<SuspiciousJoins.Suspicion> list = SuspiciousJoins.find(col -> Relations.unique(store, col), Relations.links(store, manual), manual);
+    suspiciousCache.put(key, new Object[] {store.updatedAt, store.statements.size(), manual.version, list});
+    return list;
+  }
+
   /** 画面に返す履歴の 1 件（編集中の XML の中身は返さない） */
   private static JsonObject forClient(JsonObject o) {
     JsonObject c = o.deepCopy();
@@ -2344,7 +2362,8 @@ public final class ToolServer {
   }
 
   /**
-   * 手で設定したリレーションを変える。{"action": "add" | "remove", "child", "parent"} か {"action": "disable" | "enable", "a", "b"}。
+   * 手で設定したリレーションを変える。{"action": "add" | "remove", "child", "parent"} か {"action": "disable" | "enable", "a", "b"}、
+   * 疑わしい結合を問題なしとして隠す・戻すなら {"action": "ignore" | "unignore", "a", "b"}。
    * 列は schema.table.column
    */
   private void changeManualRelation(HttpExchange ex) throws IOException {
@@ -2363,8 +2382,12 @@ public final class ToolServer {
         manual.disable(string(req, "a"), string(req, "b"));
       } else if ("enable".equals(action)) {
         manual.enable(string(req, "a"), string(req, "b"));
+      } else if ("ignore".equals(action)) {
+        manual.ignore(string(req, "a"), string(req, "b"));
+      } else if ("unignore".equals(action)) {
+        manual.unignore(string(req, "a"), string(req, "b"));
       } else {
-        sendJson(ex, 400, error("action は add・remove・disable・enable のどれかにしてください"));
+        sendJson(ex, 400, error("action は add・remove・disable・enable・ignore・unignore のどれかにしてください"));
         return;
       }
     } catch (IllegalArgumentException e) {
@@ -2377,10 +2400,6 @@ public final class ToolServer {
     sendJson(ex, 200, body);
   }
 
-  /**
-   * DB の表と列（リレーションを手で追加するときに選ぶ）。{"connectionId"} なら表（schema.table）の一覧、
-   * {"connectionId", "table": "schema.table"} ならその表の列の一覧
-   */
   /**
    * DB の表と列のコメント（COMMENT ON TABLE・COLUMN）: {"connectionId"} →
    * {"tables": {"schema.table": コメント}, "columns": {"schema.table.column": コメント}}。コメントのないものは入れない
@@ -2423,6 +2442,10 @@ public final class ToolServer {
     sendJson(ex, 200, body);
   }
 
+  /**
+   * DB の表と列（リレーションを手で追加するときに選ぶ）。{"connectionId"} なら表（schema.table）の一覧、
+   * {"connectionId", "table": "schema.table"} ならその表の列の一覧
+   */
   private void dbColumns(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
     if (req == null) {
@@ -2543,6 +2566,8 @@ public final class ToolServer {
       ManualRelations manual = manualRelations();
       List<Relations.Link> all = Relations.links(store, manual);
       Relations.Graph graph = new Relations.Graph(store, all, manual);
+      // 疑わしい結合（組の数の 2 乗に比例するので、解析の結果と手で設定したものが変わらなければ前のものを使う）
+      body.put("suspicious", suspicious(connectionId, store, manual));
       List<Map<String, Object>> links = new ArrayList<>();
       for (Relations.Link l : all) {
         Map<String, Object> m = new LinkedHashMap<>();

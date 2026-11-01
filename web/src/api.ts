@@ -577,7 +577,9 @@ export function createApi(token: string) {
       ),
     /** 手で設定したリレーションを変える（列は schema.table.column） */
     changeManualRelation: (
-      change: { action: 'add' | 'remove'; child: string; parent: string } | { action: 'disable' | 'enable'; a: string; b: string },
+      change:
+        | { action: 'add' | 'remove'; child: string; parent: string }
+        | { action: 'disable' | 'enable' | 'ignore' | 'unignore'; a: string; b: string },
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
     dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
@@ -694,7 +696,24 @@ export interface RelationLink {
   compositeKey?: string | null;
 }
 
+/** 疑わしい結合 */
+export interface RelationSuspicion {
+  a: string;
+  b: string;
+  kind: 'parent' | 'one-to-one' | 'sibling';
+  statements: string[];
+  /** 源流が食い違う、違う表の、同じ名前の主キーどうし */
+  reason: string;
+  /** 両側の源流（一意の列なら、その列自身） */
+  rootsA: string[];
+  rootsB: string[];
+  /** 問題なしとして隠した */
+  ignored: boolean;
+}
+
 export interface RelationsResult {
+  /** 疑わしい結合 */
+  suspicious?: RelationSuspicion[];
   /** ほかの接続先の解析の結果を使っているとき、その接続先の id（ワークスペースの設定） */
   sharedFrom?: string | null;
   /** ワークスペースのソースの名前（ソースで絞り込む。ソースが 1 つなら空） */

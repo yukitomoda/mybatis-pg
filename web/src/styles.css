@@ -2305,9 +2305,15 @@ button.icon.suggest-relation:hover {
 
 /* リレーションの画面の見方の切り替え */
 .relations-views {
-  display: flex;
+  /* 4 つの見方を 2 列 × 2 段に（狭い一覧でも折り返さない） */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.25rem;
   margin-bottom: 0.4rem;
+}
+
+.relations-views button {
+  white-space: nowrap;
 }
 
 .relations-views button {
@@ -3432,4 +3438,42 @@ div.relations-comment {
   width: 1.4rem;
   padding: 0 0.2rem;
   text-align: center;
+}
+
+/* リレーション: 気になる結合 */
+.relations-tables li button.ignored span:first-child {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.relations-show-ignored {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.relations-tables .relations-show-ignored input {
+  width: auto;
+}
+
+.relations-views .badge {
+  margin-left: 0.3rem;
+}
+
+.suspicion-reason {
+  margin: 0.4rem 0;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.suspicion-roots {
+  margin-bottom: 0.6rem;
+}
+
+.suspicion-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
 }
