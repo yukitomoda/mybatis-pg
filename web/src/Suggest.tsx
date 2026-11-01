@@ -31,7 +31,7 @@ const extraCache = new Map<string, Extra>();
 const keyOf = (connectionId: string, c: SourceColumn) => `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
 
 /** 表に出す候補の数（続きを取るときも、この数ずつ） */
-const MAX_ROWS = 15;
+const MAX_ROWS = 50;
 
 /** 入力中の値を、列と比べる文字にする（なければ null） */
 function currentText(v: PValue | undefined): string | null {

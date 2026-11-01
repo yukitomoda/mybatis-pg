@@ -557,7 +557,7 @@ export function createApi(token: string) {
       sql: string,
       label: string,
       history = true,
-      maxRows = 200,
+      maxRows = 1000,
     ) =>
       call<ResultTable & { total: number | null; elapsedMillis: number; historyId: string | null }>(
         'api/part',

@@ -158,7 +158,17 @@ export function PartsPanel({
     if (!current) return;
     setRunning(p.key);
     try {
-      const r = await conn.api.runPart(statementId, value, draft, current.id, partSql(numbered, p, values), partLabel(p), history);
+      // 件数を見るだけなら、行は 1 行だけ取る（件数は別に数える）
+      const r = await conn.api.runPart(
+        statementId,
+        value,
+        draft,
+        current.id,
+        partSql(numbered, p, values),
+        partLabel(p),
+        history,
+        history ? undefined : 1,
+      );
       setResults((old) => ({ ...old, [p.key]: { ok: true, total: r.total, historyId: r.historyId } }));
       if (r.historyId) onResult(r.historyId);
     } catch (e) {

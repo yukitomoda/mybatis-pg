@@ -1570,7 +1570,7 @@ public final class ToolServer {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
-    int maxRows = req.has("maxRows") ? Math.max(1, Math.min(10000, req.get("maxRows").getAsInt())) : 200;
+    int maxRows = req.has("maxRows") ? Math.max(1, Math.min(10000, req.get("maxRows").getAsInt())) : 1000;
     int timeout = req.has("timeoutSeconds") ? Math.max(1, Math.min(600, req.get("timeoutSeconds").getAsInt())) : 30;
     SqlRenderer.Bound part;
     try {
