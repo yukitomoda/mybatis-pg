@@ -63,6 +63,19 @@ class WorkspaceTest {
   }
 
   @Test
+  void ソースどうしで同じnamespaceのmapperがあれば_どれと重なったかをエラーにする(@TempDir Path dir) throws Exception {
+    java.nio.file.Files.copy(RES.resolve("mappers/UserMapper.xml"), dir.resolve("UserMapper.xml"));
+    Workspaces.Def def = new Workspaces.Def();
+    def.id = "a";
+    def.key = "workspace:a";
+    def.sources = Arrays.asList(source("users", Workspaces.FILES, RES.resolve("mappers")), source("copy", Workspaces.FILES, dir));
+    MapperWorkspace ws = MapperWorkspace.of(def);
+    LoadError e = ws.renderer().getLoadErrors().get(0);
+    assertEquals("copy/UserMapper.xml", e.source);
+    assertTrue(e.message.contains("が「users/UserMapper.xml」と重なるため"), e.message);
+  }
+
+  @Test
   void 定義を保存し_最後に開いたものから並べる(@TempDir Path dir) throws Exception {
     Workspaces store = Workspaces.open(dir);
     Workspaces.Def a = store.create("受発注", null, new ArrayList<Workspaces.Source>());

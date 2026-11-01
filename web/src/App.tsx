@@ -673,6 +673,7 @@ function Workspace({ api }: { api: Api }) {
               <DraftList drafts={drafts} onOpen={editFile} hasStatements={(file) => statements.some((x) => x.file === file)} />
               <StatementTree
                 sources={sourceNames}
+                onOpenWorkspace={() => go('workspace')}
                 statements={statements}
                 playgrounds={playgrounds}
                 onCreatePlayground={createPlayground}
@@ -1071,6 +1072,7 @@ function saveToggled(keys: Set<string>) {
 function StatementTree({
   statements,
   sources,
+  onOpenWorkspace,
   playgrounds,
   onCreatePlayground,
   selected,
@@ -1082,6 +1084,8 @@ function StatementTree({
   statements: StatementEntry[];
   /** ワークスペースのソースの名前（ツリーで 1 段の見出しにする） */
   sources: string[];
+  /** ワークスペースの画面を開く（statement が 1 つもないとき、ソースを足してもらう） */
+  onOpenWorkspace: () => void;
   /** 一覧を閉じる */
   onCollapse: () => void;
   playgrounds: PlaygroundEntry[];
@@ -1272,7 +1276,19 @@ function StatementTree({
             {playgroundsOpen && playgroundNodes.length > 0 && render(playgroundNodes)}
           </li>
         </ul>
-        {tree.length === 0 ? <p className="hint">該当する statement がありません</p> : render(tree)}
+        {tree.length === 0 && !filtering && project.length === 0 ? (
+          <p className="hint">
+            statement がありません。
+            <button type="button" className="link" onClick={onOpenWorkspace}>
+              ワークスペース
+            </button>
+            で、プロジェクトや JAR を足してください。
+          </p>
+        ) : tree.length === 0 ? (
+          <p className="hint">該当する statement がありません</p>
+        ) : (
+          render(tree)
+        )}
       </nav>
     </div>
   );

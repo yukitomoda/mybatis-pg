@@ -184,6 +184,11 @@ public class SqlRenderer {
     return Collections.unmodifiableList(loadErrors);
   }
 
+  /** 読み込みのエラーを書き換える（ワークスペースで、ソースどうしで重なった statement の説明にするなど） */
+  void rewriteLoadErrors(java.util.function.UnaryOperator<LoadError> f) {
+    loadErrors.replaceAll(f);
+  }
+
   public boolean hasStatement(String statementId) {
     return configuration.hasStatement(statementId, false);
   }
