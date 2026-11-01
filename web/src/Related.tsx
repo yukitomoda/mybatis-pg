@@ -8,7 +8,16 @@ import { message } from './Execution';
 import { NODE_H } from './RelationDiagram';
 
 /** どのつながりでたどったか（たどった元から見た隣の表） */
-type Step = { direction: 'parent' | 'child'; table: string; columns: string[]; otherColumns: string[] };
+type Step = {
+  direction: 'parent' | 'child';
+  table: string;
+  columns: string[];
+  otherColumns: string[];
+  /** 紐づけた値（たどった先の列の名前で。列ごとに 1 行。id = 2 など） */
+  match: string[];
+  /** 紐づけた値の全部（線にマウスを乗せると出す） */
+  matchAll: string;
+};
 
 /** 集めた表（図の 1 つの箱。たどった 1 歩ごとに作る） */
 export interface RelatedNode {
@@ -70,6 +79,21 @@ const sameRows = (a: RelatedRows, b: RelatedRows) => {
   return a.rows.length === b.rows.length && a.rows.every((r) => keys.has(JSON.stringify(r)));
 };
 
+/** 値を SQL の書き方にする（数は そのまま、ほかは '…'） */
+const literal = (v: string | null) => (v === null ? 'NULL' : /^-?\d+(\.\d+)?$/.test(v) ? v : `'${v.replace(/'/g, "''")}'`);
+
+/** 紐づけた値を、たどった先の列の名前で書く（短いものと、全部） */
+function describeMatch(columns: string[], values: (string | null)[][]): { match: string[]; matchAll: string } {
+  const one = (t: (string | null)[]) => columns.map((c, i) => `${c} = ${literal(t[i])}`).join(', ');
+  if (values.length === 1) return { match: columns.map((c, i) => `${c} = ${literal(values[0][i])}`), matchAll: one(values[0]) };
+  const all = values.map(one).join('\n');
+  if (columns.length === 1) {
+    const vs = values.map((t) => literal(t[0]));
+    return { match: [`${columns[0]} IN (${vs.slice(0, 3).join(', ')}${vs.length > 3 ? ', …' : ''})`], matchAll: all };
+  }
+  return { match: [`(${columns.join(', ')})`, `が ${values.length} 組`], matchAll: all };
+}
+
 let seq = 0;
 const newId = () => `n${++seq}`;
 
@@ -83,7 +107,13 @@ async function step(api: Api, connectionId: string, from: RelatedNode, n: Relate
     table: n.table,
     parent: from.id,
     direction: n.direction,
-    step: { direction: n.direction, table: n.table, columns: n.columns, otherColumns: n.otherColumns },
+    step: {
+      direction: n.direction,
+      table: n.table,
+      columns: n.columns,
+      otherColumns: n.otherColumns,
+      ...describeMatch(n.otherColumns, values),
+    },
     rows,
   };
 }
@@ -111,7 +141,7 @@ async function collectParents(api: Api, connectionId: string, node: RelatedNode,
 
 /** 箱の幅（そろえる。長い名前は省く）と、列・行の間 */
 const BOX_W = 170;
-const COL_GAP = 56;
+const COL_GAP = 150;
 const ROW_GAP = 18;
 const PAD = 16;
 
@@ -151,11 +181,11 @@ export function placeNodes(nodes: RelatedNode[]): { placed: Placed[]; width: num
 }
 
 /** 箱の名前を、幅に収まるように省く */
-function fit(text: string, max = BOX_W - 16): string {
+function fit(text: string, max = BOX_W - 16, half = 7.4): string {
   let w = 0;
   let out = '';
   for (const ch of text) {
-    w += ch.charCodeAt(0) > 0xff ? 13 : 7.4;
+    w += ch.charCodeAt(0) > 0xff ? half * 1.75 : half;
     if (w > max) return `${out}…`;
     out += ch;
   }
@@ -337,13 +367,31 @@ function RelatedGraph({
           // 矢印は、リレーションの親の側（親をたどった箱なら、この箱。子をたどった箱なら、元の箱）
           const toParent = node.direction === 'parent';
           return (
-            <path
-              key={node.id}
-              d={`M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`}
-              className="edge parent"
-              markerEnd={toParent ? 'url(#rg-arrow)' : undefined}
-              markerStart={toParent ? undefined : 'url(#rg-arrow)'}
-            />
+            <g key={node.id}>
+              <path
+                d={`M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`}
+                className="edge parent"
+                markerEnd={toParent ? 'url(#rg-arrow)' : undefined}
+                markerStart={toParent ? undefined : 'url(#rg-arrow)'}
+              />
+              {node.step && (
+                // 値は、たどった先の箱の入口に書く。左へたどった線は線の上に、右へたどった線は線の下に
+                // （同じすき間に、向きの違う線の値が並んでも重ならないように）
+                <text
+                  x={right ? x2 - 6 : x2 + 6}
+                  y={right ? y2 + 14 : y2 - 6 - (node.step.match.length - 1) * 13}
+                  className="edge-label"
+                  textAnchor={right ? 'end' : 'start'}
+                >
+                  <title>{node.step.matchAll}</title>
+                  {node.step.match.map((line, i) => (
+                    <tspan key={i} x={right ? x2 - 6 : x2 + 6} dy={i === 0 ? 0 : 13}>
+                      {fit(line, COL_GAP - 8, 6.6)}
+                    </tspan>
+                  ))}
+                </text>
+              )}
+            </g>
           );
         })}
         {placed.map(({ node, x, y }) => (

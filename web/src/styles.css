@@ -3416,3 +3416,14 @@ div.relations-comment {
 .data-table .row-action button:hover {
   color: var(--accent);
 }
+
+/* 関連データの図: 線に、紐づけた値を書く */
+.related-graph svg .edge-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
