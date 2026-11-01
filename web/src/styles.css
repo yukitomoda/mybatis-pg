@@ -3203,6 +3203,10 @@ body.col-resizing {
   stroke: var(--accent);
 }
 
+.relation-diagram svg .edge-arrow.lit {
+  fill: var(--accent);
+}
+
 .relation-diagram svg .node.dim {
   opacity: 0.35;
 }

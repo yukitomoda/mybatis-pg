@@ -306,6 +306,9 @@ export function RelationDiagram({
               <marker id="rd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" className="edge-arrow" />
               </marker>
+              <marker id="rd-arrow-lit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" className="edge-arrow lit" />
+              </marker>
               <marker
                 id="rd-arrow-manual"
                 viewBox="0 0 10 10"
@@ -321,8 +324,9 @@ export function RelationDiagram({
             {laid.edges.map(({ edge: e, points }) => {
               const d = roundedPath(points);
               // 親子の矢印は親の側（線の始まり。親 → 子の向きで配置している）に付ける
-              const marker = e.kind === 'parent' ? (e.manual ? 'url(#rd-arrow-manual)' : 'url(#rd-arrow)') : undefined;
               const lit = hover !== null && (e.from === hover || e.to === hover);
+              const marker =
+                e.kind !== 'parent' ? undefined : lit ? 'url(#rd-arrow-lit)' : e.manual ? 'url(#rd-arrow-manual)' : 'url(#rd-arrow)';
               const cls = ['edge', e.kind, e.manual ? 'manual' : '', open?.edge === e ? 'active' : '', lit ? 'lit' : '']
                 .filter(Boolean)
                 .join(' ');
