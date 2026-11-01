@@ -2404,16 +2404,6 @@ button.icon.suggest-toggle {
   color: var(--muted);
 }
 
-.relations-evidence summary {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.relations-evidence ul {
-  margin: 0.2rem 0;
-  padding-left: 1rem;
-}
-
 @media (max-width: 700px) {
   .relations-body {
     grid-template-columns: 1fr;
@@ -2453,10 +2443,6 @@ button.icon.suggest-toggle {
 
 .relations-table .badge {
   margin-left: 0.4rem;
-}
-
-.relations-actions {
-  white-space: nowrap;
 }
 
 /* 値の候補のパネルの、リレーションへのボタン（見出しの行の右端に、目立たせずに置く） */
@@ -2962,4 +2948,74 @@ body.col-resizing {
 .relations-tables .caret {
   display: inline-block;
   width: 0.8rem;
+}
+
+/* 「i」のボタン（理由や根拠を、押したときだけ小窓で見る） */
+.info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.3rem;
+  padding: 0 0.15rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.info-button:hover,
+.info-button[aria-expanded='true'] {
+  color: var(--accent);
+}
+
+/* ボタンの近くに浮いて出る小窓 */
+.popover {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(36rem, calc(100vw - 16px));
+  max-height: 60vh;
+  overflow: auto;
+  padding: 0.6rem 0.8rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  font-size: 13px;
+}
+
+.popover h4 {
+  margin: 0 0 0.4rem;
+  font-size: 13px;
+}
+
+.popover h5 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.popover p {
+  margin: 0.2rem 0;
+}
+
+.popover-sql,
+.popover-path {
+  margin: 0.2rem 0;
+  padding-left: 1.2rem;
+}
+
+.popover-path > li {
+  margin-bottom: 0.3rem;
+}
+
+.popover-actions {
+  margin-top: 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.relations-param-name {
+  margin-right: 0.4rem;
 }

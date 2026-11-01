@@ -4,6 +4,7 @@ import type { Api, RelationLink, RelationStatement, RelationsResult, RelationsTi
 import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
+import { InfoButton } from './Popover';
 import { SideSplitter, useSideWidth } from './Splitter';
 import type { GlobalSet } from './globalModel';
 import { resolveTemplates } from './gen';
@@ -495,35 +496,43 @@ function TableRelations({
                           </button>
                           {l.manual && <span className="badge">手動</span>}
                           {l.disabled && <span className="badge muted">無効</span>}
-                        </td>
-                        <td className="hint">{d.reason}</td>
-                        <td>
-                          {l.statements.length > 0 && (
-                            <Evidence
-                              items={l.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), l.a, l.b) }))}
-                              onOpen={onOpen}
-                            />
-                          )}
-                        </td>
-                        <td className="relations-actions">
-                          {l.manual ? (
-                            <button type="button" className="link" onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}>
-                              削除
-                            </button>
-                          ) : l.disabled ? (
-                            <button type="button" className="link" onClick={() => onChange({ action: 'enable', a: l.a, b: l.b })}>
-                              有効に戻す
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="link"
-                              title="誤ったリレーションを、源流を探すときに使わないようにします"
-                              onClick={() => onChange({ action: 'disable', a: l.a, b: l.b })}
-                            >
-                              無効にする
-                            </button>
-                          )}
+                          <InfoButton title="判定の理由と根拠の SQL">
+                            <h4>
+                              {d.label} <code>{s(other)}</code>
+                            </h4>
+                            <p>{d.reason}</p>
+                            {l.statements.length > 0 && (
+                              <SqlList
+                                title={`根拠の SQL（${l.statements.length} 件）`}
+                                items={l.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), l.a, l.b) }))}
+                                onOpen={onOpen}
+                              />
+                            )}
+                            <div className="popover-actions">
+                              {l.manual ? (
+                                <button
+                                  type="button"
+                                  className="link"
+                                  onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}
+                                >
+                                  このリレーションを削除
+                                </button>
+                              ) : l.disabled ? (
+                                <button type="button" className="link" onClick={() => onChange({ action: 'enable', a: l.a, b: l.b })}>
+                                  有効に戻す
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="link"
+                                  title="誤ったリレーションを、源流を探すときに使わないようにします"
+                                  onClick={() => onChange({ action: 'disable', a: l.a, b: l.b })}
+                                >
+                                  誤りなので無効にする
+                                </button>
+                              )}
+                            </div>
+                          </InfoButton>
                         </td>
                       </tr>
                     );
@@ -534,17 +543,51 @@ function TableRelations({
             <p className="relations-origin">
               <span className="relations-label">源流</span>
               {os.length > 0 ? (
-                os.map((o) => (
-                  <span key={o.column} className="relations-origin-item">
-                    <button type="button" className="link" onClick={() => onGoColumn(o.column)}>
-                      <code>{s(o.column)}</code>
-                    </button>
-                    <span className="hint">
-                      {o.path.length > 1 ? `（${o.path.slice(1).map(s).join(' → ')} 経由、` : '（'}
-                      {o.manual ? '手で設定' : `${o.count} 件の SQL`}）
+                os.map((o) => {
+                  // たどった道筋（この列 → … → 源流）と、その各段のリレーションの根拠の SQL
+                  const chain = [...o.path, o.column];
+                  const steps = chain.slice(1).map((to, k) => {
+                    const from = chain[k];
+                    const l = links.find((x) => (x.a === from && x.b === to) || (x.a === to && x.b === from));
+                    return { from, to, link: l };
+                  });
+                  return (
+                    <span key={o.column} className="relations-origin-item">
+                      <button type="button" className="link" onClick={() => onGoColumn(o.column)}>
+                        <code>{s(o.column)}</code>
+                      </button>
+                      <InfoButton title="源流までの道筋と根拠の SQL">
+                        <h4>
+                          源流 <code>{s(o.column)}</code>
+                        </h4>
+                        <p className="hint">
+                          {o.manual
+                            ? '手で設定したリレーションでたどりました。'
+                            : `この列から、リレーションを ${steps.length} 段たどりました（${o.count} 件の SQL）。`}
+                        </p>
+                        <ol className="popover-path">
+                          {steps.map((st) => (
+                            <li key={`${st.from} ${st.to}`}>
+                              <code>{s(st.from)}</code> → <code>{s(st.to)}</code>
+                              {st.link && (
+                                <span className="hint">
+                                  （{describeLink(st.link, st.from, keys, s).label.replace(/^[→←＝]\s*/, '')}
+                                  {st.link.manual && '、手で設定'}）
+                                </span>
+                              )}
+                              {st.link && st.link.statements.length > 0 && (
+                                <SqlList
+                                  items={st.link.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), st.link!.a, st.link!.b) }))}
+                                  onOpen={onOpen}
+                                />
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      </InfoButton>
                     </span>
-                  </span>
-                ))
+                  );
+                })
               ) : singleUnique(keys[col]) ? (
                 <span className="hint">この列が源流（{key}）</span>
               ) : (
@@ -554,7 +597,18 @@ function TableRelations({
             {ps.length > 0 && (
               <div className="relations-params">
                 <span className="relations-label">比べているパラメータ</span>
-                <Evidence items={ps.map((p) => ({ id: p.statement, note: p.property }))} onOpen={onOpen} label={`${ps.length} 件`} />
+                {[...new Set(ps.map((p) => p.property.slice(p.property.lastIndexOf('.') + 1)))].map((n) => (
+                  <code key={n} className="relations-param-name">
+                    {n}
+                  </code>
+                ))}
+                <InfoButton title="比べている statement">
+                  <SqlList
+                    title={`比べている statement（${ps.length} 件）`}
+                    items={ps.map((p) => ({ id: p.statement, note: p.property }))}
+                    onOpen={onOpen}
+                  />
+                </InfoButton>
               </div>
             )}
           </section>
@@ -916,20 +970,12 @@ function AddLink({
   );
 }
 
-/** 根拠の statement。件数を出し、押すと一覧を開く（statement を押すと、その statement を開く） */
-function Evidence({
-  items,
-  onOpen,
-  label,
-}: {
-  items: { id: string; note: string | null }[];
-  onOpen: (id: string) => void;
-  label?: string;
-}) {
+/** 根拠の statement の一覧（押すと、その statement を開く） */
+function SqlList({ title, items, onOpen }: { title?: string; items: { id: string; note: string | null }[]; onOpen: (id: string) => void }) {
   return (
-    <details className="relations-evidence">
-      <summary>{label ?? `${items.length} 件の SQL`}</summary>
-      <ul>
+    <>
+      {title && <h5>{title}</h5>}
+      <ul className="popover-sql">
         {items.map((it) => (
           <li key={`${it.id} ${it.note}`}>
             <button type="button" className="link" onClick={() => onOpen(it.id)}>
@@ -939,6 +985,6 @@ function Evidence({
           </li>
         ))}
       </ul>
-    </details>
+    </>
   );
 }
