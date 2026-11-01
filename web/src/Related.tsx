@@ -148,22 +148,34 @@ const PAD = 16;
 type Placed = { node: RelatedNode; col: number; row: number; x: number; y: number };
 
 /**
- * 箱の位置を決める（たどっても、すでにある箱は動かない）。起点は 0 列。親をたどった箱は元の箱の 1 列左、子をたどった箱は 1 列右。
- * 行は、作った順に、その列の空いている行のうち、元の箱と同じ高さかそれより下のいちばん上
+ * 箱の位置を決める。起点は 0 列。親をたどった箱は元の箱の 1 列左、子をたどった箱は 1 列右。
+ * 行は、起点から木をたどり（同じ元からたどった箱は、たどった順）、それぞれの箱の下に、その箱からたどった箱をまとめて置く。
+ * 左（親）と右（子）は別々に積む。新しい箱は元の箱のそばに入り、その下の箱は下へずれる（並び順は保ち、線が交差しないようにする）
  */
 export function placeNodes(nodes: RelatedNode[]): { placed: Placed[]; width: number; height: number; minCol: number } {
+  const kids = new Map<string | null, RelatedNode[]>();
+  for (const n of nodes) kids.set(n.parent, [...(kids.get(n.parent) ?? []), n]);
   const at = new Map<string, { col: number; row: number }>();
-  const used = new Map<number, Set<number>>();
-  for (const n of nodes) {
-    const p = n.parent ? at.get(n.parent) : undefined;
-    const col = p ? p.col + (n.direction === 'parent' ? -1 : 1) : 0;
-    let row = p ? p.row : 0;
-    const taken = used.get(col) ?? new Set<number>();
-    while (taken.has(row)) row++;
-    taken.add(row);
-    used.set(col, taken);
+  /** 列ごとの、次に空いている行 */
+  const nextFree = new Map<number, number>();
+  /** 箱を置き、その箱と、その箱からたどった箱が使ったいちばん下の行を返す */
+  const place = (n: RelatedNode, col: number, want: number): number => {
+    const row = Math.max(want, nextFree.get(col) ?? 0);
+    nextFree.set(col, row + 1);
     at.set(n.id, { col, row });
-  }
+    let bottom = row;
+    // 左（親）と右（子）は、それぞれ箱の行から下へ積む
+    const cursor = { parent: row, child: row };
+    for (const c of kids.get(n.id) ?? []) {
+      const side = c.direction === 'parent' ? 'parent' : 'child';
+      const b = place(c, col + (side === 'parent' ? -1 : 1), cursor[side]);
+      cursor[side] = b + 1;
+      bottom = Math.max(bottom, b);
+    }
+    return bottom;
+  };
+  let top = 0;
+  for (const root of kids.get(null) ?? []) top = place(root, 0, top) + 1;
   const cols = [...at.values()].map((v) => v.col);
   const minCol = Math.min(0, ...cols);
   const maxCol = Math.max(0, ...cols);

@@ -13,25 +13,34 @@ const node = (id: string, parent: string | null, direction: RelatedNode['directi
 });
 
 describe('placeNodes', () => {
-  it('起点を 0 列に、親を左、子を右に置き、たどってもすでにある箱は動かない', () => {
+  const rowsOf = (nodes: RelatedNode[]) => Object.fromEntries(placeNodes(nodes).placed.map((p) => [p.node.id, [p.col, p.row]]));
+
+  it('起点を 0 列に、親を左、子を右に置く', () => {
     const nodes = [
       node('start', null, 'start'),
       node('dept', 'start', 'parent'),
       node('pos', 'start', 'parent'),
       node('items', 'start', 'child'),
     ];
-    const before = placeNodes(nodes).placed.map((p) => [p.node.id, p.col, p.row]);
-    expect(before).toEqual([
-      ['start', 0, 0],
-      ['dept', -1, 0],
-      ['pos', -1, 1],
-      ['items', 1, 0],
-    ]);
-    // dept から子をたどる（起点と同じ列。空いている行に置く）
-    const after = placeNodes([...nodes, node('emps', 'dept', 'child')]);
-    expect(after.placed.slice(0, 4).map((p) => [p.node.id, p.col, p.row])).toEqual(before);
-    expect(after.placed.slice(0, 4).map((p) => [p.x, p.y])).toEqual(placeNodes(nodes).placed.map((p) => [p.x, p.y]));
-    expect(after.placed[4].col).toBe(0);
-    expect(after.placed[4].row).toBe(1);
+    expect(rowsOf(nodes)).toEqual({ start: [0, 0], dept: [-1, 0], pos: [-1, 1], items: [1, 0] });
+  });
+
+  it('あとからたどった箱は元の箱のそばに入り、下の箱は下へずれる（並び順は保つ）', () => {
+    // 起点の親: 上司（mgr）と部署（dept）。上司の親: 上司の部署（mgrDept）
+    const nodes = [
+      node('start', null, 'start'),
+      node('mgr', 'start', 'parent'),
+      node('dept', 'start', 'parent'),
+      node('mgrDept', 'mgr', 'parent'),
+    ];
+    expect(rowsOf(nodes)).toEqual({ start: [0, 0], mgr: [-1, 0], dept: [-1, 1], mgrDept: [-2, 0] });
+    // 上司の親（上司の役職）をあとからたどると、上司の部署の下に入り、部署（dept）が下へずれる
+    const more = [...nodes, node('mgrPos', 'mgr', 'parent')];
+    expect(rowsOf(more)).toEqual({ start: [0, 0], mgr: [-1, 0], dept: [-1, 2], mgrDept: [-2, 0], mgrPos: [-2, 1] });
+  });
+
+  it('親の箱から子をたどると、元へ戻る列でも、ほかの箱と重ならない', () => {
+    const nodes = [node('start', null, 'start'), node('dept', 'start', 'parent'), node('emps', 'dept', 'child')];
+    expect(rowsOf(nodes)).toEqual({ start: [0, 0], dept: [-1, 0], emps: [0, 1] });
   });
 });
