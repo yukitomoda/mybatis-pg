@@ -2532,6 +2532,10 @@ button.icon.suggest-relation:hover {
   vertical-align: top;
 }
 
+.relations-grid-schema {
+  color: var(--muted);
+}
+
 .relations-grid-col code {
   font-weight: 700;
 }

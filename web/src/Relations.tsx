@@ -671,6 +671,7 @@ function TableRelations({
               <th>列</th>
               <th>鍵</th>
               <th>関係</th>
+              <th>相手のスキーマ</th>
               <th>相手の表</th>
               <th>相手の列</th>
               <th aria-label="理由" />
@@ -713,7 +714,7 @@ function TableRelations({
                 {ls.length === 0 ? (
                   <tr>
                     {lead}
-                    <td colSpan={4} className="hint">
+                    <td colSpan={5} className="hint">
                       なし
                     </td>
                     {tail}
@@ -727,8 +728,11 @@ function TableRelations({
                         {i === 0 && lead}
                         <td className="relation-kind">{d.label}</td>
                         <td>
+                          <code className="relations-grid-schema">{other.slice(0, other.indexOf('.'))}</code>
+                        </td>
+                        <td>
                           <button type="button" className="link" onClick={() => onGoColumn(other)}>
-                            <code>{s(tableOf(other))}</code>
+                            <code>{tableOf(other).slice(other.indexOf('.') + 1)}</code>
                           </button>
                         </td>
                         <td>
