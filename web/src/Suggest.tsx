@@ -241,7 +241,9 @@ export function CandidatePane({
           </code>
         )}
         {comments.columns[`${column.schema}.${column.table}.${column.column}`] && (
-          <span className="relations-comment">{comments.columns[`${column.schema}.${column.table}.${column.column}`]}</span>
+          <span className="relations-comment suggest-comment" title={comments.columns[`${column.schema}.${column.table}.${column.column}`]}>
+            {comments.columns[`${column.schema}.${column.table}.${column.column}`]}
+          </span>
         )}
         {column.role === 'origin' ? (
           <span className="suggest-condition" title="リレーションでたどった経路">

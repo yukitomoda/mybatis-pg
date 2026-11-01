@@ -421,7 +421,11 @@ export function RelationsScreen({
                   <>
                     <h2 className="relations-detail-title">
                       <code>{table}</code>
-                      {comments.tables[table] && <span className="relations-comment">{comments.tables[table]}</span>}
+                      {comments.tables[table] && (
+                        <span className="relations-comment" title={comments.tables[table]}>
+                          {comments.tables[table]}
+                        </span>
+                      )}
                     </h2>
                     <div className="tabs" role="tablist" aria-label="表示の仕方">
                       <button
@@ -747,7 +751,11 @@ function TableRelations({
               <>
                 <td rowSpan={span} className="relations-grid-col">
                   <code>{name(col)}</code>
-                  {comments.columns[col] && <div className="relations-comment">{comments.columns[col]}</div>}
+                  {comments.columns[col] && (
+                    <div className="relations-comment" title={comments.columns[col]}>
+                      {comments.columns[col]}
+                    </div>
+                  )}
                 </td>
                 <td rowSpan={span}>{key && <span className={isPrimaryKey(keys[col]) ? 'badge pk' : 'badge'}>{key}</span>}</td>
               </>

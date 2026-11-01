@@ -3233,7 +3233,32 @@ body.col-resizing {
   font-weight: normal;
 }
 
+/* 長いコメントは切る（マウスを乗せると全文） */
+.relations-detail-title {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.relations-detail-title .relations-comment,
+.suggest-comment {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-comment {
+  max-width: 24rem;
+}
+
+/* 列の名前の下は 2 行まで */
 div.relations-comment {
+  display: -webkit-box;
+  max-width: 16rem;
   margin-left: 0;
+  overflow: hidden;
   white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
