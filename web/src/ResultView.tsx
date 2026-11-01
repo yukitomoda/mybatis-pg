@@ -528,7 +528,6 @@ function HistoryDetail({
                 onCell={onCell}
                 truncated={t.truncated}
                 titles={entry.kind === 'table' ? t.columns.map((c) => comments.columns[`${entry.label}.${c}`]) : undefined}
-                csvName={entry.kind === 'table' ? (entry.label ?? 'table') : shortId(entry.statementId ?? 'result')}
                 onRow={
                   entry.kind === 'table' && entry.label
                     ? (i) =>

@@ -35,8 +35,6 @@ export function DataTable({
   truncated,
   titles,
   onRow,
-  csvName,
-  menuItems,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -58,10 +56,6 @@ export function DataTable({
   titles?: (string | undefined)[];
   /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
   onRow?: (index: number) => void;
-  /** CSV で書き出すときのファイル名（拡張子なし。既定は result） */
-  csvName?: string;
-  /** 「⋯」のメニューに足す項目 */
-  menuItems?: MenuItem[];
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
@@ -113,9 +107,11 @@ export function DataTable({
     return idx;
   }, [rows, types, filter, sort]);
 
-  const copy = () => {
+  /** 見えている行を、TSV か CSV でコピーする */
+  const copy = (format: 'tsv' | 'csv') => {
+    const visible = order.map((i) => rows[i]);
     const esc = (v: string | null) => (v === null ? '' : v.replace(/[\t\n\r]/g, ' '));
-    const text = [columns.join('\t'), ...order.map((i) => rows[i].map(esc).join('\t'))].join('\n');
+    const text = format === 'csv' ? toCsv(columns, visible) : [columns.join('\t'), ...visible.map((r) => r.map(esc).join('\t'))].join('\n');
     navigator.clipboard.writeText(text).then(
       () => {
         setCopied(true);
@@ -138,18 +134,8 @@ export function DataTable({
         {copied && <span className="hint">コピーしました</span>}
         <TableMenu
           items={[
-            { label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: copy },
-            {
-              label: 'CSV で書き出す',
-              title: '見えている行を、CSV のファイルで保存します',
-              onSelect: () =>
-                downloadCsv(
-                  `${csvName ?? 'result'}.csv`,
-                  columns,
-                  order.map((i) => rows[i]),
-                ),
-            },
-            ...(menuItems ?? []),
+            { label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: () => copy('tsv') },
+            { label: 'CSV でコピー', title: '見えている行を、CSV でコピーします', onSelect: () => copy('csv') },
           ]}
         />
       </div>
@@ -232,22 +218,12 @@ export function DataTable({
 
 /** 表の操作のメニュー（⋯ を押すと開く。項目を選ぶか、外を押すと閉じる） */
 /** 表の「⋯」のメニューの項目 */
-export type MenuItem = { label: string; title?: string; onSelect: () => void };
+type MenuItem = { label: string; title?: string; onSelect: () => void };
 
-/** CSV（Excel で開けるよう、先頭に BOM を付ける。NULL は空） */
-export function toCsv(columns: string[], rows: (string | null)[][]): string {
+/** CSV（NULL は空。カンマ・引用符・改行を含む値は引用符で囲む） */
+function toCsv(columns: string[], rows: (string | null)[][]): string {
   const cell = (v: string | null) => (v === null ? '' : /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return '\ufeff' + [columns, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
-}
-
-/** CSV のファイルで保存する */
-export function downloadCsv(name: string, columns: string[], rows: (string | null)[][]) {
-  const url = URL.createObjectURL(new Blob([toCsv(columns, rows)], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
+  return [columns, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
 }
 
 function TableMenu({ items }: { items: MenuItem[] }) {

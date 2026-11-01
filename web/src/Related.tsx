@@ -1,9 +1,9 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
-// 親（その行が参照する行）は自動で集め、子（その行を参照する行）は 1 段ずつ押してたどる。集めた行は、表ごとに CSV で書き出せる
+// 親（その行が参照する行）は自動で集め、子（その行を参照する行）は 1 段ずつ押してたどる
 import { useEffect, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
-import { DataTable, downloadCsv } from './DataTable';
+import { DataTable } from './DataTable';
 import { message } from './Execution';
 
 /** 集めた表（ツリーの 1 つの項目） */
@@ -152,26 +152,6 @@ async function collectParents(
   }
 }
 
-/** 表ごとにまとめた行（同じ行は 1 つに） */
-function byTable(nodes: RelatedNode[]): { table: string; columns: string[]; rows: (string | null)[][] }[] {
-  const out = new Map<string, { table: string; columns: string[]; rows: (string | null)[][]; seen: Set<string> }>();
-  for (const n of nodes) {
-    let t = out.get(n.table);
-    if (!t) {
-      t = { table: n.table, columns: n.rows.columns, rows: [], seen: new Set() };
-      out.set(n.table, t);
-    }
-    for (const r of n.rows.rows) {
-      const k = JSON.stringify(r);
-      if (!t.seen.has(k)) {
-        t.seen.add(k);
-        t.rows.push(r);
-      }
-    }
-  }
-  return [...out.values()].map(({ table, columns, rows }) => ({ table, columns, rows }));
-}
-
 const LABEL = { start: '起点', parent: '親', child: '子' } as const;
 
 export function RelatedPane({
@@ -229,7 +209,6 @@ export function RelatedPane({
     }
   };
   walk(null, 0);
-  const tables = byTable(entry.nodes);
 
   return (
     <div className="related">
@@ -298,14 +277,6 @@ export function RelatedPane({
               truncated={node.rows.truncated}
               titles={node.rows.columns.map((c) => comments.columns[`${node.table}.${c}`])}
               onCell={onCell}
-              csvName={node.table}
-              menuItems={[
-                {
-                  label: 'すべての表を CSV で書き出す',
-                  title: '集めた表ごとに、CSV のファイルで保存します',
-                  onSelect: () => tables.forEach((t) => downloadCsv(`${t.table}.csv`, t.columns, t.rows)),
-                },
-              ]}
             />
           </div>
         )}

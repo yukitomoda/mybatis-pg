@@ -320,7 +320,6 @@ export function CandidatePane({
               rowClass={(i) => (i < currentRows.length ? 'current' : undefined)}
               highlight={column.column}
               titles={tableColumns.map((c) => comments.columns[`${column.schema}.${column.table}.${c}`])}
-              csvName={`${column.schema}.${column.table}`}
               onRow={
                 onRelated && connectionId
                   ? (i) => {
