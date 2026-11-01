@@ -2265,6 +2265,10 @@ public final class ToolServer {
       // 解析で検出したもの（判断の根拠を見るため）: 列ごとの一意の順位、statement ごとの結合の組とパラメータ
       body.put("keys", new LinkedHashMap<>(store.keys));
       List<Map<String, Object>> details = new ArrayList<>();
+      // ワークスペースのソース（statement ごとに、どのソースのものかを付ける。リレーションの画面で絞り込む）
+      List<String> sourceNames = workspace.sourceNames();
+      SqlRenderer current = workspace.renderer();
+      body.put("sources", sourceNames);
       // パラメータ名ごとの、statement・項目・比べている列・源流と判断した列
       Map<String, List<Map<String, Object>>> names = new java.util.TreeMap<>();
       for (Map.Entry<String, Relations.Entry> e : store.statements.entrySet()) {
@@ -2278,6 +2282,7 @@ public final class ToolServer {
         m.put("joins", joins);
         m.put("params", en.params == null ? new LinkedHashMap<>() : en.params);
         m.put("error", en.error);
+        m.put("source", sourceOf(sourceNames, current, e.getKey()));
         details.add(m);
         if (en.params != null) {
           for (Map.Entry<String, List<String>> pe : en.params.entrySet()) {
@@ -2380,6 +2385,16 @@ public final class ToolServer {
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
     }
+  }
+
+  /** statement のソースの名前（ソースの名前を付けていないか、今は読み込んでいない statement なら null） */
+  private String sourceOf(List<String> sourceNames, SqlRenderer renderer, String statementId) {
+    if (sourceNames.isEmpty() || !renderer.hasStatement(statementId)) {
+      return null;
+    }
+    String shown = displayPath(renderer.statementSource(statementId));
+    int slash = shown.indexOf('/');
+    return slash > 0 && sourceNames.contains(shown.substring(0, slash)) ? shown.substring(0, slash) : null;
   }
 
   /** 画面に出すファイルのパス（基準ディレクトリからの相対パス。ソースが 2 つ以上なら「ソースの名前/相対パス」） */

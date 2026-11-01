@@ -641,6 +641,8 @@ export interface RelationLink {
 }
 
 export interface RelationsResult {
+  /** ワークスペースのソースの名前（ソースで絞り込む。ソースが 1 つなら空） */
+  sources?: string[];
   progress?: {
     done: number;
     total: number;
@@ -687,6 +689,8 @@ export interface RelationStatement {
   /** パラメータ（項目のパス）→ 比べている列 */
   params: Record<string, string[]>;
   error: string | null;
+  /** ワークスペースのソースの名前（ソースが 1 つか、今は読み込んでいない statement なら null） */
+  source?: string | null;
 }
 
 /** 解析にかかった時間 */

@@ -3359,3 +3359,15 @@ body.col-resizing {
 .workspace-create input {
   width: 20rem;
 }
+
+/* リレーションの画面の、ワークスペースのソースでの絞り込み */
+.relations-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.6rem;
+}
+
+.popover-sql .badge {
+  margin-right: 0.3rem;
+}
