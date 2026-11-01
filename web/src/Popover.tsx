@@ -32,7 +32,7 @@ export function InfoButton({ title, children }: { title: string; children: React
   );
 }
 
-function Popover({
+export function Popover({
   anchor,
   ignore,
   onClose,
@@ -40,7 +40,7 @@ function Popover({
 }: {
   anchor: DOMRect;
   /** 押しても閉じない要素（開いたボタン。押すと閉じるのはボタンの側で） */
-  ignore: React.RefObject<HTMLElement | null>;
+  ignore?: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -62,7 +62,7 @@ function Popover({
   useEffect(() => {
     const down = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (box.current?.contains(t) || ignore.current?.contains(t)) return;
+      if (box.current?.contains(t) || ignore?.current?.contains(t)) return;
       onClose();
     };
     const key = (e: KeyboardEvent) => {

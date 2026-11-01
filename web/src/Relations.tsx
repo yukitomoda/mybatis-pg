@@ -5,6 +5,7 @@ import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import { InfoButton } from './Popover';
+import { RelationDiagram, type TableEdge } from './RelationDiagram';
 import { SideSplitter, useSideWidth } from './Splitter';
 import type { GlobalSet } from './globalModel';
 import { resolveTemplates } from './gen';
@@ -22,6 +23,8 @@ function loadSetId(): string {
 
 /** schema.table.column の表の部分（schema.table） */
 const tableOf = (col: string) => col.slice(0, col.lastIndexOf('.'));
+/** 「表と列」の右側の見方（列・図）を覚えるキー */
+const MODE_KEY = 'mybatis-pg.relations.tableMode';
 /** 表示用。schema が 1 つだけなら省く */
 const shorten = (col: string, oneSchema: boolean) => (oneSchema ? col.slice(col.indexOf('.') + 1) : col);
 
@@ -171,6 +174,58 @@ export function RelationsScreen({
   const shownStatements = details.filter((d) => d.id.toLowerCase().includes(q));
   const shownNames = Object.keys(names).filter((n) => n.toLowerCase().includes(q));
   const detailOf = useMemo(() => new Map(details.map((d) => [d.id, d])), [details]);
+  // 「表と列」の右側を、列ごとの一覧で見るか、関係図で見るか（ブラウザに覚える）
+  const [tableMode, setTableModeState] = useState<'columns' | 'diagram'>(() => {
+    try {
+      return localStorage.getItem(MODE_KEY) === 'diagram' ? 'diagram' : 'columns';
+    } catch {
+      return 'columns';
+    }
+  });
+  const setTableMode = (m: 'columns' | 'diagram') => {
+    setTableModeState(m);
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+      // 保存できない環境では、この表示中だけ覚える
+    }
+  };
+  // 関係図の線を押したときの、理由と根拠
+  const edgeInfo = (e: TableEdge) => (
+    <>
+      <h4>
+        <code>{shorten(e.from, oneSchema)}</code> {e.kind === 'parent' ? '→ 親' : e.kind === 'sibling' ? '＝ 兄弟' : '＝ 1 対 1'}{' '}
+        <code>{shorten(e.to, oneSchema)}</code>
+      </h4>
+      <ul className="popover-sql">
+        {e.links.map((l) => (
+          <li key={`${l.a} ${l.b}`}>
+            <code>{l.a.slice(l.a.lastIndexOf('.') + 1)}</code> = <code>{l.b.slice(l.b.lastIndexOf('.') + 1)}</code>
+            <span className="hint"> {describeLink(l, l.a, keys, s).reason}</span>
+          </li>
+        ))}
+      </ul>
+      {e.statements > 0 && (
+        <SqlList
+          title={`根拠の SQL（${e.statements} 件）`}
+          items={[...new Set(e.links.flatMap((l) => l.statements))].map((id) => ({ id, note: null }))}
+          onOpen={onOpen}
+        />
+      )}
+      <div className="popover-actions">
+        <button
+          type="button"
+          className="link"
+          onClick={() => {
+            setTableMode('columns');
+            setTable(e.from);
+          }}
+        >
+          <code>{shorten(e.from, oneSchema)}</code> の列を見る
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <div className="relations">
@@ -318,8 +373,39 @@ export function RelationsScreen({
             {view === 'statements' && <p className="hint">数は「結合の組・パラメータ」。⚠ は解析できなかったもの</p>}
           </div>
           <SideSplitter label="一覧の幅" side={side} />
-          <div className="relations-detail">
+          <div className={view === 'tables' && table && tableMode === 'diagram' ? 'relations-detail diagram' : 'relations-detail'}>
+            {view === 'tables' && table && (
+              <div className="relations-mode" role="tablist" aria-label="表示の仕方">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tableMode === 'columns'}
+                  className={tableMode === 'columns' ? 'active' : undefined}
+                  onClick={() => setTableMode('columns')}
+                >
+                  列
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tableMode === 'diagram'}
+                  className={tableMode === 'diagram' ? 'active' : undefined}
+                  onClick={() => setTableMode('diagram')}
+                >
+                  図
+                </button>
+              </div>
+            )}
+            {view === 'tables' && table && tableMode === 'diagram' && (
+              <>
+                <h2 className="relations-detail-title">
+                  <code>{table}</code>
+                </h2>
+                <RelationDiagram center={table} links={links} keys={keys} oneSchema={oneSchema} onCenter={setTable} edgeInfo={edgeInfo} />
+              </>
+            )}
             {view === 'tables' &&
+              tableMode === 'columns' &&
               (table ? (
                 <TableRelations
                   table={table}
@@ -340,6 +426,7 @@ export function RelationsScreen({
               ) : (
                 <p className="hint">表を選んでください</p>
               ))}
+            {view === 'tables' && !table && tableMode === 'diagram' && <p className="hint">表を選んでください</p>}
             {view === 'statements' &&
               (statement && detailOf.get(statement) ? (
                 <StatementDetail detail={detailOf.get(statement)!} keys={keys} s={s} onOpen={onOpen} onGoColumn={goColumn} />

@@ -3019,3 +3019,177 @@ body.col-resizing {
 .relations-param-name {
   margin-right: 0.4rem;
 }
+
+/* 「表と列」の右側の見方（列・図）の切り替え */
+.relations-detail {
+  position: relative;
+}
+
+/* 図のときは、図の枠を下までいっぱいに伸ばす */
+.relations-detail.diagram {
+  display: flex;
+  flex-direction: column;
+}
+
+.relations-mode {
+  position: absolute;
+  top: 0.2rem;
+  right: 0;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.relations-mode button {
+  padding: 0.15rem 0.8rem;
+  border: none;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.relations-mode button.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 関係図 */
+.relation-diagram {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.relation-diagram-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin: 0.4rem 0;
+  font-size: 13px;
+}
+
+.relation-diagram-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.relation-diagram-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.relation-diagram-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 12px;
+}
+
+.relation-diagram-legend svg {
+  margin-left: 0.5rem;
+}
+
+.relation-diagram-scroll {
+  flex: 1;
+  min-height: 20rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.relation-diagram-scroll > svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.relation-diagram svg .node {
+  cursor: pointer;
+}
+
+.relation-diagram svg .node rect {
+  fill: var(--panel);
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.relation-diagram svg .node:hover rect {
+  stroke: var(--accent);
+}
+
+.relation-diagram svg .node.center {
+  cursor: default;
+}
+
+.relation-diagram svg .node.center rect {
+  fill: var(--accent-bg);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.relation-diagram svg .node-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  fill: var(--text);
+}
+
+.relation-diagram svg .node-sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-anchor: middle;
+  fill: var(--muted);
+}
+
+.relation-diagram svg .node-more {
+  font-size: 12px;
+  fill: var(--muted);
+}
+
+.relation-diagram svg .edge,
+.relation-diagram-legend .edge {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+}
+
+.relation-diagram svg .edge.sibling,
+.relation-diagram-legend .edge.sibling {
+  stroke-dasharray: 5 4;
+}
+
+.relation-diagram svg .edge.one-to-one,
+.relation-diagram-legend .edge.one-to-one {
+  stroke: var(--ok);
+}
+
+.relation-diagram svg .edge.manual,
+.relation-diagram-legend .edge.manual {
+  stroke: var(--hl-attr);
+}
+
+.relation-diagram svg .edge.active {
+  stroke: var(--accent);
+}
+
+.relation-diagram svg .edge-arrow {
+  fill: var(--muted);
+}
+
+.relation-diagram svg .edge-arrow.manual {
+  fill: var(--hl-attr);
+}
+
+.relation-diagram svg .edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+}
