@@ -56,8 +56,8 @@ public final class MapperWorkspace {
     }
   }
 
-  /** MyBatis の、statement の名前が重なったときのエラー */
-  private static final java.util.regex.Pattern DUPLICATE = java.util.regex.Pattern.compile("collection already contains value for (\\S+)");
+  /** MyBatis の、statement の名前が重なったときのエラー（3.4: "value for 名前"、3.5: "key 名前. please check …"） */
+  private static final java.util.regex.Pattern DUPLICATE = java.util.regex.Pattern.compile("collection already contains (?:value for|key) (\\S+)");
 
   private volatile List<Part> parts;
   /** ファイルを「ソースの名前/相対パス」で見せる（定義したソースが 2 つ以上。有効・無効で見せ方が変わらないように） */
@@ -236,7 +236,7 @@ public final class MapperWorkspace {
         if (!m.find()) {
           return e;
         }
-        String id = m.group(1);
+        String id = m.group(1).replaceAll("\\.$", "");
         String other = loaded.hasStatement(id) ? displayPath(loaded.statementSource(id)) : null;
         return new LoadError(e.source == null ? null : displayPath(e.source), e.line, e.column, "statement の名前 " + id + " が"
             + (other == null ? "ほかのファイル" : "「" + other + "」") + "と重なるため、このファイルは読み込んでいません（ワークスペースのソースどうしで、同じ namespace の mapper があります）");
