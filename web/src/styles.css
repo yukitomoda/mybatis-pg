@@ -1521,10 +1521,6 @@ button.open-file:focus-visible {
   padding: 0 1.5px;
 }
 
-.globals-list {
-  border-right: 1px solid var(--border);
-}
-
 .globals-list-head {
   display: flex;
   align-items: center;
