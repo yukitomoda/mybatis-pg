@@ -2813,6 +2813,26 @@ button.icon.suggest-relation:hover {
   color: var(--muted);
 }
 
+/* 列の幅を変えるつまみ（見出しの右端） */
+.data-table .col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.data-table .col-resize:hover {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ドラッグ中は、どこでも幅を変えるカーソルにし、文字を選ばない */
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* セルを押してパラメータに値を入れられる */
 .data-table td.insertable {
   cursor: pointer;

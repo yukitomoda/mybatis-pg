@@ -48,6 +48,32 @@ export function DataTable({
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
+  // 手で変えた列の幅（px。列の番号ごと）。列が変わったら（別の結果を見たら）戻す
+  const [widths, setWidths] = useState<Record<number, number>>({});
+  useEffect(() => setWidths({}), [columns]);
+  // 幅を変えるドラッグの直後の click で、並べ替えないため
+  const resizing = useRef(false);
+
+  const startResize = (e: React.MouseEvent, col: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).parentElement!;
+    const x0 = e.clientX;
+    const w0 = th.getBoundingClientRect().width;
+    resizing.current = true;
+    const move = (m: MouseEvent) => setWidths((old) => ({ ...old, [col]: Math.max(40, Math.round(w0 + m.clientX - x0)) }));
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+      window.setTimeout(() => (resizing.current = false));
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.classList.add('col-resizing');
+  };
+  const widthStyle = (col: number) =>
+    widths[col] === undefined ? undefined : { width: widths[col], minWidth: widths[col], maxWidth: widths[col] };
 
   // 絞り込みと並べ替え（元の行の番号を持つ）
   const order = useMemo(() => {
@@ -101,10 +127,28 @@ export function DataTable({
                   key={i}
                   className={i === target ? 'target' : undefined}
                   title={types[i] ? `${types[i]}（押すと並べ替え）` : '押すと並べ替え'}
-                  onClick={() => setSort(sort?.col === i ? (sort.desc ? null : { col: i, desc: true }) : { col: i, desc: false })}
+                  style={widthStyle(i)}
+                  onClick={() => {
+                    if (resizing.current) return;
+                    setSort(sort?.col === i ? (sort.desc ? null : { col: i, desc: true }) : { col: i, desc: false });
+                  }}
                 >
                   {c}
                   {sort?.col === i && <span className="sort-mark">{sort.desc ? ' ▼' : ' ▲'}</span>}
+                  <span
+                    className="col-resize"
+                    title="ドラッグで幅を変える（ダブルクリックで戻す）"
+                    onMouseDown={(e) => startResize(e, i)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setWidths((old) => {
+                        const next = { ...old };
+                        delete next[i];
+                        return next;
+                      });
+                    }}
+                  />
                 </th>
               ))}
             </tr>
@@ -121,6 +165,7 @@ export function DataTable({
                       undefined
                     }
                     title={v ?? 'NULL'}
+                    style={widthStyle(c)}
                     onClick={onCell ? () => onCell(v, types[c] ?? '') : undefined}
                   >
                     {v ?? 'NULL'}
