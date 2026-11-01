@@ -1032,6 +1032,7 @@ function Workspace({ api }: { api: Api }) {
             current={c.statementId === selected ? getAt(effective, c.path) : undefined}
             visible={visible}
             onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
+            onRelated={rv.showRelated}
           />
         )}
       />

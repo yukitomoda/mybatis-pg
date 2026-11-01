@@ -34,6 +34,7 @@ export function DataTable({
   actions,
   truncated,
   titles,
+  onRow,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -53,6 +54,8 @@ export function DataTable({
   truncated?: boolean;
   /** 列の説明（DB のコメント。見出しにマウスを乗せると出す） */
   titles?: (string | undefined)[];
+  /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
+  onRow?: (index: number) => void;
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
@@ -135,6 +138,7 @@ export function DataTable({
         <table>
           <thead>
             <tr>
+              {onRow && <th className="row-action" aria-label="関連データ" />}
               {lead && <th className="lead">{lead.header}</th>}
               {columns.map((c, i) => (
                 <th
@@ -170,6 +174,19 @@ export function DataTable({
           <tbody>
             {order.map((r) => (
               <tr key={r} className={rowClass?.(r)}>
+                {onRow && (
+                  <td className="row-action">
+                    <button
+                      type="button"
+                      className="icon"
+                      title="この行から関連データを集める"
+                      aria-label="関連データ"
+                      onClick={() => onRow(r)}
+                    >
+                      ⤷
+                    </button>
+                  </td>
+                )}
                 {lead && <td className="lead">{lead.cells[r]}</td>}
                 {rows[r].map((v, c) => (
                   <td

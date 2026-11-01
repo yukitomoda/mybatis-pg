@@ -664,6 +664,16 @@ public final class ToolServer {
           history(ex);
         }
         break;
+      case "/api/related/neighbors":
+        if (requireMethod(ex, method, "POST")) {
+          relatedNeighbors(ex);
+        }
+        break;
+      case "/api/related/rows":
+        if (requireMethod(ex, method, "POST")) {
+          relatedRows(ex);
+        }
+        break;
       case "/api/table-rows":
         if (requireMethod(ex, method, "POST")) {
           tableRows(ex);
@@ -1486,6 +1496,144 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("historyId", record("table", table, req, null, connectionId, sql.toString(), java.util.Collections.singletonList(r.table), null,
         null, null, null, r.elapsedMillis, null, maxRows, sql.toString()));
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * 関連データ: 表の隣の表（親・子）。{"connectionId", "table"} →
+   * {"neighbors": [{"direction": "parent" | "child", "table", "columns", "otherColumns", "manual", "indexed"}]}
+   */
+  private void relatedNeighbors(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    String table = string(req, "table");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    Relations.Store store = relationStore(connectionId);
+    List<Relations.Link> links;
+    synchronized (store) {
+      links = Relations.links(store, manualRelations());
+    }
+    List<RelatedData.Neighbor> neighbors = RelatedData.neighbors(table, links);
+    try (java.sql.Connection c = connections.open(connectionId)) {
+      c.setAutoCommit(false);
+      c.setReadOnly(true);
+      RelatedData.markIndexed(c, neighbors);
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("neighbors", neighbors);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * 関連データ: 表から、列の値の組に当たる行を引く（読み取り専用。主キーの順）。
+   * {"connectionId", "table", "columns": [列], "values": [[値, ...], ...], "limit"?} か、起点の行を {"connectionId", "table", "row": {列: 値}}
+   * （主キーがあれば主キーで、なければ比べられる列すべてで引く） →
+   * {"columns", "columnTypes", "rows", "truncated", "total", "pk"}
+   */
+  private void relatedRows(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    String table = string(req, "table");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    boolean byRow = req.has("row") && req.get("row").isJsonObject();
+    if (table == null || table.indexOf('.') <= 0 || !byRow && (!req.has("columns") || !req.has("values"))) {
+      sendJson(ex, 400, error("table（schema.table）・columns・values を指定してください"));
+      return;
+    }
+    List<String> columns = byRow ? new ArrayList<String>()
+        : Json.GSON.fromJson(req.get("columns"), new com.google.gson.reflect.TypeToken<List<String>>() { }.getType());
+    List<List<String>> values = byRow ? new ArrayList<List<String>>() : RelatedData.distinctTuples(
+        Json.GSON.fromJson(req.get("values"), new com.google.gson.reflect.TypeToken<List<List<String>>>() { }.getType()));
+    Map<String, String> row = byRow
+        ? Json.GSON.fromJson(req.get("row"), new com.google.gson.reflect.TypeToken<Map<String, String>>() { }.getType()) : null;
+    int limit = req.has("limit") ? Math.max(1, Math.min(MAX_ROWS_LIMIT, req.get("limit").getAsInt())) : 100;
+    Map<String, Object> body = new LinkedHashMap<>();
+    if (!byRow && values.isEmpty()) {
+      body.put("columns", new ArrayList<>());
+      body.put("columnTypes", new ArrayList<>());
+      body.put("rows", new ArrayList<>());
+      body.put("truncated", false);
+      body.put("total", 0);
+      body.put("pk", new ArrayList<>());
+      sendJson(ex, 200, body);
+      return;
+    }
+    Map<String, Object> desc;
+    try (java.sql.Connection c = connections.open(connectionId)) {
+      c.setAutoCommit(false);
+      desc = RelatedData.describe(c, table);
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    @SuppressWarnings("unchecked")
+    Map<String, String> types = (Map<String, String>) desc.get("types");
+    @SuppressWarnings("unchecked")
+    List<String> pk = (List<String>) desc.get("pk");
+    if (byRow) {
+      // 起点の行: 主キーの値がそろえば主キーで、なければ比べられる列（json・xml などを除く）の値すべてで引く
+      List<String> use = !pk.isEmpty() && pk.stream().allMatch(c -> row.get(c) != null) ? pk : new ArrayList<String>();
+      if (use.isEmpty()) {
+        for (Map.Entry<String, String> e : types.entrySet()) {
+          if (row.get(e.getKey()) != null && !e.getValue().matches("json|jsonb|xml|point|polygon|box|circle|line|lseg|path")) {
+            use.add(e.getKey());
+          }
+        }
+      }
+      List<String> v = new ArrayList<>();
+      for (String c : use) {
+        v.add(row.get(c));
+      }
+      columns = use;
+      values = java.util.Collections.singletonList(v);
+      if (columns.isEmpty()) {
+        sendJson(ex, 400, error("行を見分ける列がありません"));
+        return;
+      }
+    }
+    final List<List<String>> tuples = values;
+    if (types.isEmpty() || !types.keySet().containsAll(columns)) {
+      sendJson(ex, 404, error("表か列がありません: " + table + " " + columns));
+      return;
+    }
+    String sql = RelatedData.rowsSql(table, columns, tuples.size(), types, pk, false);
+    String countSql = RelatedData.rowsSql(table, columns, tuples.size(), types, pk, true);
+    QueryExecutor.ParameterSetter setter = ps -> {
+      int i = 1;
+      for (List<String> v : tuples) {
+        for (String x : v) {
+          ps.setString(i++, x);
+        }
+      }
+    };
+    QueryExecutor.PartResult r;
+    try {
+      r = QueryExecutor.fetch(sql, setter, () -> connections.open(connectionId), 0, 0, limit, countSql, 30);
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+      return;
+    }
+    body.put("columns", r.table.columns);
+    body.put("columnTypes", r.table.columnTypes);
+    body.put("rows", r.table.rows);
+    body.put("truncated", r.table.truncated);
+    body.put("total", r.total);
+    body.put("pk", pk);
     sendJson(ex, 200, body);
   }
 

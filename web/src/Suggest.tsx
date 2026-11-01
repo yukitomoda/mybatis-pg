@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { SourceColumn } from './api';
 import { useDbComments } from './comments';
 import { DataTable } from './DataTable';
+import { rowLabel, rowRecord } from './ResultView';
 import type { Connections } from './Execution';
 import { message } from './Execution';
 import type { PValue } from './params';
@@ -75,6 +76,7 @@ export function CandidatePane({
   current,
   visible,
   onCell,
+  onRelated,
 }: {
   conn: Connections;
   columns: SourceColumn[];
@@ -94,6 +96,8 @@ export function CandidatePane({
   visible: boolean;
   /** セルを押したとき（入れる先がなければ undefined） */
   onCell?: (text: string | null, type: string) => void;
+  /** 行から関連データを集める */
+  onRelated?: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const column = columns[Math.min(index, columns.length - 1)];
@@ -316,6 +320,14 @@ export function CandidatePane({
               rowClass={(i) => (i < currentRows.length ? 'current' : undefined)}
               highlight={column.column}
               titles={tableColumns.map((c) => comments.columns[`${column.schema}.${column.table}.${c}`])}
+              onRow={
+                onRelated && connectionId
+                  ? (i) => {
+                      const t = `${column.schema}.${column.table}`;
+                      onRelated(connectionId, t, rowRecord(tableColumns, allRows[i]), rowLabel(t, tableColumns, allRows[i]));
+                    }
+                  : undefined
+              }
               onCell={onCell}
               truncated={more}
               actions={

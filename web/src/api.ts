@@ -36,6 +36,30 @@ export interface StatementsResponse {
   loadErrors: LoadError[];
 }
 
+/** 関連データ: 隣の表 */
+export interface RelatedNeighbor {
+  /** parent: この表が参照する表（1 対 1 を含む）、child: この表を参照する表 */
+  direction: 'parent' | 'child';
+  table: string;
+  /** この表の列 */
+  columns: string[];
+  /** 相手の表の列（columns と同じ順） */
+  otherColumns: string[];
+  manual: boolean;
+  /** 子のとき、引く列にインデックスがあるか */
+  indexed: boolean | null;
+}
+
+/** 関連データ: 引いた行 */
+export interface RelatedRows {
+  columns: string[];
+  columnTypes: string[];
+  rows: (string | null)[][];
+  truncated: boolean;
+  total: number | null;
+  pk: string[];
+}
+
 /** ワークスペースのソース */
 export interface WorkspaceSource {
   id?: string;
@@ -557,6 +581,16 @@ export function createApi(token: string) {
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
     dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
+    /** 関連データ: 表の隣の表（親・子） */
+    relatedNeighbors: (connectionId: string, table: string) =>
+      call<{ neighbors: RelatedNeighbor[] }>('api/related/neighbors', post(JSON.stringify({ connectionId, table }))),
+    /** 関連データ: 列の値の組に当たる行（row を渡すと、その行を主キーで引く） */
+    relatedRows: (
+      connectionId: string,
+      table: string,
+      match: { columns: string[]; values: (string | null)[][] } | { row: Record<string, string | null> },
+      limit = 100,
+    ) => call<RelatedRows>('api/related/rows', post(JSON.stringify({ connectionId, table, limit, ...match }))),
     /** 表の中身を読んで、実行の履歴に残す（結果ビューで見る） */
     tableRows: (connectionId: string, table: string) =>
       call<{ historyId: string | null }>('api/table-rows', post(JSON.stringify({ connectionId, table }))),

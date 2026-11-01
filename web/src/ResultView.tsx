@@ -5,6 +5,8 @@ import type { PointerEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, HistoryEntry, HistorySummary, SourceColumn } from './api';
 import { DataTable } from './DataTable';
+import type { RelatedEntry } from './Related';
+import { RelatedPane } from './Related';
 import type { Path } from './params';
 
 /** 値の候補（パラメータごとに 1 件。履歴には残さない） */
@@ -21,7 +23,7 @@ export interface CandidateEntry {
   relations: boolean;
 }
 
-type Selection = { kind: 'history'; id: string } | { kind: 'candidate'; key: string } | null;
+type Selection = { kind: 'history'; id: string } | { kind: 'candidate'; key: string } | { kind: 'related'; key: string } | null;
 type Geometry = { x: number; y: number; w: number; h: number };
 
 const GEOMETRY_KEY = 'mybatis-pg.result-view';
@@ -54,6 +56,8 @@ export function useResultView(api: Api | null) {
   const [geometry, setGeometry] = useState<Geometry>(loadGeometry);
   const [history, setHistory] = useState<HistorySummary[]>([]);
   const [candidates, setCandidates] = useState<CandidateEntry[]>([]);
+  /** 関連データ（起点の行ごと。履歴には残さない） */
+  const [related, setRelated] = useState<RelatedEntry[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
   /** 最小化している間に、新しい結果が入った */
   const [fresh, setFresh] = useState(false);
@@ -82,6 +86,7 @@ export function useResultView(api: Api | null) {
     geometry,
     history,
     candidates,
+    related,
     selection,
     fresh,
     refresh,
@@ -101,6 +106,18 @@ export function useResultView(api: Api | null) {
       setMinimized(false);
     },
     removeCandidate: (key: string) => setCandidates((old) => old.filter((x) => x.key !== key)),
+    /** 行から関連データを集める（結果ビューに出す） */
+    showRelated: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => {
+      const key = `r${Date.now()}`;
+      setRelated((old) =>
+        [{ key, connectionId, table, row, label, nodes: [], selected: null, busy: false, error: null }, ...old].slice(0, 10),
+      );
+      setSelection({ kind: 'related', key });
+      setOpen(true);
+      setMinimized(false);
+    },
+    updateRelated: (key: string, f: (e: RelatedEntry) => RelatedEntry) => setRelated((old) => old.map((e) => (e.key === key ? f(e) : e))),
+    removeRelated: (key: string) => setRelated((old) => old.filter((e) => e.key !== key)),
     toggle: () => {
       if (open && !minimized) setOpen(false);
       else {
@@ -205,6 +222,8 @@ export function ResultView({
   const candidate =
     rv.selection?.kind === 'candidate' ? rv.candidates.find((c) => c.key === (rv.selection as { key: string }).key) : undefined;
   const historyId = rv.selection?.kind === 'history' ? rv.selection.id : null;
+  const relatedEntry =
+    rv.selection?.kind === 'related' ? rv.related.find((r) => r.key === (rv.selection as { key: string }).key) : undefined;
 
   return (
     <div ref={box} className={rv.maximized ? 'result-view maximized' : 'result-view'} style={style} role="dialog" aria-label="結果ビュー">
@@ -277,6 +296,26 @@ export function ResultView({
               </ul>
             </>
           )}
+          {rv.related.length > 0 && (
+            <>
+              <h4>関連データ</h4>
+              <ul>
+                {rv.related.map((r) => (
+                  <li key={r.key}>
+                    <button
+                      type="button"
+                      className={rv.selection?.kind === 'related' && rv.selection.key === r.key ? 'selected' : undefined}
+                      onClick={() => rv.setSelection({ kind: 'related', key: r.key })}
+                      title={r.label}
+                    >
+                      <span className="result-view-item-title">{r.label}</span>
+                      <span className="hint">{r.nodes.length} 表</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <h4>
             実行の履歴
             {rv.history.length > 0 && (
@@ -316,7 +355,15 @@ export function ResultView({
           </ul>
         </aside>
         <section className="result-view-detail">
-          {candidate ? (
+          {relatedEntry ? (
+            <RelatedPane
+              key={relatedEntry.key}
+              api={api}
+              entry={relatedEntry}
+              update={(f) => rv.updateRelated(relatedEntry.key, f)}
+              onCell={onCell}
+            />
+          ) : candidate ? (
             <>
               <h3>
                 <code>{candidate.label}</code> の値の候補 <span className="hint">{candidate.statementId}</span>
@@ -332,6 +379,7 @@ export function ResultView({
               onOpenStatement={onOpenStatement}
               onRestoreParams={onRestoreParams}
               onUpdated={rv.refresh}
+              onRelated={rv.showRelated}
             />
           ) : (
             <p className="hint">左の一覧から選んでください</p>
@@ -353,6 +401,7 @@ function HistoryDetail({
   onOpenStatement,
   onRestoreParams,
   onUpdated,
+  onRelated,
 }: {
   api: Api;
   id: string;
@@ -361,6 +410,8 @@ function HistoryDetail({
   onRestoreParams: (statementId: string, parameters: unknown) => void;
   /** 続きを取った・取り直した（履歴の一覧の行数などを読み直す） */
   onUpdated: () => void;
+  /** 行から関連データを集める（表の中身のとき） */
+  onRelated: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
   // 表の中身なら、列の見出しに DB のコメントを出す
@@ -477,6 +528,17 @@ function HistoryDetail({
                 onCell={onCell}
                 truncated={t.truncated}
                 titles={entry.kind === 'table' ? t.columns.map((c) => comments.columns[`${entry.label}.${c}`]) : undefined}
+                onRow={
+                  entry.kind === 'table' && entry.label
+                    ? (i) =>
+                        onRelated(
+                          entry.connectionId,
+                          entry.label!,
+                          rowRecord(t.columns, t.rows[i]),
+                          rowLabel(entry.label!, t.columns, t.rows[i]),
+                        )
+                    : undefined
+                }
                 actions={
                   <>
                     {t.truncated && (
@@ -523,4 +585,14 @@ function HistoryDetail({
       )}
     </div>
   );
+}
+
+/** 行を、列 → 値にする */
+export function rowRecord(columns: string[], row: (string | null)[]): Record<string, string | null> {
+  return Object.fromEntries(columns.map((c, i) => [c, row[i]]));
+}
+
+/** 関連データの一覧に出す名前（表と、先頭の列の値。erp.projects id=5） */
+export function rowLabel(table: string, columns: string[], row: (string | null)[]): string {
+  return `${table} ${columns[0]}=${row[0] ?? 'NULL'}`;
 }
