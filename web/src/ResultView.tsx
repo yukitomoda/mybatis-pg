@@ -5,6 +5,7 @@ import type { PointerEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, HistoryEntry, HistorySummary, SourceColumn } from './api';
 import { DataTable } from './DataTable';
+import { Popover } from './Popover';
 import type { RelatedEntry } from './Related';
 import { RelatedPane } from './Related';
 import type { Path } from './params';
@@ -435,11 +436,18 @@ function HistoryDetail({
   onRelated: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
-  // 表の中身なら、列の見出しに DB のコメントを出す
-  const comments = useDbComments(api, entry?.kind === 'table' ? entry.connectionId : null);
+  // 列の見出しに DB のコメントを出す（表の中身と、出どころの分かる列）
+  const comments = useDbComments(api, entry?.connectionId);
+  /** 複数の表の列がある行から関連データを集めるときに、どの表から始めるかを選ぶ */
+  const [pick, setPick] = useState<{ tables: { table: string; row: Record<string, string | null> }[]; anchor: DOMRect } | null>(null);
   /** 続きを取っている・取り直している */
   const [fetching, setFetching] = useState<'more' | 'refetch' | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const startFrom = (x: { table: string; row: Record<string, string | null> }) => {
+    if (!entry) return;
+    const [col, val] = Object.entries(x.row)[0] ?? ['', null];
+    onRelated(entry.connectionId, x.table, x.row, `${x.table} ${col}=${val ?? 'NULL'}`);
+  };
   const fetchRows = (index: number, refetch: boolean) => {
     setFetching(refetch ? 'refetch' : 'more');
     setFetchError(null);
@@ -548,7 +556,14 @@ function HistoryDetail({
                 rows={t.rows}
                 onCell={onCell}
                 truncated={t.truncated}
-                titles={entry.kind === 'table' ? t.columns.map((c) => comments.columns[`${entry.label}.${c}`]) : undefined}
+                titles={
+                  entry.kind === 'table'
+                    ? t.columns.map((c) => comments.columns[`${entry.label}.${c}`])
+                    : t.columns.map((_, i) => {
+                        const src = t.columnSources?.[i];
+                        return src ? [src, comments.columns[src]].filter(Boolean).join('\n') : undefined;
+                      })
+                }
                 onRow={
                   entry.kind === 'table' && entry.label
                     ? (i) =>
@@ -558,7 +573,14 @@ function HistoryDetail({
                           rowRecord(t.columns, t.rows[i]),
                           rowLabel(entry.label!, t.columns, t.rows[i]),
                         )
-                    : undefined
+                    : t.columnSources?.some(Boolean)
+                      ? (i, anchor) => {
+                          // 出どころの分かる列を、表ごとに分ける（1 つの表なら、すぐに始める）
+                          const tables = tablesOfRow(t.columnSources!, t.rows[i]);
+                          if (tables.length === 1) startFrom(tables[0]);
+                          else setPick({ tables, anchor });
+                        }
+                      : undefined
                 }
                 actions={
                   <>
@@ -599,6 +621,21 @@ function HistoryDetail({
           <pre className="sql">{JSON.stringify(entry.parameters ?? {}, null, 2)}</pre>
         </div>
       )}
+      {pick && (
+        <Popover anchor={pick.anchor} onClose={() => setPick(null)}>
+          <h4>どの表の行から集めますか</h4>
+          <ul className="popover-sql">
+            {pick.tables.map((x) => (
+              <li key={x.table}>
+                <button type="button" className="link" onClick={() => startFrom(x)}>
+                  {x.table}
+                </button>
+                <span className="hint"> {Object.keys(x.row).join(', ')}</span>
+              </li>
+            ))}
+          </ul>
+        </Popover>
+      )}
       {tab === 'sql' && entry.sql && (
         <div className="history-sql">
           <pre className="sql">{entry.sql}</pre>
@@ -616,4 +653,17 @@ export function rowRecord(columns: string[], row: (string | null)[]): Record<str
 /** 関連データの一覧に出す名前（表と、先頭の列の値。erp.projects id=5） */
 export function rowLabel(table: string, columns: string[], row: (string | null)[]): string {
   return `${table} ${columns[0]}=${row[0] ?? 'NULL'}`;
+}
+
+/** 行の、出どころの分かる列を表ごとに分ける（表 → 元の列の名前 → 値。表は結果の列の順） */
+export function tablesOfRow(sources: (string | null)[], row: (string | null)[]): { table: string; row: Record<string, string | null> }[] {
+  const out = new Map<string, Record<string, string | null>>();
+  sources.forEach((src, i) => {
+    if (!src) return;
+    const table = src.slice(0, src.lastIndexOf('.'));
+    const column = src.slice(src.lastIndexOf('.') + 1);
+    if (!out.has(table)) out.set(table, {});
+    out.get(table)![column] = row[i];
+  });
+  return [...out].map(([table, r]) => ({ table, row: r }));
 }

@@ -34,6 +34,11 @@ public final class QueryExecutor {
   public static final class ResultTable {
     public final List<String> columns = new ArrayList<>();
     public final List<String> columnTypes = new ArrayList<>();
+    /**
+     * 列の出どころ（schema.table.column）。表の列をそのまま出した列だけ（サブクエリをはさんでも追える）。式や集計の列は null。
+     * PostgreSQL の応答の列の情報から読む（実行を増やさない）
+     */
+    public final List<String> columnSources = new ArrayList<>();
     /** 値は文字列で返す（DB の表記のまま見せるため）。NULL は null */
     public final List<List<String>> rows = new ArrayList<>();
     /** maxRows を超える行があった */
@@ -512,6 +517,25 @@ public final class QueryExecutor {
     return read(rs, 0, maxRows);
   }
 
+  /** 列の出どころ（schema.table.column）。分からなければ null（PostgreSQL でないときも） */
+  private static String columnSource(ResultSetMetaData meta, int i) {
+    try {
+      if (!meta.isWrapperFor(org.postgresql.PGResultSetMetaData.class)) {
+        return null;
+      }
+      org.postgresql.PGResultSetMetaData pg = meta.unwrap(org.postgresql.PGResultSetMetaData.class);
+      String table = pg.getBaseTableName(i);
+      String column = pg.getBaseColumnName(i);
+      String schema = pg.getBaseSchemaName(i);
+      if (table == null || table.isEmpty() || column == null || column.isEmpty() || schema == null || schema.isEmpty()) {
+        return null;
+      }
+      return schema + "." + table + "." + column;
+    } catch (SQLException | RuntimeException e) {
+      return null;
+    }
+  }
+
   /** skip 行を読み飛ばしてから、maxRows 行を読む */
   private static ResultTable read(ResultSet rs, int skip, int maxRows) throws SQLException {
     ResultTable table = new ResultTable();
@@ -520,6 +544,7 @@ public final class QueryExecutor {
     for (int i = 1; i <= n; i++) {
       table.columns.add(meta.getColumnLabel(i));
       table.columnTypes.add(meta.getColumnTypeName(i));
+      table.columnSources.add(columnSource(meta, i));
     }
     for (int i = 0; i < skip; i++) {
       if (!rs.next()) {

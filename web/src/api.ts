@@ -214,6 +214,8 @@ export interface ConnectionInput {
 export interface ResultTable {
   columns: string[];
   columnTypes: string[];
+  /** 列の出どころ（schema.table.column。表の列をそのまま出した列だけ。式や集計の列は null。前の版の履歴にはない） */
+  columnSources?: (string | null)[];
   rows: (string | null)[][];
   truncated: boolean;
 }

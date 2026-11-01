@@ -154,4 +154,15 @@ class QueryExecutorTest {
         "CREATE TEMP TABLE t AS SELECT 1", null, () -> DriverManager.getConnection(pg), 0, 0, 10, null, 30));
     assertTrue(e.getMessage().startsWith("続き・再取得は読み取り専用で流すので"), e.getMessage());
   }
+
+  @Test
+  void 結果の列の出どころを_別名やサブクエリをはさんでも読む() throws Exception {
+    String pg = System.getenv("MYBATIS_PG_TEST_URL");
+    org.junit.jupiter.api.Assumptions.assumeTrue(pg != null, "MYBATIS_PG_TEST_URL がない");
+    String sql = "SELECT c.relname AS name, n.nspname, 1 + 1 AS two FROM pg_catalog.pg_class c"
+        + " JOIN (SELECT oid, nspname FROM pg_catalog.pg_namespace) n ON n.oid = c.relnamespace LIMIT 1";
+    QueryExecutor.PartResult r = QueryExecutor.fetch(sql, null, () -> DriverManager.getConnection(pg), 0, 0, 1, null, 30);
+    assertEquals(Arrays.asList("name", "nspname", "two"), r.table.columns);
+    assertEquals(Arrays.asList("pg_catalog.pg_class.relname", "pg_catalog.pg_namespace.nspname", null), r.table.columnSources);
+  }
 }

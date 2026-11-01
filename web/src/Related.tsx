@@ -122,7 +122,8 @@ async function step(api: Api, connectionId: string, from: RelatedNode, n: Relate
 
 /** 起点の行を引き、起点の親を自動で集める。集めた箱は add で足していく（途中でも画面に出す） */
 export async function startRelated(api: Api, e: RelatedEntry, add: (n: RelatedNode) => void): Promise<void> {
-  const rows = await api.relatedRows(e.connectionId, e.table, { row: e.row }, 1);
+  // 主キーで引ければ 1 行。結果に主キーの列がなければ、ほかの列の値で引くので、1 行に決まらないこともある
+  const rows = await api.relatedRows(e.connectionId, e.table, { row: e.row }, LIMIT);
   const root: RelatedNode = { id: newId(), table: e.table, parent: null, direction: 'start', step: null, rows };
   add(root);
   await collectParents(api, e.connectionId, root, add, [root]);

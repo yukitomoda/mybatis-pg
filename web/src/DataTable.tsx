@@ -57,7 +57,7 @@ export function DataTable({
   /** 列の説明（DB のコメント。見出しにマウスを乗せると出す） */
   titles?: (string | undefined)[];
   /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
-  onRow?: (index: number) => void;
+  onRow?: (index: number, anchor: DOMRect) => void;
   /** 選んだ行（元の行の番号）。onCheck があれば、行の左端にチェックボックスを出す */
   checked?: Set<number>;
   onCheck?: (rows: Set<number>) => void;
@@ -223,7 +223,7 @@ export function DataTable({
                       className="icon"
                       title="この行から関連データを集める"
                       aria-label="関連データ"
-                      onClick={() => onRow(r)}
+                      onClick={(e) => onRow(r, e.currentTarget.getBoundingClientRect())}
                     >
                       ⤷
                     </button>
