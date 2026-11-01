@@ -36,6 +36,8 @@ public final class Main {
       + "  java -jar mybatis-pg.jar [オプション] mapperのファイルまたはディレクトリ...\n"
       + "  java -jar mybatis-pg.jar [オプション] --jar アプリのJAR（war）\n"
       + "                       JAR の中（中の JAR を含む）の mapper XML を読み込む。編集して試せるが、ファイルには保存できない\n"
+      + "                       --project・ファイル・--jar は、それをソースに持つワークスペースを開く（なければ作る）。\n"
+      + "                       ソース（プロジェクト・JAR）は、画面の「ワークスペース」で足したり外したりできる\n"
       + "オプション:\n"
       + "  --port 番号          待ち受けるポート。省略すると 7171 から順に空いているポートを使う（複数起動できる）。0 なら OS が選ぶ\n"
       + "  --public-url URL     リバースプロキシ経由で公開する URL。{port} は使ったポートに置き換える\n"
