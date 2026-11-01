@@ -24,6 +24,10 @@ type Rows = { columns: string[]; columnTypes: string[]; rows: (string | null)[][
 /** 列の値の候補は、開いている間は覚えておく（同じ列を何度も読まない） */
 const cache = new Map<string, Promise<Values>>();
 
+type Extra = { values: Values['values']; rows: Rows['rows']; more: boolean };
+/** 「続きを取得」で足した値と行も、開いている間は列ごとに覚えておく（表を開き直しても消えないように） */
+const extraCache = new Map<string, Extra>();
+
 const keyOf = (connectionId: string, c: SourceColumn) => `${connectionId}\u0000${c.schema}.${c.table}.${c.column}`;
 
 /** 表に出す候補の数（続きを取るときも、この数ずつ） */
@@ -103,7 +107,7 @@ export function CandidatePane({
     let active = true;
     setValues(null);
     setError(null);
-    setExtra(null);
+    setExtra(extraCache.get(keyOf(connectionId, column)) ?? null);
     const key = keyOf(connectionId, column);
     let p = cache.get(key);
     if (!p) {
@@ -124,7 +128,7 @@ export function CandidatePane({
   // 候補の値ごとの行（表のすべての列）。候補が決まったら 1 回だけ読む
   const [rows, setRows] = useState<Rows | null>(null);
   /** 「続きを取得」で足した値と行 */
-  const [extra, setExtra] = useState<{ values: Values['values']; rows: Rows['rows']; more: boolean } | null>(null);
+  const [extra, setExtra] = useState<Extra | null>(null);
   const [fetching, setFetching] = useState<'more' | 'refetch' | null>(null);
   const top = values ? [...values.values, ...(extra?.values ?? [])] : [];
   const more = extra ? extra.more : (values?.more ?? false);
@@ -143,11 +147,11 @@ export function CandidatePane({
                 null,
               )
             : null;
-        setExtra((old) => ({
-          values: [...(old?.values ?? []), ...v.values],
-          rows: [...(old?.rows ?? []), ...(r?.rows ?? [])],
-          more: v.more,
-        }));
+        const key = keyOf(connectionId, column);
+        const old = extraCache.get(key);
+        const next = { values: [...(old?.values ?? []), ...v.values], rows: [...(old?.rows ?? []), ...(r?.rows ?? [])], more: v.more };
+        extraCache.set(key, next);
+        setExtra(next);
         if (!rows && r) setRows({ columns: r.columns, columnTypes: r.columnTypes, rows: [] });
       })
       .catch((e) => setError(message(e)))
@@ -156,6 +160,7 @@ export function CandidatePane({
   const refetch = () => {
     if (!connectionId) return;
     cache.delete(keyOf(connectionId, column));
+    extraCache.delete(keyOf(connectionId, column));
     setReload({ limit: Math.min(100, Math.max(MAX_ROWS, top.length)) });
   };
   useEffect(() => {
