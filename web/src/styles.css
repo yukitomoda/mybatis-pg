@@ -3379,3 +3379,9 @@ body.col-resizing {
   gap: 0.6rem;
   margin-bottom: 0.6rem;
 }
+
+.workspace-transfer {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}

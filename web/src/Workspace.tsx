@@ -1,6 +1,6 @@
 // ワークスペース: 開いているワークスペースの名前とソース（プロジェクト・JAR・mapper のファイル）を変え、
 // ほかのワークスペースを開いたり、作ったり、消したりする
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Api, WorkspaceSnapshot, WorkspaceSource } from './api';
 import { message } from './Execution';
 
@@ -48,6 +48,40 @@ export function WorkspaceScreen({
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newName, setNewName] = useState('');
+  const importFile = useRef<HTMLInputElement>(null);
+
+  /** 開いているワークスペースの定義（保存したもの）を、JSON のファイルにして保存する。パスワードや解析の結果は含めない */
+  const exportDefinition = () => {
+    const cur = snap?.current;
+    if (!cur) return;
+    const def = {
+      format: 'mybatis-pg-workspace',
+      version: 1,
+      name: cur.name,
+      sources: cur.sources.map(({ name, type, path, enabled }) => ({ name, type, path, enabled })),
+      relationConnection: cur.relationConnection,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(def, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cur.name}.workspace.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const importDefinition = async (file: File) => {
+    let def: unknown;
+    try {
+      def = JSON.parse(await file.text());
+    } catch {
+      setError('JSON のファイルではありません');
+      return;
+    }
+    const name = (def as { name?: unknown })?.name;
+    await run(
+      () => api.importWorkspace(def),
+      `「${typeof name === 'string' ? name : ''}」を作りました。「開く」で使えます（パスが合わなければ、開いてから直してください）`,
+    );
+  };
 
   const show = (s: WorkspaceSnapshot) => {
     setSnap(s);
@@ -291,6 +325,36 @@ export function WorkspaceScreen({
             ))}
           </ul>
         )}
+        <div className="workspace-transfer">
+          <button
+            type="button"
+            className="link"
+            onClick={exportDefinition}
+            title="名前・ソース・解析の結果の共有の設定を、JSON のファイルで保存します（パスワードや解析の結果は含めません）"
+          >
+            このワークスペースを書き出す
+          </button>
+          <button
+            type="button"
+            className="link"
+            disabled={busy}
+            onClick={() => importFile.current?.click()}
+            title="書き出したファイルから、新しいワークスペースを作ります"
+          >
+            書き出したファイルから作る
+          </button>
+          <input
+            ref={importFile}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) importDefinition(f);
+            }}
+          />
+        </div>
         <form
           className="workspace-create"
           onSubmit={(e) => {

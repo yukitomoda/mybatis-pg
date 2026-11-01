@@ -276,6 +276,40 @@ public final class ToolServer {
           openWorkspace(def);
           break;
         }
+        case "import": {
+          // 書き出した定義から、新しいワークスペースを作る（開かない）。パスが今のマシンにないソースも、そのまま入れる（画面で直す）
+          JsonObject d = req.has("definition") && req.get("definition").isJsonObject() ? req.getAsJsonObject("definition") : null;
+          if (d == null || string(d, "name") == null) {
+            sendJson(ex, 400, error("ワークスペースの定義（書き出したファイル）ではありません"));
+            return;
+          }
+          List<Workspaces.Source> list = new ArrayList<>();
+          java.util.Set<String> used = new java.util.HashSet<>();
+          if (d.has("sources") && d.get("sources").isJsonArray()) {
+            for (JsonElement e : d.getAsJsonArray("sources")) {
+              JsonObject o = e.getAsJsonObject();
+              String type = string(o, "type");
+              String path = string(o, "path");
+              if (path == null || !(Workspaces.PROJECT.equals(type) || Workspaces.JAR.equals(type) || Workspaces.FILES.equals(type))) {
+                continue;
+              }
+              String n = string(o, "name") == null || string(o, "name").trim().isEmpty() ? Workspaces.defaultName(path) : string(o, "name").trim();
+              String base = n.replace("/", "-");
+              n = base;
+              for (int i = 2; !used.add(n); i++) {
+                n = base + "-" + i;
+              }
+              list.add(new Workspaces.Source(Workspaces.newId(), n, type, path, !o.has("enabled") || o.get("enabled").getAsBoolean()));
+            }
+          }
+          Workspaces.Def created = workspaces.create(string(d, "name").trim(), null, list);
+          String rc = string(d, "relationConnection");
+          if (rc != null && !rc.isEmpty()) {
+            created.relationConnection = rc;
+            workspaces.save(created);
+          }
+          break;
+        }
         case "delete": {
           String id = string(req, "id");
           if (currentWorkspace != null && currentWorkspace.id.equals(id)) {
@@ -444,6 +478,7 @@ public final class ToolServer {
       case "/api/workspace/open":
       case "/api/workspace/create":
       case "/api/workspace/delete":
+      case "/api/workspace/import":
         if (requireMethod(ex, method, "POST")) {
           workspaceAction(ex, path.substring("/api/workspace/".length()));
         }

@@ -353,6 +353,8 @@ export function createApi(token: string) {
     openWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/open', post(JSON.stringify({ id }))),
     /** ワークスペースを作って開く */
     createWorkspace: (name: string) => call<WorkspaceSnapshot>('api/workspace/create', post(JSON.stringify({ name }))),
+    /** 書き出した定義から、新しいワークスペースを作る（開かない） */
+    importWorkspace: (definition: unknown) => call<WorkspaceSnapshot>('api/workspace/import', post(JSON.stringify({ definition }))),
     /** ワークスペースを消す（開いているものは消せない） */
     deleteWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/delete', post(JSON.stringify({ id }))),
     parameters: (id: string, draft: DraftParam = null) =>

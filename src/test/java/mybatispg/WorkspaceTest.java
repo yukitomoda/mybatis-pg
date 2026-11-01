@@ -144,6 +144,16 @@ class WorkspaceTest {
       call(base, "POST", "/api/workspace/delete", "{\"id\":\"" + other + "\"}", 200);
       assertEquals(1, store.list().size());
 
+      // 書き出した定義から作る（開かない）。名前が重なれば番号を付ける
+      JsonObject imported = call(base, "POST", "/api/workspace/import", "{\"definition\":{\"name\":\"受発注\",\"sources\":[{\"name\":\"a\",\"type\":\"project\",\"path\":\"/no/such\"},"
+          + "{\"name\":\"a\",\"type\":\"jar\",\"path\":\"/no/such.jar\"},{\"name\":\"x\",\"type\":\"evil\",\"path\":\"/\"}]}}", 200);
+      assertEquals("受発注", imported.getAsJsonObject("current").get("name").getAsString());
+      Workspaces.Def copy = store.find("受発注 (2)");
+      assertEquals(Arrays.asList("a", "a-2"), Arrays.asList(copy.sources.get(0).name, copy.sources.get(1).name));
+      assertEquals(2, copy.sources.size());
+      call(base, "POST", "/api/workspace/import", "{\"definition\":{}}", 400);
+      store.delete(copy.id);
+
       // リレーションの解析の結果を、すべての接続先で 1 つの接続先のものを使う
       assertTrue(call(base, "POST", "/api/relations", "{\"connectionId\":\"" + db2 + "\"}", 200).get("sharedFrom").isJsonNull());
       JsonObject shared = call(base, "POST", "/api/workspace/save", "{\"name\":\"受発注\",\"relationConnection\":\"" + db1 + "\",\"sources\":[{\"id\":\"" + users
