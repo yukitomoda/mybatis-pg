@@ -2507,10 +2507,51 @@ button.icon.suggest-relation:hover {
   color: var(--accent);
 }
 
-/* 列ごとのまとめ */
+/* 表と列: すべての列のつながりを 1 つの表にまとめ、相手の表・列の位置をそろえて流し見できるようにする */
+.relations-grid {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.relations-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 2px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.relations-grid td {
+  padding: 0.25rem 0.6rem;
+  vertical-align: top;
+}
+
+.relations-grid-col code {
+  font-weight: 700;
+}
+
+.relations-grid tr.disabled code {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.relations-grid .badge {
+  margin-left: 0.4rem;
+}
+
+.relations-grid td > .badge:first-child {
+  margin-left: 0;
+}
+
+/* 列ごとのまとめ（表の tbody） */
 .relations-column {
   border-bottom: 1px solid var(--border);
-  padding: 0.3rem 0 0.6rem;
 }
 
 /* 主キーの列は、薄い緑の背景でパッと見て分かるようにする（強調している列の青のほうが優先） */
@@ -2525,28 +2566,6 @@ button.icon.suggest-relation:hover {
 
 .relations-column.focus {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
-}
-
-.relations-column h3 {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.relations-origin,
-.relations-params {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.2rem 0.6rem;
-  margin: 0.3rem 0 0;
-  font-size: 13px;
-}
-
-.relations-label {
-  color: var(--muted);
-  font-size: 12px;
-  min-width: 7rem;
 }
 
 .relations-origin-item {

@@ -548,159 +548,205 @@ function TableRelations({
   ].sort((x, y) => (x === focus ? -1 : y === focus ? 1 : x.localeCompare(y)));
   const name = (c: string) => c.slice(c.lastIndexOf('.') + 1);
 
+  /** つながりの理由と根拠（「i」の小窓） */
+  const linkInfo = (l: RelationLink, other: string, d: { label: string; reason: string }) => (
+    <InfoButton title="判定の理由と根拠の SQL">
+      <h4>
+        {d.label} <code>{s(other)}</code>
+      </h4>
+      <p>{d.reason}</p>
+      {l.statements.length > 0 && (
+        <SqlList
+          title={`根拠の SQL（${l.statements.length} 件）`}
+          items={l.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), l.a, l.b) }))}
+          onOpen={onOpen}
+        />
+      )}
+      <div className="popover-actions">
+        {l.manual ? (
+          <button type="button" className="link" onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}>
+            このリレーションを削除
+          </button>
+        ) : l.disabled ? (
+          <button type="button" className="link" onClick={() => onChange({ action: 'enable', a: l.a, b: l.b })}>
+            有効に戻す
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="link"
+            title="誤ったリレーションを、源流を探すときに使わないようにします"
+            onClick={() => onChange({ action: 'disable', a: l.a, b: l.b })}
+          >
+            誤りなので無効にする
+          </button>
+        )}
+      </div>
+    </InfoButton>
+  );
+
+  /** 源流（たどった道筋と根拠は「i」の小窓） */
+  const originCell = (col: string, os: Origin[], key: string | null) =>
+    os.length > 0 ? (
+      os.map((o) => {
+        // たどった道筋（この列 → … → 源流）と、その各段のリレーションの根拠の SQL
+        const chain = [...o.path, o.column];
+        const steps = chain.slice(1).map((to, k) => {
+          const from = chain[k];
+          const l = links.find((x) => (x.a === from && x.b === to) || (x.a === to && x.b === from));
+          return { from, to, link: l };
+        });
+        return (
+          <span key={o.column} className="relations-origin-item">
+            <button type="button" className="link" onClick={() => onGoColumn(o.column)}>
+              <code>{s(o.column)}</code>
+            </button>
+            <InfoButton title="源流までの道筋と根拠の SQL">
+              <h4>
+                源流 <code>{s(o.column)}</code>
+              </h4>
+              <p className="hint">
+                {o.manual
+                  ? '手で設定したリレーションでたどりました。'
+                  : `この列から、リレーションを ${steps.length} 段たどりました（${o.count} 件の SQL）。`}
+              </p>
+              <ol className="popover-path">
+                {steps.map((st) => (
+                  <li key={`${st.from} ${st.to}`}>
+                    <code>{s(st.from)}</code> → <code>{s(st.to)}</code>
+                    {st.link && (
+                      <span className="hint">
+                        （{describeLink(st.link, st.from, keys, s).label.replace(/^[→←＝]\s*/, '')}
+                        {st.link.manual && '、手で設定'}）
+                      </span>
+                    )}
+                    {st.link && st.link.statements.length > 0 && (
+                      <SqlList
+                        items={st.link.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), st.link!.a, st.link!.b) }))}
+                        onOpen={onOpen}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </InfoButton>
+          </span>
+        );
+      })
+    ) : singleUnique(keys[col]) ? (
+      <span className="hint">この列（{key}）</span>
+    ) : (
+      <span className="hint">なし</span>
+    );
+
+  /** 比べているパラメータの名前（どの statement かは「i」の小窓） */
+  const paramCell = (ps: { statement: string; property: string }[]) =>
+    ps.length > 0 && (
+      <>
+        {[...new Set(ps.map((p) => p.property.slice(p.property.lastIndexOf('.') + 1)))].map((n) => (
+          <code key={n} className="relations-param-name">
+            {n}
+          </code>
+        ))}
+        <InfoButton title="比べている statement">
+          <SqlList
+            title={`比べている statement（${ps.length} 件）`}
+            items={ps.map((p) => ({ id: p.statement, note: p.property }))}
+            onOpen={onOpen}
+          />
+        </InfoButton>
+      </>
+    );
+
   return (
     <>
       <h2 className="relations-detail-title">
         <code>{table}</code>
       </h2>
       {columns.length === 0 && <p className="hint">この表の列は、解析で見つかったつながりやパラメータがありません。</p>}
-      {columns.map((col) => {
-        const ls = mine.filter((l) => l.a === col || l.b === col);
-        const os = origins.get(col) ?? [];
-        const ps = params.get(col) ?? [];
-        const key = keyLabel(keys[col]);
-        return (
-          <section
-            key={col}
-            className={['relations-column', isPrimaryKey(keys[col]) ? 'pk' : '', col === focus ? 'focus' : ''].filter(Boolean).join(' ')}
-          >
-            <h3>
-              <code>{name(col)}</code>
-              {key && <span className={isPrimaryKey(keys[col]) ? 'badge pk' : 'badge'}>{key}</span>}
-            </h3>
-            {ls.length > 0 && (
-              <table className="relations-table">
-                <tbody>
-                  {ls.map((l) => {
+      {columns.length > 0 && (
+        <table className="relations-grid">
+          <thead>
+            <tr>
+              <th>列</th>
+              <th>鍵</th>
+              <th>関係</th>
+              <th>相手の表</th>
+              <th>相手の列</th>
+              <th aria-label="理由" />
+              <th>源流</th>
+              <th>比べているパラメータ</th>
+            </tr>
+          </thead>
+          {columns.map((col) => {
+            // 親・1 対 1・子・兄弟の順、その中は相手の表と列の順
+            const order = (l: RelationLink) => (l.kind === 'parent' ? (l.a === col ? 0 : 2) : l.kind === 'one-to-one' ? 1 : 3);
+            const ls = mine
+              .filter((l) => l.a === col || l.b === col)
+              .sort((x, y) => order(x) - order(y) || (x.a === col ? x.b : x.a).localeCompare(y.a === col ? y.b : y.a));
+            const os = origins.get(col) ?? [];
+            const ps = params.get(col) ?? [];
+            const key = keyLabel(keys[col]);
+            const span = Math.max(1, ls.length);
+            // 列ごとにまとめる欄（列・鍵・源流・パラメータ）は、つながりの行をまたぐ
+            const lead = (
+              <>
+                <td rowSpan={span} className="relations-grid-col">
+                  <code>{name(col)}</code>
+                </td>
+                <td rowSpan={span}>{key && <span className={isPrimaryKey(keys[col]) ? 'badge pk' : 'badge'}>{key}</span>}</td>
+              </>
+            );
+            const tail = (
+              <>
+                <td rowSpan={span}>{originCell(col, os, key)}</td>
+                <td rowSpan={span}>{paramCell(ps)}</td>
+              </>
+            );
+            return (
+              <tbody
+                key={col}
+                className={['relations-column', isPrimaryKey(keys[col]) ? 'pk' : '', col === focus ? 'focus' : '']
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {ls.length === 0 ? (
+                  <tr>
+                    {lead}
+                    <td colSpan={4} className="hint">
+                      なし
+                    </td>
+                    {tail}
+                  </tr>
+                ) : (
+                  ls.map((l, i) => {
                     const other = l.a === col ? l.b : l.a;
                     const d = describeLink(l, col, keys, s);
                     return (
                       <tr key={`${l.a} ${l.b}`} className={l.disabled ? 'disabled' : undefined}>
+                        {i === 0 && lead}
                         <td className="relation-kind">{d.label}</td>
                         <td>
                           <button type="button" className="link" onClick={() => onGoColumn(other)}>
-                            <code>{s(other)}</code>
+                            <code>{s(tableOf(other))}</code>
                           </button>
+                        </td>
+                        <td>
+                          <code>{other.slice(other.lastIndexOf('.') + 1)}</code>
                           {l.manual && <span className="badge">手動</span>}
                           {l.disabled && <span className="badge muted">無効</span>}
-                          <InfoButton title="判定の理由と根拠の SQL">
-                            <h4>
-                              {d.label} <code>{s(other)}</code>
-                            </h4>
-                            <p>{d.reason}</p>
-                            {l.statements.length > 0 && (
-                              <SqlList
-                                title={`根拠の SQL（${l.statements.length} 件）`}
-                                items={l.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), l.a, l.b) }))}
-                                onOpen={onOpen}
-                              />
-                            )}
-                            <div className="popover-actions">
-                              {l.manual ? (
-                                <button
-                                  type="button"
-                                  className="link"
-                                  onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}
-                                >
-                                  このリレーションを削除
-                                </button>
-                              ) : l.disabled ? (
-                                <button type="button" className="link" onClick={() => onChange({ action: 'enable', a: l.a, b: l.b })}>
-                                  有効に戻す
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="link"
-                                  title="誤ったリレーションを、源流を探すときに使わないようにします"
-                                  onClick={() => onChange({ action: 'disable', a: l.a, b: l.b })}
-                                >
-                                  誤りなので無効にする
-                                </button>
-                              )}
-                            </div>
-                          </InfoButton>
                         </td>
+                        <td>{linkInfo(l, other, d)}</td>
+                        {i === 0 && tail}
                       </tr>
                     );
-                  })}
-                </tbody>
-              </table>
-            )}
-            <p className="relations-origin">
-              <span className="relations-label">源流</span>
-              {os.length > 0 ? (
-                os.map((o) => {
-                  // たどった道筋（この列 → … → 源流）と、その各段のリレーションの根拠の SQL
-                  const chain = [...o.path, o.column];
-                  const steps = chain.slice(1).map((to, k) => {
-                    const from = chain[k];
-                    const l = links.find((x) => (x.a === from && x.b === to) || (x.a === to && x.b === from));
-                    return { from, to, link: l };
-                  });
-                  return (
-                    <span key={o.column} className="relations-origin-item">
-                      <button type="button" className="link" onClick={() => onGoColumn(o.column)}>
-                        <code>{s(o.column)}</code>
-                      </button>
-                      <InfoButton title="源流までの道筋と根拠の SQL">
-                        <h4>
-                          源流 <code>{s(o.column)}</code>
-                        </h4>
-                        <p className="hint">
-                          {o.manual
-                            ? '手で設定したリレーションでたどりました。'
-                            : `この列から、リレーションを ${steps.length} 段たどりました（${o.count} 件の SQL）。`}
-                        </p>
-                        <ol className="popover-path">
-                          {steps.map((st) => (
-                            <li key={`${st.from} ${st.to}`}>
-                              <code>{s(st.from)}</code> → <code>{s(st.to)}</code>
-                              {st.link && (
-                                <span className="hint">
-                                  （{describeLink(st.link, st.from, keys, s).label.replace(/^[→←＝]\s*/, '')}
-                                  {st.link.manual && '、手で設定'}）
-                                </span>
-                              )}
-                              {st.link && st.link.statements.length > 0 && (
-                                <SqlList
-                                  items={st.link.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), st.link!.a, st.link!.b) }))}
-                                  onOpen={onOpen}
-                                />
-                              )}
-                            </li>
-                          ))}
-                        </ol>
-                      </InfoButton>
-                    </span>
-                  );
-                })
-              ) : singleUnique(keys[col]) ? (
-                <span className="hint">この列が源流（{key}）</span>
-              ) : (
-                <span className="hint">なし</span>
-              )}
-            </p>
-            {ps.length > 0 && (
-              <div className="relations-params">
-                <span className="relations-label">比べているパラメータ</span>
-                {[...new Set(ps.map((p) => p.property.slice(p.property.lastIndexOf('.') + 1)))].map((n) => (
-                  <code key={n} className="relations-param-name">
-                    {n}
-                  </code>
-                ))}
-                <InfoButton title="比べている statement">
-                  <SqlList
-                    title={`比べている statement（${ps.length} 件）`}
-                    items={ps.map((p) => ({ id: p.statement, note: p.property }))}
-                    onOpen={onOpen}
-                  />
-                </InfoButton>
-              </div>
-            )}
-          </section>
-        );
-      })}
+                  })
+                )}
+              </tbody>
+            );
+          })}
+        </table>
+      )}
       <h3 className="relations-add-head">リレーションを追加</h3>
       <AddLink
         key={`parent ${table} ${focus}`}
