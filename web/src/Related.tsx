@@ -312,7 +312,7 @@ function RelatedGraph({
           return (
             <g
               key={n.table}
-              className={['node', node.direction === 'start' ? 'center' : '', n.table === selected ? 'selected' : '']
+              className={['node', node.direction === 'start' ? 'origin' : '', n.table === selected ? 'selected' : '']
                 .filter(Boolean)
                 .join(' ')}
               transform={`translate(${n.x},${n.y})`}

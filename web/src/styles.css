@@ -3356,6 +3356,17 @@ div.relations-comment {
   margin: 0 auto;
 }
 
+/* 関連データの起点（ほかと違う色で、はっきり分ける） */
+.related-graph svg .node.origin rect {
+  fill: var(--warn-bg);
+  stroke: var(--warn);
+  stroke-width: 2.5;
+}
+
+.related-graph svg .node.origin .node-name {
+  fill: var(--warn);
+}
+
 .relation-diagram svg .node.selected rect {
   stroke: var(--accent);
   stroke-width: 2.5;
