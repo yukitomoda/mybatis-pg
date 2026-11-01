@@ -1,12 +1,11 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
 // 起点の親（その行が参照する行）は自動で集め、ほかは 1 段ずつ押してたどる。たどった 1 歩ごとに箱を作り、起点を中心にした図で見る
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
 import { DataTable } from './DataTable';
 import { message } from './Execution';
-import type { Laid, TableEdge } from './RelationDiagram';
-import { layoutWithElk, NODE_H, roundedPath } from './RelationDiagram';
+import { NODE_H } from './RelationDiagram';
 
 /** どのつながりでたどったか（たどった元から見た隣の表） */
 type Step = { direction: 'parent' | 'child'; table: string; columns: string[]; otherColumns: string[] };
@@ -110,13 +109,55 @@ async function collectParents(api: Api, connectionId: string, node: RelatedNode,
   }
 }
 
-/** 図の線（子の箱 → 親の箱） */
-function edgesOf(nodes: RelatedNode[]): TableEdge[] {
-  const out: TableEdge[] = [];
+/** 箱の幅（そろえる。長い名前は省く）と、列・行の間 */
+const BOX_W = 170;
+const COL_GAP = 56;
+const ROW_GAP = 18;
+const PAD = 16;
+
+type Placed = { node: RelatedNode; col: number; row: number; x: number; y: number };
+
+/**
+ * 箱の位置を決める（たどっても、すでにある箱は動かない）。起点は 0 列。親をたどった箱は元の箱の 1 列左、子をたどった箱は 1 列右。
+ * 行は、作った順に、その列の空いている行のうち、元の箱と同じ高さかそれより下のいちばん上
+ */
+export function placeNodes(nodes: RelatedNode[]): { placed: Placed[]; width: number; height: number; minCol: number } {
+  const at = new Map<string, { col: number; row: number }>();
+  const used = new Map<number, Set<number>>();
   for (const n of nodes) {
-    if (!n.parent) continue;
-    const [child, parent] = n.direction === 'parent' ? [n.parent, n.id] : [n.id, n.parent];
-    out.push({ from: child, to: parent, kind: 'parent', links: [], statements: 0, manual: false });
+    const p = n.parent ? at.get(n.parent) : undefined;
+    const col = p ? p.col + (n.direction === 'parent' ? -1 : 1) : 0;
+    let row = p ? p.row : 0;
+    const taken = used.get(col) ?? new Set<number>();
+    while (taken.has(row)) row++;
+    taken.add(row);
+    used.set(col, taken);
+    at.set(n.id, { col, row });
+  }
+  const cols = [...at.values()].map((v) => v.col);
+  const minCol = Math.min(0, ...cols);
+  const maxCol = Math.max(0, ...cols);
+  const maxRow = Math.max(0, ...[...at.values()].map((v) => v.row));
+  const placed = nodes.map((node) => {
+    const { col, row } = at.get(node.id)!;
+    return { node, col, row, x: PAD + (col - minCol) * (BOX_W + COL_GAP), y: PAD + row * (NODE_H + ROW_GAP) };
+  });
+  return {
+    placed,
+    minCol,
+    width: PAD * 2 + (maxCol - minCol + 1) * BOX_W + (maxCol - minCol) * COL_GAP,
+    height: PAD * 2 + (maxRow + 1) * NODE_H + maxRow * ROW_GAP,
+  };
+}
+
+/** 箱の名前を、幅に収まるように省く */
+function fit(text: string, max = BOX_W - 16): string {
+  let w = 0;
+  let out = '';
+  for (const ch of text) {
+    w += ch.charCodeAt(0) > 0xff ? 13 : 7.4;
+    if (w > max) return `${out}…`;
+    out += ch;
   }
   return out;
 }
@@ -242,7 +283,7 @@ export function RelatedPane({
   );
 }
 
-/** 集めた箱の図（起点を中心に、親を左、子を右に並べる。箱を押すと選ぶ） */
+/** 集めた箱の図（起点を中心に、親を左、子を右に並べる。たどっても、すでにある箱は動かない。箱を押すと選ぶ） */
 function RelatedGraph({
   nodes,
   selected,
@@ -254,85 +295,81 @@ function RelatedGraph({
   comments: Record<string, string>;
   onSelect: (id: string) => void;
 }) {
-  const [laid, setLaid] = useState<Laid | null>(null);
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const label = (id: string) => {
-    const t = byId.get(id)!.table;
-    return t.slice(t.indexOf('.') + 1);
-  };
-  const sub = (id: string) => {
-    const r = byId.get(id)!.rows;
-    return `${r.rows.length}${r.truncated ? '+' : ''} 行`;
-  };
-  const key = nodes.map((n) => `${n.id}:${n.parent}`).join(',');
-  useEffect(() => {
-    let active = true;
-    // 結果ビューの中では図の場所が横長なので、親を左、子を右に並べる（起点が真ん中に来る）
-    layoutWithElk(
-      nodes.map((n) => n.id),
-      edgesOf(nodes),
-      label,
-      sub,
-      'RIGHT',
-    ).then(
-      (l) => active && setLaid(l),
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [key]);
-
-  // 選んでいる箱が見えるようにスクロールする（配置し直したときと、選び直したとき）
+  const { placed, width, height, minCol } = placeNodes(nodes);
+  const at = new Map(placed.map((p) => [p.node.id, p]));
   const box = useRef<HTMLDivElement>(null);
+
+  // 左に列が増えると図全体が右へずれるので、そのぶんスクロールして、見えている箱をその場に留める
+  const lastMinCol = useRef(minCol);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && minCol < lastMinCol.current) el.scrollLeft += (lastMinCol.current - minCol) * (BOX_W + COL_GAP);
+    lastMinCol.current = minCol;
+  }, [minCol]);
+
+  // 選んでいる箱が見えるようにスクロールする（足したときと、選び直したとき）
+  const sel = selected ? at.get(selected) : undefined;
   useEffect(() => {
     const el = box.current;
-    const n = laid?.nodes.find((x) => x.table === selected);
-    if (!el || !n) return;
-    if (n.x < el.scrollLeft || n.x + n.w > el.scrollLeft + el.clientWidth) el.scrollLeft = n.x + n.w / 2 - el.clientWidth / 2;
-    if (n.y < el.scrollTop || n.y + NODE_H > el.scrollTop + el.clientHeight) el.scrollTop = n.y + NODE_H / 2 - el.clientHeight / 2;
-  }, [laid, selected]);
+    if (!el || !sel) return;
+    if (sel.x < el.scrollLeft || sel.x + BOX_W > el.scrollLeft + el.clientWidth) el.scrollLeft = sel.x + BOX_W / 2 - el.clientWidth / 2;
+    if (sel.y < el.scrollTop || sel.y + NODE_H > el.scrollTop + el.clientHeight) el.scrollTop = sel.y + NODE_H / 2 - el.clientHeight / 2;
+  }, [selected, nodes.length]);
 
-  if (!laid) return <div className="related-graph" />;
   return (
     <div className="related-graph relation-diagram" ref={box}>
-      <svg width={laid.width} height={laid.height} viewBox={`0 0 ${laid.width} ${laid.height}`} role="img" aria-label="集めた表の図">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="集めた表の図">
         <defs>
           <marker id="rg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" className="edge-arrow" />
           </marker>
         </defs>
-        {laid.edges.map(({ points }, i) => (
-          <path key={i} d={roundedPath(points)} className="edge parent" markerStart="url(#rg-arrow)" />
-        ))}
-        {laid.nodes.map((n) => {
-          // 配置の id は箱の id
-          const node = byId.get(n.table);
-          if (!node) return null;
+        {placed.map(({ node, x, y }) => {
+          const p = node.parent ? at.get(node.parent) : undefined;
+          if (!p) return null;
+          // たどった元の箱から、この箱へ（横に並ぶので、向かい合う辺どうしを曲線でつなぐ）
+          const right = x > p.x;
+          const x1 = right ? p.x + BOX_W : p.x;
+          const x2 = right ? x : x + BOX_W;
+          const y1 = p.y + NODE_H / 2;
+          const y2 = y + NODE_H / 2;
+          const bend = (x2 - x1) / 2;
+          // 矢印は、リレーションの親の側（親をたどった箱なら、この箱。子をたどった箱なら、元の箱）
+          const toParent = node.direction === 'parent';
           return (
-            <g
-              key={n.table}
-              className={['node', node.direction === 'start' ? 'origin' : '', n.table === selected ? 'selected' : '']
-                .filter(Boolean)
-                .join(' ')}
-              transform={`translate(${n.x},${n.y})`}
-              onClick={() => onSelect(n.table)}
-            >
-              <title>
-                {[node.table, comments[node.table], node.step && `${node.step.columns.join(', ')} → ${node.step.otherColumns.join(', ')}`]
-                  .filter(Boolean)
-                  .join('\n')}
-              </title>
-              <rect width={n.w} height={NODE_H} rx="6" />
-              <text x={n.w / 2} y={19} className="node-name">
-                {n.label}
-              </text>
-              <text x={n.w / 2} y={36} className="node-sub">
-                {n.sub}
-              </text>
-            </g>
+            <path
+              key={node.id}
+              d={`M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`}
+              className="edge parent"
+              markerEnd={toParent ? 'url(#rg-arrow)' : undefined}
+              markerStart={toParent ? undefined : 'url(#rg-arrow)'}
+            />
           );
         })}
+        {placed.map(({ node, x, y }) => (
+          <g
+            key={node.id}
+            className={['node', node.direction === 'start' ? 'origin' : '', node.id === selected ? 'selected' : '']
+              .filter(Boolean)
+              .join(' ')}
+            transform={`translate(${x},${y})`}
+            onClick={() => onSelect(node.id)}
+          >
+            <title>
+              {[node.table, comments[node.table], node.step && `${node.step.columns.join(', ')} → ${node.step.otherColumns.join(', ')}`]
+                .filter(Boolean)
+                .join('\n')}
+            </title>
+            <rect width={BOX_W} height={NODE_H} rx="6" />
+            <text x={BOX_W / 2} y={19} className="node-name">
+              {fit(node.table.slice(node.table.indexOf('.') + 1))}
+            </text>
+            <text x={BOX_W / 2} y={36} className="node-sub">
+              {node.rows.rows.length}
+              {node.rows.truncated ? '+' : ''} 行
+            </text>
+          </g>
+        ))}
       </svg>
     </div>
   );
