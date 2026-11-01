@@ -6,6 +6,7 @@ import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
 import { CandidatePane } from './Suggest';
+import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
 import { countParts, PartsPanel } from './Subquery';
@@ -68,7 +69,7 @@ function saveTab(tab: Tab) {
 
 // ---- 画面の切り替えと URL ----
 
-type Screen = 'query' | 'globals' | 'bulk' | 'relations' | 'connections';
+type Screen = 'query' | 'globals' | 'bulk' | 'relations' | 'connections' | 'workspace';
 
 const SCREENS: [Screen, string][] = [
   ['query', 'クエリ'],
@@ -76,6 +77,7 @@ const SCREENS: [Screen, string][] = [
   ['bulk', '一括チェック'],
   ['relations', 'リレーション'],
   ['connections', '接続先'],
+  ['workspace', 'ワークスペース'],
 ];
 
 /** リレーションの画面で見ているもの */
@@ -192,6 +194,14 @@ function Workspace({ api }: { api: Api }) {
   const [playgrounds, setPlaygrounds] = useState<PlaygroundEntry[]>([]);
   /** ファイルに保存できない（JAR から読み込んだときなど） */
   const [readOnly, setReadOnly] = useState(false);
+  /** ワークスペースで、保存できないソース（JAR）のファイルの頭 */
+  const [readOnlyPrefixes, setReadOnlyPrefixes] = useState<string[]>([]);
+  /** このファイルは保存できない */
+  const readOnlyFile = (file: string | null) => readOnly || (!!file && readOnlyPrefixes.some((p) => p !== '' && file.startsWith(p)));
+  /** 開いているワークスペースの名前 */
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
+  /** ファイルにソースの名前を付けて見せるときの、ソースの名前（一覧のツリーで 1 段の見出しにする） */
+  const [sourceNames, setSourceNames] = useState<string[]>([]);
   /** プレイグラウンドを作ったり保存したりするたびに増やして、statement 一覧を取り直す */
   const [playgroundVersion, setPlaygroundVersion] = useState(0);
   /** statement を選ばずにエディタで開いているファイル（statement がないプレイグラウンドなど） */
@@ -290,6 +300,9 @@ function Workspace({ api }: { api: Api }) {
         setStatements(r.statements);
         setPlaygrounds(r.playgrounds);
         setReadOnly(r.readOnly);
+        setReadOnlyPrefixes(r.readOnlyPrefixes ?? []);
+        setWorkspaceName(r.workspace ?? null);
+        setSourceNames(r.sources ?? []);
         setLoadErrors(r.loadErrors);
       })
       .catch(handleError);
@@ -609,6 +622,16 @@ function Workspace({ api }: { api: Api }) {
     <div className="app">
       <nav className="topbar">
         <span className="brand">mybatis-pg</span>
+        {workspaceName && (
+          <button
+            type="button"
+            className="workspace-badge"
+            title="ワークスペース（押すと、ソースを変えたり、ほかのワークスペースを開いたりできます）"
+            onClick={() => go('workspace')}
+          >
+            {workspaceName}
+          </button>
+        )}
         {SCREENS.map(([key, label]) => (
           <button
             key={key}
@@ -649,6 +672,7 @@ function Workspace({ api }: { api: Api }) {
             <aside className="sidebar">
               <DraftList drafts={drafts} onOpen={editFile} hasStatements={(file) => statements.some((x) => x.file === file)} />
               <StatementTree
+                sources={sourceNames}
                 statements={statements}
                 playgrounds={playgrounds}
                 onCreatePlayground={createPlayground}
@@ -885,7 +909,7 @@ function Workspace({ api }: { api: Api }) {
                   opener={opener}
                   visible={tab === 'template'}
                   playground={playgroundOf(looseFile)}
-                  readOnly={readOnly}
+                  readOnly={readOnlyFile(looseFile)}
                 />
               ) : selected ? (
                 !templateSeen ? null : editorFile ? (
@@ -899,7 +923,7 @@ function Workspace({ api }: { api: Api }) {
                     opener={opener}
                     visible={tab === 'template'}
                     playground={playgroundOf(editorFile)}
-                    readOnly={readOnly}
+                    readOnly={readOnlyFile(editorFile)}
                   />
                 ) : (
                   <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
@@ -967,6 +991,19 @@ function Workspace({ api }: { api: Api }) {
         <ConnectionsScreen conn={conn} />
       </div>
 
+      <div className="screen scroll" hidden={screen !== 'workspace'}>
+        <WorkspaceScreen
+          api={api}
+          active={screen === 'workspace'}
+          onOpened={() => {
+            // 別のワークスペースは、statement・接続先・共通パラメータなどがすべて違うので、画面を読み込み直す
+            window.location.hash = '#/workspace';
+            window.location.reload();
+          }}
+          onSaved={conn.reload}
+        />
+      </div>
+
       <ResultView
         rv={rv}
         api={api}
@@ -1032,6 +1069,7 @@ function saveToggled(keys: Set<string>) {
 
 function StatementTree({
   statements,
+  sources,
   playgrounds,
   onCreatePlayground,
   selected,
@@ -1041,6 +1079,8 @@ function StatementTree({
   onCollapse,
 }: {
   statements: StatementEntry[];
+  /** ワークスペースのソースの名前（ツリーで 1 段の見出しにする） */
+  sources: string[];
   /** 一覧を閉じる */
   onCollapse: () => void;
   playgrounds: PlaygroundEntry[];
@@ -1056,7 +1096,7 @@ function StatementTree({
   const [toggled, setToggled] = useState(loadToggled);
   const filtering = filter.trim() !== '';
   const project = useMemo(() => statements.filter((s) => !s.playground), [statements]);
-  const tree = useMemo(() => buildTree(filterEntries(project, filter)), [project, filter]);
+  const tree = useMemo(() => buildTree(filterEntries(project, filter), sources), [project, filter, sources]);
   // プレイグラウンドは、ファイルの代わりに名前で並べる（絞り込んでいるときは、当たるものだけ）
   const playgroundNodes = useMemo<TreeNode[]>(() => {
     const matched = new Set(
@@ -1096,7 +1136,15 @@ function StatementTree({
   useEffect(() => {
     if (!selected || !loaded) return;
     const s = statements.find((x) => x.id === selected);
-    const keys = s?.playground ? [s.file] : pathTo(buildTree(statements.filter((x) => !x.playground)), selected);
+    const keys = s?.playground
+      ? [s.file]
+      : pathTo(
+          buildTree(
+            statements.filter((x) => !x.playground),
+            sources,
+          ),
+          selected,
+        );
     update((next) => {
       for (const k of keys) {
         if (k.endsWith('/')) next.delete(k);
@@ -1112,9 +1160,15 @@ function StatementTree({
         return (
           <li key={n.key}>
             <div className="node-line">
-              <button type="button" className={`node ${n.kind}`} aria-expanded={open} onClick={() => toggle(n)} title={n.key}>
+              <button
+                type="button"
+                className={n.kind === 'dir' && n.source ? 'node dir source' : `node ${n.kind}`}
+                aria-expanded={open}
+                onClick={() => toggle(n)}
+                title={n.kind === 'dir' && n.source ? `ソース: ${n.label}` : n.key}
+              >
                 <span className="twisty">{open ? '▾' : '▸'}</span>
-                {n.kind === 'dir' ? n.label + '/' : n.label}
+                {n.kind === 'dir' ? (n.source ? n.label : n.label + '/') : n.label}
                 {n.kind === 'file' && brokenPlaygrounds.has(n.key) && (
                   <span className="warn-mark" title="XML を読み込めません" aria-label="読み込めません">
                     ⚠

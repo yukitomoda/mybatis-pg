@@ -13,7 +13,7 @@ export interface StatementEntry {
 }
 
 export type TreeNode =
-  | { kind: 'dir'; key: string; label: string; children: TreeNode[] }
+  | { kind: 'dir'; key: string; label: string; children: TreeNode[]; source?: boolean }
   | { kind: 'file'; key: string; label: string; statements: StatementEntry[] };
 
 interface RawDir {
@@ -26,8 +26,9 @@ const emptyDir = (): RawDir => ({ dirs: new Map(), files: new Map() });
 /**
  * ファイルのパスからツリーを作る。
  * 子が 1 つしかないディレクトリは、子とまとめて 1 つの項目（例: src/main/、mapper/UserMapper.xml）にする。
+ * sources（ワークスペースのソースの名前）に当たるいちばん上のディレクトリは、まとめずに 1 段の見出しにする。
  */
-export function buildTree(entries: StatementEntry[]): TreeNode[] {
+export function buildTree(entries: StatementEntry[], sources: string[] = []): TreeNode[] {
   const root = emptyDir();
   for (const e of entries) {
     // 絶対パスの先頭の / は、最初のディレクトリ名に含める
@@ -50,7 +51,17 @@ export function buildTree(entries: StatementEntry[]): TreeNode[] {
     list.push(e);
     dir.files.set(fileName, list);
   }
-  return children(root, '');
+  if (sources.length === 0) return children(root, '');
+  // ソースの名前のディレクトリは、ソースの順に、まとめずに出す
+  const out: TreeNode[] = [];
+  for (const name of sources) {
+    const d = root.dirs.get(name);
+    if (!d) continue;
+    root.dirs.delete(name);
+    const key = name + '/';
+    out.push({ kind: 'dir', key, label: name, children: children(d, key), source: true });
+  }
+  return [...out, ...children(root, '')];
 }
 
 function children(dir: RawDir, prefix: string): TreeNode[] {

@@ -92,7 +92,8 @@ public final class ConnectionStore {
   /**
    * ワークスペースのプロジェクト（名前ごとのディレクトリ）の設定のデータソースを接続先にする。
    * プロジェクトが 1 つなら、id と名前は useProject と同じ（前の設定や解析の結果をそのまま使う）。
-   * 2 つ以上なら、重ならないように id と名前にプロジェクトの名前を付ける（project:名前/default、名前: application.yml）
+   * 2 つ以上なら、名前にプロジェクトの名前を付ける（名前: application.yml）。id は、最初のプロジェクトは変えず（ソースを足しても、
+   * その接続先で解析したリレーションや、画面で選んでいた接続先をそのまま使う）、2 つ目からは重ならないように名前を付ける（project:名前/default）
    */
   public void useProjects(java.util.Map<String, Path> projects) {
     if (projects.size() == 1) {
@@ -102,11 +103,13 @@ public final class ConnectionStore {
     java.util.Map<String, Path> fixed = new java.util.LinkedHashMap<>(projects);
     this.projectSources = () -> {
       List<ProjectDataSources.Source> out = new java.util.ArrayList<>();
+      boolean first = true;
       for (java.util.Map.Entry<String, Path> e : fixed.entrySet()) {
         for (ProjectDataSources.Source s : ProjectDataSources.read(e.getValue(), System.getenv(), System.getProperties())) {
-          out.add(new ProjectDataSources.Source(ProjectDataSources.PREFIX + e.getKey() + "/" + s.id.substring(ProjectDataSources.PREFIX.length()),
-              e.getKey() + ": " + s.name, e.getKey() + "/" + s.file, s.url, s.user, s.password, s.error));
+          String id = first ? s.id : ProjectDataSources.PREFIX + e.getKey() + "/" + s.id.substring(ProjectDataSources.PREFIX.length());
+          out.add(new ProjectDataSources.Source(id, e.getKey() + ": " + s.name, e.getKey() + "/" + s.file, s.url, s.user, s.password, s.error));
         }
+        first = false;
       }
       return out;
     };

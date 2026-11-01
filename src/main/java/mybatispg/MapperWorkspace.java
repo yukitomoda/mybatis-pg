@@ -38,6 +38,8 @@ public final class MapperWorkspace {
     final Path jar;
     /** プロジェクトのディレクトリ（application.yml のデータソースを接続先にする）。プロジェクトでなければ null */
     final Path projectDir;
+    /** ソースの名前を付けて見せるときの基準（プロジェクトなら mapper を探す src/main/resources など。ほかは baseDir） */
+    final Path displayBase;
 
     Part(String name, String type, Supplier<List<Path>> files, List<Path> watchRoots, Path baseDir, boolean readOnly, Path jar,
         Path projectDir) {
@@ -49,6 +51,8 @@ public final class MapperWorkspace {
       this.readOnly = readOnly;
       this.jar = jar;
       this.projectDir = projectDir;
+      Path common = projectDir != null ? commonAncestor(watchRoots) : null;
+      this.displayBase = common != null && common.startsWith(baseDir) ? common : baseDir;
     }
   }
 
@@ -293,8 +297,11 @@ public final class MapperWorkspace {
     if (owner == null) {
       return file.toString().replace('\\', '/');
     }
-    String rel = owner.baseDir.relativize(file).toString().replace('\\', '/');
-    return prefixed || ps.size() > 1 ? owner.name + "/" + rel : rel;
+    if (prefixed || ps.size() > 1) {
+      Path base = file.startsWith(owner.displayBase) && !file.equals(owner.displayBase) ? owner.displayBase : owner.baseDir;
+      return owner.name + "/" + base.relativize(file).toString().replace('\\', '/');
+    }
+    return owner.baseDir.relativize(file).toString().replace('\\', '/');
   }
 
   /** ファイルを含むソース（基準がいちばん深いもの）。なければ null */
@@ -307,6 +314,18 @@ public final class MapperWorkspace {
       }
     }
     return owner;
+  }
+
+  /** ファイルにソースの名前を付けて見せるときの、ソースの名前（付けないなら空） */
+  public List<String> sourceNames() {
+    List<String> out = new ArrayList<>();
+    List<Part> ps = parts;
+    if (prefixed || ps.size() > 1) {
+      for (Part p : ps) {
+        out.add(p.name);
+      }
+    }
+    return out;
   }
 
   public String projectKey() {

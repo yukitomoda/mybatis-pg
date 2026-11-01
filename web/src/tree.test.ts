@@ -73,3 +73,22 @@ describe('pathTo と filterEntries', () => {
     expect(filterEntries(entries, ' ')).toBe(entries);
   });
 });
+
+describe('ワークスペースのソース', () => {
+  it('ソースの名前のディレクトリは、子とまとめずに 1 段の見出しにし、ソースの順に並べる', () => {
+    const tree = buildTree(
+      [
+        { id: 'b.A.x', file: 'batch/mapper/batch/A.xml' },
+        { id: 'o.B.y', file: 'order-api/mapper/shop/B.xml' },
+        { id: 'o.C.z', file: 'order-api/mapper/erp/C.xml' },
+      ],
+      ['order-api', 'batch'],
+    );
+    expect(tree.map((n) => [n.label, n.kind === 'dir' && n.source])).toEqual([
+      ['order-api', true],
+      ['batch', true],
+    ]);
+    const batch = tree[1];
+    expect(batch.kind === 'dir' && batch.children.map((n) => n.label)).toEqual(['mapper/batch/A.xml']);
+  });
+});

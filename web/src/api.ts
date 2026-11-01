@@ -27,7 +27,32 @@ export interface StatementsResponse {
   playgrounds: PlaygroundEntry[];
   /** ファイルに保存できない（JAR から読み込んだときなど） */
   readOnly: boolean;
+  /** ワークスペースで、保存できないソース（JAR）のファイルの頭（「ソースの名前/」） */
+  readOnlyPrefixes?: string[];
+  /** 開いているワークスペースの名前 */
+  workspace?: string | null;
+  /** ファイルにソースの名前を付けて見せるときの、ソースの名前（付けないなら空） */
+  sources?: string[];
   loadErrors: LoadError[];
+}
+
+/** ワークスペースのソース */
+export interface WorkspaceSource {
+  id?: string;
+  name: string;
+  /** project: Spring Boot のプロジェクト、jar: JAR・war、files: mapper XML のファイルかディレクトリ */
+  type: 'project' | 'jar' | 'files';
+  path: string;
+  enabled: boolean;
+  /** 使えない理由（パスがないなど） */
+  error?: string | null;
+  /** 読んだ mapper XML の数（無効なら null、読めなければ -1） */
+  files?: number | null;
+}
+
+export interface WorkspaceSnapshot {
+  current: { id: string; name: string; sources: WorkspaceSource[] } | null;
+  workspaces: { id: string; name: string; sources: number; current: boolean }[];
 }
 
 /** パラメータと比べられている列（推論） */
@@ -304,6 +329,20 @@ export function createApi(token: string) {
 
   return {
     statements: () => call<StatementsResponse>('api/statements'),
+    /** 開いているワークスペースと、ワークスペースの一覧 */
+    workspace: () => call<WorkspaceSnapshot>('api/workspace'),
+    /** 開いているワークスペースの名前とソースを保存する（読み込み直す） */
+    saveWorkspace: (name: string, sources: WorkspaceSource[]) =>
+      call<WorkspaceSnapshot>(
+        'api/workspace/save',
+        post(JSON.stringify({ name, sources: sources.map(({ id, name, type, path, enabled }) => ({ id, name, type, path, enabled })) })),
+      ),
+    /** ワークスペースを開く */
+    openWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/open', post(JSON.stringify({ id }))),
+    /** ワークスペースを作って開く */
+    createWorkspace: (name: string) => call<WorkspaceSnapshot>('api/workspace/create', post(JSON.stringify({ name }))),
+    /** ワークスペースを消す（開いているものは消せない） */
+    deleteWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/delete', post(JSON.stringify({ id }))),
     parameters: (id: string, draft: DraftParam = null) =>
       draft
         ? call<ParametersResponse>('api/parameters', post(JSON.stringify({ id, draft })))

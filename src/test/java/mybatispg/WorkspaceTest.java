@@ -58,6 +58,7 @@ class WorkspaceTest {
         source("none", Workspaces.FILES, RES.resolve("no-such")));
     ws.configure(def);
     assertEquals("users/UserMapper.xml", ws.displayPath(user.toString()));
+    assertEquals(Arrays.asList("users"), ws.sourceNames());
     assertFalse(ws.renderer().statementIds().stream().anyMatch(id -> id.startsWith("sample.ParamMapper.")));
   }
 
@@ -129,6 +130,28 @@ class WorkspaceTest {
     } finally {
       server.stop();
     }
+  }
+
+  @Test
+  void プロジェクトが2つ以上なら_接続先の名前にプロジェクトの名前を付け_2つ目からはidにも付ける(@TempDir Path dir) throws Exception {
+    java.util.Map<String, Path> projects = new java.util.LinkedHashMap<>();
+    for (String n : new String[] {"order-api", "batch"}) {
+      Path res = dir.resolve(n).resolve("src/main/resources");
+      java.nio.file.Files.createDirectories(res);
+      java.nio.file.Files.write(res.resolve("application.yml"),
+          "spring:\n  datasource:\n    url: jdbc:postgresql://127.0.0.1:5432/app\n    username: u\n".getBytes(StandardCharsets.UTF_8));
+      projects.put(n, dir.resolve(n));
+    }
+    ConnectionStore store = ConnectionStore.inMemory();
+    store.useProjects(projects);
+    List<String> got = new ArrayList<>();
+    for (ConnectionStore.Profile p : store.list()) {
+      got.add(p.id + " " + p.name);
+    }
+    assertEquals(Arrays.asList("project:default order-api: application.yml", "project:batch/default batch: application.yml"), got);
+    // 1 つなら、前と同じ
+    store.useProjects(java.util.Collections.singletonMap("order-api", dir.resolve("order-api")));
+    assertEquals("project:default application.yml", store.list().get(0).id + " " + store.list().get(0).name);
   }
 
   private static String str(Path p) {

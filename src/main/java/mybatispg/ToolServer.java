@@ -767,6 +767,8 @@ public final class ToolServer {
     body.put("readOnly", workspace.isReadOnly());
     // ワークスペースで、保存できないソース（JAR）のファイルの頭（「ソースの名前/」）
     body.put("readOnlyPrefixes", workspace.readOnlyPrefixes());
+    // ファイルにソースの名前を付けて見せるときの、ソースの名前（一覧のツリーで、1 段の見出しにする）
+    body.put("sources", workspace.sourceNames());
     Workspaces.Def def = currentWorkspace;
     body.put("workspace", def == null ? null : def.name);
     body.put("loadErrors", renderer.getLoadErrors());
