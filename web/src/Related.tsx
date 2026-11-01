@@ -1,9 +1,11 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
 // 親（その行が参照する行）は自動で集め、子（その行を参照する行）は 1 段ずつ押してたどる
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
 import { DataTable } from './DataTable';
+import type { Laid, TableEdge } from './RelationDiagram';
+import { layoutWithElk, NODE_H, roundedPath } from './RelationDiagram';
 import { message } from './Execution';
 
 /** 集めた表（ツリーの 1 つの項目） */
@@ -28,6 +30,7 @@ export interface RelatedEntry {
   /** 一覧に出す名前（erp.projects id=5 など） */
   label: string;
   nodes: RelatedNode[];
+  /** 選んでいる表（schema.table） */
   selected: string | null;
   /** 集めている途中 */
   busy: boolean;
@@ -152,8 +155,6 @@ async function collectParents(
   }
 }
 
-const LABEL = { start: '起点', parent: '親', child: '子' } as const;
-
 export function RelatedPane({
   api,
   entry,
@@ -167,7 +168,9 @@ export function RelatedPane({
   onCell?: (text: string | null, type: string) => void;
 }) {
   const comments = useDbComments(api, entry.connectionId);
-  const add = (n: RelatedNode) => update((e) => ({ ...e, nodes: [...e.nodes, n], selected: e.selected ?? n.id }));
+  // 子をたどったら、その子の表を選ぶ（親は自動で集めるので、選んでいる表は変えない）
+  const add = (n: RelatedNode) =>
+    update((e) => ({ ...e, nodes: [...e.nodes, n], selected: n.direction === 'child' ? n.table : (e.selected ?? n.table) }));
   const run = (f: () => Promise<void>) => {
     update((e) => ({ ...e, busy: true, error: null }));
     f().then(
@@ -180,35 +183,44 @@ export function RelatedPane({
     if (entry.nodes.length === 0 && !entry.busy && !entry.error) run(() => startRelated(api, entry, add));
   }, [entry.key]);
 
-  const node = entry.nodes.find((n) => n.id === entry.selected) ?? entry.nodes[0];
-  // 選んだ項目の子（まだたどっていないもの）
+  // 表ごとにまとめた行と、表どうしの線（どの経路で集めたかによらず、表は 1 つにまとめる）
+  const tables = useMemo(() => mergeByTable(entry.nodes), [entry.nodes]);
+  const edges = useMemo(() => edgesOf(entry.nodes), [entry.nodes]);
+  const selected = entry.selected && tables.has(entry.selected) ? entry.selected : entry.table;
+  const merged = tables.get(selected);
+  // 子をたどるときの元（選んだ表の、集めた行すべて）
+  const node: RelatedNode | undefined = merged && {
+    id: entry.nodes.find((n) => n.table === selected)!.id,
+    table: selected,
+    parent: null,
+    direction: 'start',
+    via: '',
+    rows: merged,
+  };
+  // 選んだ表の子（まだたどっていないもの）
   const [children, setChildren] = useState<RelatedNeighbor[]>([]);
   useEffect(() => {
     setChildren([]);
-    if (!node) return;
+    if (!merged) return;
     let active = true;
-    neighborsOf(api, entry.connectionId, node.table).then(
+    neighborsOf(api, entry.connectionId, selected).then(
       (ns) => active && setChildren(ns.filter((n) => n.direction === 'child')),
       () => undefined,
     );
     return () => {
       active = false;
     };
-  }, [node?.id]);
+  }, [selected, !!merged]);
+  const tableOfNode = new Map(entry.nodes.map((n) => [n.id, n.table]));
   const expanded = (n: RelatedNeighbor) =>
     entry.nodes.some(
-      (x) => x.parent === node?.id && x.direction === 'child' && x.table === n.table && x.via.startsWith(n.otherColumns.join(', ')),
+      (x) =>
+        x.direction === 'child' &&
+        x.table === n.table &&
+        x.parent !== null &&
+        tableOfNode.get(x.parent) === selected &&
+        x.via.startsWith(n.otherColumns.join(', ')),
     );
-
-  // ツリーの並び（親子の順。深さで字下げする）
-  const ordered: { n: RelatedNode; depth: number }[] = [];
-  const walk = (parent: string | null, depth: number) => {
-    for (const n of entry.nodes.filter((x) => x.parent === parent)) {
-      ordered.push({ n, depth });
-      walk(n.id, depth + 1);
-    }
-  };
-  walk(null, 0);
 
   return (
     <div className="related">
@@ -220,32 +232,19 @@ export function RelatedPane({
       </div>
       {entry.error && <pre className="render-error">{entry.error}</pre>}
       <div className="related-body">
-        <ul className="related-tree">
-          {ordered.map(({ n, depth }) => (
-            <li key={n.id}>
-              <button
-                type="button"
-                className={n.id === node?.id ? 'selected' : undefined}
-                style={{ paddingLeft: `${0.4 + depth * 0.9}rem` }}
-                title={[n.table, comments.tables[n.table], n.via].filter(Boolean).join('\n')}
-                onClick={() => update((e) => ({ ...e, selected: n.id }))}
-              >
-                <span className={`related-kind ${n.direction}`}>{LABEL[n.direction]}</span>
-                <span className="related-table">{n.table.slice(n.table.indexOf('.') + 1)}</span>
-                <span className="count">
-                  {n.rows.rows.length}
-                  {n.rows.truncated && n.rows.total !== null ? `/${n.rows.total}` : ''}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <RelatedGraph
+          tables={tables}
+          edges={edges}
+          start={entry.table}
+          selected={selected}
+          comments={comments.tables}
+          onSelect={(t) => update((e) => ({ ...e, selected: t }))}
+        />
         {node && (
           <div className="related-detail">
             <div className="related-node-head">
               <code>{node.table}</code>
               {comments.tables[node.table] && <span className="relations-comment">{comments.tables[node.table]}</span>}
-              {node.via && <span className="hint">{node.via}</span>}
             </div>
             {children.length > 0 && (
               <div className="related-children">
@@ -281,6 +280,122 @@ export function RelatedPane({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 表ごとにまとめた行（同じ行は 1 つに） */
+function mergeByTable(nodes: RelatedNode[]): Map<string, RelatedRows> {
+  const out = new Map<string, RelatedRows & { seen: Set<string> }>();
+  for (const n of nodes) {
+    let t = out.get(n.table);
+    if (!t) {
+      t = { ...n.rows, rows: [], truncated: false, total: null, seen: new Set() };
+      out.set(n.table, t);
+    }
+    t.truncated ||= n.rows.truncated;
+    for (const r of n.rows.rows) {
+      const k = JSON.stringify(r);
+      if (!t.seen.has(k)) {
+        t.seen.add(k);
+        t.rows.push(r);
+      }
+    }
+  }
+  return new Map([...out].map(([k, { seen: _seen, ...rows }]) => [k, rows]));
+}
+
+/** 表どうしの線（子の表 → 親の表。どの列でたどったかをまとめる） */
+function edgesOf(nodes: RelatedNode[]): TableEdge[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const out = new Map<string, TableEdge>();
+  for (const n of nodes) {
+    const p = n.parent ? byId.get(n.parent) : undefined;
+    if (!p) continue;
+    // 親としてたどったなら n が親、子としてたどったなら n が子
+    const [child, parent] = n.direction === 'parent' ? [p.table, n.table] : [n.table, p.table];
+    const key = `${child}\u0000${parent}\u0000${n.via}`;
+    if (!out.has(key)) out.set(key, { from: child, to: parent, kind: 'parent', links: [], statements: 0, manual: false });
+  }
+  return [...out.values()];
+}
+
+/** 集めた表の図（箱を押すと、その表を選ぶ） */
+function RelatedGraph({
+  tables,
+  edges,
+  start,
+  selected,
+  comments,
+  onSelect,
+}: {
+  tables: Map<string, RelatedRows>;
+  edges: TableEdge[];
+  start: string;
+  selected: string;
+  comments: Record<string, string>;
+  onSelect: (table: string) => void;
+}) {
+  const [laid, setLaid] = useState<Laid | null>(null);
+  const names = [...tables.keys()];
+  const label = (t: string) => t.slice(t.indexOf('.') + 1);
+  const sub = (t: string) => {
+    const r = tables.get(t)!;
+    return `${r.rows.length}${r.truncated ? '+' : ''} 行`;
+  };
+  const key = names.join(',') + '|' + names.map(sub).join(',') + '|' + edges.map((e) => `${e.from}>${e.to}`).join(',');
+  useEffect(() => {
+    let active = true;
+    // 結果ビューの中では図の場所が横長なので、親を左、子を右に並べる
+    layoutWithElk(names, edges, label, sub, 'RIGHT').then(
+      (l) => active && setLaid(l),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [key]);
+  // 選んでいる表が見えるようにスクロールする（配置し直したときと、選び直したとき）
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    const n = laid?.nodes.find((x) => x.table === selected);
+    if (!el || !n) return;
+    const left = n.x + n.w / 2 - el.clientWidth / 2;
+    const top = n.y + NODE_H / 2 - el.clientHeight / 2;
+    if (n.x < el.scrollLeft || n.x + n.w > el.scrollLeft + el.clientWidth) el.scrollLeft = left;
+    if (n.y < el.scrollTop || n.y + NODE_H > el.scrollTop + el.clientHeight) el.scrollTop = top;
+  }, [laid, selected]);
+  if (!laid) return <div className="related-graph" />;
+  return (
+    <div className="related-graph relation-diagram" ref={box}>
+      <svg width={laid.width} height={laid.height} viewBox={`0 0 ${laid.width} ${laid.height}`} role="img" aria-label="集めた表の図">
+        <defs>
+          <marker id="rg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" className="edge-arrow" />
+          </marker>
+        </defs>
+        {laid.edges.map(({ points }, i) => (
+          <path key={i} d={roundedPath(points)} className="edge parent" markerStart="url(#rg-arrow)" />
+        ))}
+        {laid.nodes.map((n) => (
+          <g
+            key={n.table}
+            className={['node', n.table === start ? 'center' : '', n.table === selected ? 'selected' : ''].filter(Boolean).join(' ')}
+            transform={`translate(${n.x},${n.y})`}
+            onClick={() => onSelect(n.table)}
+          >
+            <title>{[n.table, comments[n.table]].filter(Boolean).join('\n')}</title>
+            <rect width={n.w} height={NODE_H} rx="6" />
+            <text x={n.w / 2} y={19} className="node-name">
+              {n.label}
+            </text>
+            <text x={n.w / 2} y={36} className="node-sub">
+              {n.sub}
+            </text>
+          </g>
+        ))}
+      </svg>
     </div>
   );
 }

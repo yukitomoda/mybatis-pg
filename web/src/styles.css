@@ -3327,75 +3327,38 @@ div.relations-comment {
 }
 
 .related-body {
-  display: grid;
-  grid-template-columns: minmax(10rem, 14rem) 1fr;
-  gap: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   flex: 1;
   min-height: 0;
   margin-top: 0.4rem;
 }
 
-.related-tree {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* 集めた表の図（上）。表の行（下）に場所を残す */
+.related-graph {
+  flex: 0 0 45%;
+  min-height: 8rem;
   overflow: auto;
-  border-right: 1px solid var(--border);
-}
-
-.related-tree button {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  width: 100%;
-  padding: 0.15rem 0.4rem;
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: var(--text);
-  font-size: 12px;
-  text-align: left;
-}
-
-.related-tree button:hover {
-  background: var(--code-bg);
-}
-
-.related-tree button.selected {
-  background: var(--accent-bg);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.related-tree .related-table {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-}
-
-.related-tree .count {
-  color: var(--muted);
-}
-
-.related-kind {
-  flex: none;
-  padding: 0 0.25rem;
-  border-radius: 3px;
-  font-size: 11px;
-  color: var(--muted);
   border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
 }
 
-.related-kind.parent {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+/* 関係図の CSS（縦に並べる flex）で図が縮まないようにする */
+.related-graph.relation-diagram {
+  display: block;
 }
 
-.related-kind.child {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+.related-graph > svg {
+  display: block;
+  flex: none;
+  margin: 0 auto;
+}
+
+.relation-diagram svg .node.selected rect {
+  stroke: var(--accent);
+  stroke-width: 2.5;
 }
 
 .related-detail {

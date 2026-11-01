@@ -85,24 +85,26 @@ export function neighborhood(center: string, edges: TableEdge[], depth: number, 
   return { shown, hidden };
 }
 
-const NODE_H = 46;
+export const NODE_H = 46;
 /** 文字の幅（px）。全角の文字は、半角の倍近くで数える */
 const textWidth = (text: string, half: number) => [...text].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? half * 1.75 : half), 0);
 const nodeWidth = (label: string, sub: string) => Math.min(300, Math.max(120, Math.max(textWidth(label, 7.4), textWidth(sub, 6.4)) + 24));
 
 type Placed = { table: string; x: number; y: number; w: number; label: string; sub: string };
 type Routed = { edge: TableEdge; points: { x: number; y: number }[] };
-type Laid = { nodes: Placed[]; edges: Routed[]; width: number; height: number };
+export type Laid = { nodes: Placed[]; edges: Routed[]; width: number; height: number };
 
 /** ELK は大きいので、図を開いたときに読み込む */
 let elk: Promise<{ layout: (g: ElkNode) => Promise<ElkNode> }> | null = null;
 const loadElk = () => (elk ??= import('elkjs/lib/elk.bundled.js').then((m) => new m.default()));
 
-async function layoutWithElk(
+export async function layoutWithElk(
   tables: string[],
   edges: TableEdge[],
   label: (t: string) => string,
   sub: (t: string) => string,
+  /** DOWN: 親を上に、RIGHT: 親を左に */
+  direction: 'DOWN' | 'RIGHT' = 'DOWN',
 ): Promise<Laid> {
   const engine = await loadElk();
   const graph: ElkNode = {
@@ -110,7 +112,7 @@ async function layoutWithElk(
     layoutOptions: {
       'elk.algorithm': 'layered',
       // 親を上に（線は親 → 子の向きで渡す）
-      'elk.direction': 'DOWN',
+      'elk.direction': direction,
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.nodeNode': '36',
       'elk.layered.spacing.nodeNodeBetweenLayers': '64',
@@ -149,7 +151,7 @@ async function layoutWithElk(
 }
 
 /** 折れ線を、角を丸めた path にする */
-function roundedPath(points: { x: number; y: number }[], r = 8): string {
+export function roundedPath(points: { x: number; y: number }[], r = 8): string {
   if (points.length < 2) return '';
   let d = `M${points[0].x},${points[0].y}`;
   for (let i = 1; i < points.length - 1; i++) {
