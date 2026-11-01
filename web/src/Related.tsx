@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
-import { DataTable } from './DataTable';
+import { DataTable, downloadCsv } from './DataTable';
 import { message } from './Execution';
 
 /** 集めた表（ツリーの 1 つの項目） */
@@ -172,21 +172,6 @@ function byTable(nodes: RelatedNode[]): { table: string; columns: string[]; rows
   return [...out.values()].map(({ table, columns, rows }) => ({ table, columns, rows }));
 }
 
-/** CSV（Excel で開けるよう、先頭に BOM を付ける。NULL は空） */
-function toCsv(columns: string[], rows: (string | null)[][]): string {
-  const cell = (v: string | null) => (v === null ? '' : /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return '﻿' + [columns, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
-}
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 const LABEL = { start: '起点', parent: '親', child: '子' } as const;
 
 export function RelatedPane({
@@ -253,22 +238,6 @@ export function RelatedPane({
           関連データ <code>{entry.label}</code>
         </h3>
         {entry.busy && <span className="hint">集めています…</span>}
-        <span className="spacer" />
-        {tables.length > 0 && (
-          <details className="related-export">
-            <summary>CSV で書き出す</summary>
-            <div className="related-export-list">
-              {tables.map((t) => (
-                <button key={t.table} type="button" className="link" onClick={() => download(`${t.table}.csv`, toCsv(t.columns, t.rows))}>
-                  {t.table}（{t.rows.length} 行）
-                </button>
-              ))}
-              <button type="button" onClick={() => tables.forEach((t) => download(`${t.table}.csv`, toCsv(t.columns, t.rows)))}>
-                すべて
-              </button>
-            </div>
-          </details>
-        )}
       </div>
       {entry.error && <pre className="render-error">{entry.error}</pre>}
       <div className="related-body">
@@ -329,6 +298,14 @@ export function RelatedPane({
               truncated={node.rows.truncated}
               titles={node.rows.columns.map((c) => comments.columns[`${node.table}.${c}`])}
               onCell={onCell}
+              csvName={node.table}
+              menuItems={[
+                {
+                  label: 'すべての表を CSV で書き出す',
+                  title: '集めた表ごとに、CSV のファイルで保存します',
+                  onSelect: () => tables.forEach((t) => downloadCsv(`${t.table}.csv`, t.columns, t.rows)),
+                },
+              ]}
             />
           </div>
         )}

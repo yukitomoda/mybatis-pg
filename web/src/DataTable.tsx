@@ -35,6 +35,8 @@ export function DataTable({
   truncated,
   titles,
   onRow,
+  csvName,
+  menuItems,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -56,6 +58,10 @@ export function DataTable({
   titles?: (string | undefined)[];
   /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
   onRow?: (index: number) => void;
+  /** CSV で書き出すときのファイル名（拡張子なし。既定は result） */
+  csvName?: string;
+  /** 「⋯」のメニューに足す項目 */
+  menuItems?: MenuItem[];
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
@@ -131,7 +137,20 @@ export function DataTable({
         {actions}
         {copied && <span className="hint">コピーしました</span>}
         <TableMenu
-          items={[{ label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: copy }]}
+          items={[
+            { label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: copy },
+            {
+              label: 'CSV で書き出す',
+              title: '見えている行を、CSV のファイルで保存します',
+              onSelect: () =>
+                downloadCsv(
+                  `${csvName ?? 'result'}.csv`,
+                  columns,
+                  order.map((i) => rows[i]),
+                ),
+            },
+            ...(menuItems ?? []),
+          ]}
         />
       </div>
       <div className="data-table-scroll">
@@ -212,7 +231,26 @@ export function DataTable({
 }
 
 /** 表の操作のメニュー（⋯ を押すと開く。項目を選ぶか、外を押すと閉じる） */
-function TableMenu({ items }: { items: { label: string; title?: string; onSelect: () => void }[] }) {
+/** 表の「⋯」のメニューの項目 */
+export type MenuItem = { label: string; title?: string; onSelect: () => void };
+
+/** CSV（Excel で開けるよう、先頭に BOM を付ける。NULL は空） */
+export function toCsv(columns: string[], rows: (string | null)[][]): string {
+  const cell = (v: string | null) => (v === null ? '' : /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  return '\ufeff' + [columns, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+}
+
+/** CSV のファイルで保存する */
+export function downloadCsv(name: string, columns: string[], rows: (string | null)[][]) {
+  const url = URL.createObjectURL(new Blob([toCsv(columns, rows)], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function TableMenu({ items }: { items: MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {

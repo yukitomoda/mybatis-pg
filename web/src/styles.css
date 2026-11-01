@@ -3326,36 +3326,6 @@ div.relations-comment {
   margin: 0;
 }
 
-.related-head .spacer {
-  flex: 1;
-}
-
-.related-export {
-  position: relative;
-  font-size: 13px;
-}
-
-.related-export summary {
-  cursor: pointer;
-  color: var(--accent);
-}
-
-.related-export-list {
-  position: absolute;
-  right: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.2rem;
-  min-width: 14rem;
-  padding: 0.5rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
-}
-
 .related-body {
   display: grid;
   grid-template-columns: minmax(10rem, 14rem) 1fr;
