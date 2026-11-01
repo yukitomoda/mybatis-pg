@@ -2,6 +2,7 @@
 // 線は箱を避けた縦横の折れ線にし、表にマウスを乗せるとその表の線だけを強調する。
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { RelationLink } from './api';
 import { CommentsContext } from './comments';
@@ -189,6 +190,8 @@ export function RelationDiagram({
   const [open, setOpen] = useState<{ edge: TableEdge; at: DOMRect } | null>(null);
   /** マウスを乗せている表（その表の線だけを強調する） */
   const [hover, setHover] = useState<string | null>(null);
+  /** マウスを乗せている表の箱の位置（詳細を、箱のすぐ下に出す） */
+  const [hoverAt, setHoverAt] = useState<DOMRect | null>(null);
   const edges = useMemo(() => tableEdges(links), [links]);
   const label = (t: string) => (oneSchema ? t.slice(t.indexOf('.') + 1) : t);
   // 主キーの列（列の一意の順位が偶数で、いちばん小さいもの）
@@ -357,10 +360,15 @@ export function RelationDiagram({
                 className={['node', n.table === center ? 'center' : '', near && !near.has(n.table) ? 'dim' : ''].filter(Boolean).join(' ')}
                 transform={`translate(${n.x},${n.y})`}
                 onClick={() => n.table !== center && onCenter(n.table)}
-                onMouseEnter={() => setHover(n.table)}
-                onMouseLeave={() => setHover(null)}
+                onMouseEnter={(e) => {
+                  setHover(n.table);
+                  setHoverAt(e.currentTarget.getBoundingClientRect());
+                }}
+                onMouseLeave={() => {
+                  setHover(null);
+                  setHoverAt(null);
+                }}
               >
-                <title>{comments.tables[n.table] ? `${n.table}: ${comments.tables[n.table]}` : n.table}</title>
                 <rect width={n.w} height={NODE_H} rx="6" />
                 <text x={n.w / 2} y={n.sub ? 19 : 28} className="node-name">
                   {n.label}
@@ -376,11 +384,42 @@ export function RelationDiagram({
         )}
       </div>
       {shown.size === 1 && <p className="hint">この表には、推定したリレーションがありません。</p>}
+      {hover && hoverAt && <NodeDetail table={hover} at={hoverAt} comment={comments.tables[hover]} pk={pkOf.get(hover)?.cols ?? []} />}
       {open && (
         <Popover anchor={open.at} onClose={() => setOpen(null)}>
           {edgeInfo(open.edge)}
         </Popover>
       )}
     </div>
+  );
+}
+
+/** 表の詳細（マウスを乗せた箱のすぐ下に出す）: 表の名前、コメントの全文、主キーの列 */
+function NodeDetail({ table, at, comment, pk }: { table: string; at: DOMRect; comment?: string; pk: string[] }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [left, setLeft] = useState(at.left);
+  useEffect(() => {
+    const w = box.current?.offsetWidth ?? 0;
+    setLeft(Math.max(8, Math.min(at.left, window.innerWidth - w - 8)));
+  }, [at]);
+  const below = at.bottom + 6;
+  return createPortal(
+    <div
+      ref={box}
+      className="node-detail"
+      style={{ left, ...(below + 160 > window.innerHeight ? { bottom: window.innerHeight - at.top + 6 } : { top: below }) }}
+    >
+      <div className="node-detail-name">{table}</div>
+      {comment && <div className="node-detail-comment">{comment}</div>}
+      {pk.length > 0 && (
+        <div className="node-detail-pk">
+          <span className="badge pk">主キー</span>
+          {pk.map((c) => (
+            <code key={c}>{c}</code>
+          ))}
+        </div>
+      )}
+    </div>,
+    document.body,
   );
 }

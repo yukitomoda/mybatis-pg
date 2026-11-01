@@ -3262,3 +3262,35 @@ div.relations-comment {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+
+/* 関係図: マウスを乗せた表の詳細 */
+.node-detail {
+  position: fixed;
+  z-index: 1000;
+  max-width: 28rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.node-detail-name {
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.node-detail-comment {
+  margin-top: 0.3rem;
+  white-space: pre-wrap;
+}
+
+.node-detail-pk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.5rem;
+  margin-top: 0.4rem;
+}
