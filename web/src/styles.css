@@ -3371,3 +3371,11 @@ body.col-resizing {
 .popover-sql .badge {
   margin-right: 0.3rem;
 }
+
+.workspace-relation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}

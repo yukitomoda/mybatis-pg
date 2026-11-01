@@ -1001,6 +1001,7 @@ function Workspace({ api }: { api: Api }) {
             window.location.reload();
           }}
           onSaved={conn.reload}
+          connections={conn.connections}
         />
       </div>
 

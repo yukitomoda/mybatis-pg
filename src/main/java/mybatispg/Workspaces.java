@@ -26,7 +26,8 @@ import com.google.gson.JsonParseException;
  * ~/.mybatis-pg/workspaces/last に書く。
  * <pre>
  * {"id", "name", "key": データを分ける鍵, "lastOpenedAt": ミリ秒,
- *  "sources": [{"id", "name", "type": "project" | "jar" | "files", "path", "enabled"}]}
+ *  "sources": [{"id", "name", "type": "project" | "jar" | "files", "path", "enabled"}],
+ *  "relationConnection": リレーションの解析の結果をすべての接続先で使う接続先（なければ接続先ごと）}
  * </pre>
  * key は、共通パラメータ・下書き・プレイグラウンド・実行の履歴・リレーションを分けるのに使う。
  * --project などから作ったワークスペースは、前の版と同じ鍵（プロジェクトの場所など）にして、そのデータを引き継ぐ。
@@ -68,6 +69,11 @@ final class Workspaces {
     String key;
     long lastOpenedAt;
     List<Source> sources = new ArrayList<>();
+    /**
+     * リレーションの解析の結果を、すべての接続先でこの接続先のものを使う（検証用の DB のスキーマが同じとき）。
+     * null なら接続先ごとに分ける
+     */
+    String relationConnection;
   }
 
   private static final SecureRandom RANDOM = new SecureRandom();

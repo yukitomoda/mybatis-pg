@@ -84,7 +84,10 @@ class WorkspaceTest {
     Workspaces.Def def = store.create("受発注", null,
         Arrays.asList(source("users", Workspaces.FILES, RES.resolve("mappers")), source("params", Workspaces.FILES, RES.resolve("params"))));
     MapperWorkspace ws = MapperWorkspace.of(def);
-    ToolServer server = ToolServer.start(ws, ConnectionStore.inMemory(), GlobalStore.inMemory(), 0, TOKEN);
+    ConnectionStore connections = ConnectionStore.inMemory();
+    String db1 = connections.save(profile("検証1"), null).id;
+    String db2 = connections.save(profile("検証2"), null).id;
+    ToolServer server = ToolServer.start(ws, connections, GlobalStore.inMemory(), 0, TOKEN);
     try {
       server.useWorkspaces(config, store, def);
       String base = "http://127.0.0.1:" + server.getPort();
@@ -127,6 +130,14 @@ class WorkspaceTest {
       assertEquals(new TreeSet<>(Arrays.asList("users/UserMapper.xml")), files(call(base, "GET", "/api/statements", null, 200)));
       call(base, "POST", "/api/workspace/delete", "{\"id\":\"" + other + "\"}", 200);
       assertEquals(1, store.list().size());
+
+      // リレーションの解析の結果を、すべての接続先で 1 つの接続先のものを使う
+      assertTrue(call(base, "POST", "/api/relations", "{\"connectionId\":\"" + db2 + "\"}", 200).get("sharedFrom").isJsonNull());
+      JsonObject shared = call(base, "POST", "/api/workspace/save", "{\"name\":\"受発注\",\"relationConnection\":\"" + db1 + "\",\"sources\":[{\"id\":\"" + users
+          + "\",\"name\":\"users\",\"type\":\"files\",\"path\":" + str(RES.resolve("mappers")) + "}]}", 200);
+      assertEquals(db1, shared.getAsJsonObject("current").get("relationConnection").getAsString());
+      assertEquals(db1, call(base, "POST", "/api/relations", "{\"connectionId\":\"" + db2 + "\"}", 200).get("sharedFrom").getAsString());
+      assertTrue(call(base, "POST", "/api/relations", "{\"connectionId\":\"" + db1 + "\"}", 200).get("sharedFrom").isJsonNull());
     } finally {
       server.stop();
     }
@@ -152,6 +163,16 @@ class WorkspaceTest {
     // 1 つなら、前と同じ
     store.useProjects(java.util.Collections.singletonMap("order-api", dir.resolve("order-api")));
     assertEquals("project:default application.yml", store.list().get(0).id + " " + store.list().get(0).name);
+  }
+
+  private static ConnectionStore.Profile profile(String name) {
+    ConnectionStore.Profile p = new ConnectionStore.Profile();
+    p.name = name;
+    p.host = "127.0.0.1";
+    p.database = "app";
+    p.user = "u";
+    p.params = "";
+    return p;
   }
 
   private static String str(Path p) {

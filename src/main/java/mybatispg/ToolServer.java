@@ -153,6 +153,7 @@ public final class ToolServer {
     relationsDir = configDir.resolve("relations");
     relationStores.clear();
     relationLast.clear();
+    relationGraphs.clear();
     manualRelations = null;
     connections.useProjects(workspace.projectDirs());
   }
@@ -183,6 +184,7 @@ public final class ToolServer {
       sources.add(m);
     }
     cur.put("sources", sources);
+    cur.put("relationConnection", def.relationConnection);
     body.put("current", cur);
     List<Map<String, Object>> list = new ArrayList<>();
     for (Workspaces.Def d : workspaces.list()) {
@@ -250,6 +252,9 @@ public final class ToolServer {
           }
           def.name = workspaces.uniqueName(name.trim(), def.id);
           def.sources = sources;
+          String rc = req.has("relationConnection") && !req.get("relationConnection").isJsonNull() ? req.get("relationConnection").getAsString() : null;
+          def.relationConnection = rc == null || rc.isEmpty() ? null : rc;
+          relationGraphs.clear();
           workspaces.save(def);
           workspace.configure(def);
           connections.useProjects(workspace.projectDirs());
@@ -340,11 +345,21 @@ public final class ToolServer {
     return manualRelations;
   }
 
+  /**
+   * リレーションの解析の結果を置く接続先。ワークスペースで「この接続先の結果をすべての接続先で使う」と決めていれば、その接続先
+   * （検証用の DB のスキーマが同じなら、どの DB で解析しても同じ結果になるので、1 回の解析で済ませる）
+   */
+  private String relationKey(String connectionId) {
+    Workspaces.Def def = currentWorkspace;
+    return def != null && def.relationConnection != null && !def.relationConnection.isEmpty() ? def.relationConnection : connectionId;
+  }
+
   private Relations.Store relationStore(String connectionId) throws IOException {
-    Relations.Store s = relationStores.get(connectionId);
+    String key = relationKey(connectionId);
+    Relations.Store s = relationStores.get(key);
     if (s == null) {
-      s = Relations.Store.open(relationsDir, workspace.projectKey(), connectionId);
-      relationStores.put(connectionId, s);
+      s = Relations.Store.open(relationsDir, workspace.projectKey(), key);
+      relationStores.put(key, s);
     }
     return s;
   }
@@ -2054,7 +2069,7 @@ public final class ToolServer {
 
   /** リレーションを解析してあるか */
   private boolean relationsAnalyzed(String connectionId) throws IOException {
-    if (relationsDir == null && !relationStores.containsKey(connectionId)) {
+    if (relationsDir == null && !relationStores.containsKey(relationKey(connectionId))) {
       return false;
     }
     Relations.Store store = relationStore(connectionId);
@@ -2191,6 +2206,8 @@ public final class ToolServer {
     }
     synchronized (store) {
       body.put("updatedAt", store.updatedAt == 0 ? null : store.updatedAt);
+      // ほかの接続先の解析の結果を使っているとき、その接続先
+      body.put("sharedFrom", relationKey(connectionId).equals(connectionId) ? null : relationKey(connectionId));
       body.put("statements", store.statements.size());
       body.put("complete", store.complete);
       Relations.Progress last = relationLast.get(connectionId);
@@ -2330,7 +2347,7 @@ public final class ToolServer {
    * （後で、手で設定したリレーションもここで足す）
    */
   private Relations.Graph relationGraph(String connectionId) throws IOException {
-    if (relationsDir == null && !relationStores.containsKey(connectionId)) {
+    if (relationsDir == null && !relationStores.containsKey(relationKey(connectionId))) {
       return null;
     }
     Relations.Store store = relationStore(connectionId);

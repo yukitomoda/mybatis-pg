@@ -282,6 +282,12 @@ export function RelationsScreen({
           )}
         </div>
         {error && <p className="error-text">{error}</p>}
+        {result?.sharedFrom && (
+          <p className="hint">
+            ワークスペースの設定で、「{conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom}
+            」の解析の結果を、すべての接続先で使っています（解析すると、この結果を更新します）。
+          </p>
+        )}
         {result?.progress && (
           <p className="hint">
             {result.progress.done} / {result.progress.total}

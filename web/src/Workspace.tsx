@@ -28,8 +28,11 @@ export function WorkspaceScreen({
   active,
   onOpened,
   onSaved,
+  connections,
 }: {
   api: Api;
+  /** 接続先（リレーションの解析の結果を共有する接続先を選ぶ） */
+  connections: { id: string; name: string }[];
   active: boolean;
   /** ほかのワークスペースを開いた（画面を読み込み直す） */
   onOpened: () => void;
@@ -39,6 +42,7 @@ export function WorkspaceScreen({
   const [snap, setSnap] = useState<WorkspaceSnapshot | null>(null);
   const [name, setName] = useState('');
   const [sources, setSources] = useState<WorkspaceSource[]>([]);
+  const [relationConnection, setRelationConnection] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -49,6 +53,7 @@ export function WorkspaceScreen({
     setSnap(s);
     setName(s.current?.name ?? '');
     setSources(s.current?.sources ?? []);
+    setRelationConnection(s.current?.relationConnection ?? null);
     setDirty(false);
   };
   useEffect(() => {
@@ -208,6 +213,7 @@ export function WorkspaceScreen({
                   api.saveWorkspace(
                     name,
                     sources.map((s) => ({ ...s, name: s.name.trim() || lastName(s.path) })),
+                    relationConnection,
                   ),
                 '保存して、読み込み直しました',
                 false,
@@ -223,6 +229,27 @@ export function WorkspaceScreen({
             </button>
           )}
         </div>
+        <h3>リレーションの解析の結果</h3>
+        <label className="workspace-relation">
+          <select
+            value={relationConnection ?? ''}
+            onChange={(e) => {
+              setRelationConnection(e.target.value || null);
+              setDirty(true);
+            }}
+          >
+            <option value="">接続先ごとに分ける</option>
+            {connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                「{c.name}」の結果を、すべての接続先で使う
+              </option>
+            ))}
+            {relationConnection && !connections.some((c) => c.id === relationConnection) && (
+              <option value={relationConnection}>（今はない接続先: {relationConnection}）</option>
+            )}
+          </select>
+          <span className="hint">検証用の DB のスキーマが同じなら、1 つの DB で解析した結果を、ほかの DB の値の候補にも使えます</span>
+        </label>
         {error && <pre className="render-error">{error}</pre>}
         {notice && <p className="ok-text">{notice}</p>}
         <p className="hint">

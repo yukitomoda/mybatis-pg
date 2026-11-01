@@ -51,7 +51,13 @@ export interface WorkspaceSource {
 }
 
 export interface WorkspaceSnapshot {
-  current: { id: string; name: string; sources: WorkspaceSource[] } | null;
+  current: {
+    id: string;
+    name: string;
+    sources: WorkspaceSource[];
+    /** リレーションの解析の結果を、すべての接続先でこの接続先のものを使う（null なら接続先ごと） */
+    relationConnection: string | null;
+  } | null;
   workspaces: { id: string; name: string; sources: number; current: boolean }[];
 }
 
@@ -332,10 +338,16 @@ export function createApi(token: string) {
     /** 開いているワークスペースと、ワークスペースの一覧 */
     workspace: () => call<WorkspaceSnapshot>('api/workspace'),
     /** 開いているワークスペースの名前とソースを保存する（読み込み直す） */
-    saveWorkspace: (name: string, sources: WorkspaceSource[]) =>
+    saveWorkspace: (name: string, sources: WorkspaceSource[], relationConnection: string | null) =>
       call<WorkspaceSnapshot>(
         'api/workspace/save',
-        post(JSON.stringify({ name, sources: sources.map(({ id, name, type, path, enabled }) => ({ id, name, type, path, enabled })) })),
+        post(
+          JSON.stringify({
+            name,
+            sources: sources.map(({ id, name, type, path, enabled }) => ({ id, name, type, path, enabled })),
+            relationConnection,
+          }),
+        ),
       ),
     /** ワークスペースを開く */
     openWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/open', post(JSON.stringify({ id }))),
@@ -641,6 +653,8 @@ export interface RelationLink {
 }
 
 export interface RelationsResult {
+  /** ほかの接続先の解析の結果を使っているとき、その接続先の id（ワークスペースの設定） */
+  sharedFrom?: string | null;
   /** ワークスペースのソースの名前（ソースで絞り込む。ソースが 1 つなら空） */
   sources?: string[];
   progress?: {
