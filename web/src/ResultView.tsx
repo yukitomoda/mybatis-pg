@@ -323,6 +323,7 @@ export function ResultView({
               onCell={onCell}
               onOpenStatement={onOpenStatement}
               onRestoreParams={onRestoreParams}
+              onUpdated={rv.refresh}
             />
           ) : (
             <p className="hint">左の一覧から選んでください</p>
@@ -343,14 +344,35 @@ function HistoryDetail({
   onCell,
   onOpenStatement,
   onRestoreParams,
+  onUpdated,
 }: {
   api: Api;
   id: string;
   onCell?: (text: string | null, type: string) => void;
   onOpenStatement: (id: string) => void;
   onRestoreParams: (statementId: string, parameters: unknown) => void;
+  /** 続きを取った・取り直した（履歴の一覧の行数などを読み直す） */
+  onUpdated: () => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
+  /** 続きを取っている・取り直している */
+  const [fetching, setFetching] = useState<'more' | 'refetch' | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const fetchRows = (index: number, refetch: boolean) => {
+    setFetching(refetch ? 'refetch' : 'more');
+    setFetchError(null);
+    api.moreResult(id, index, refetch).then(
+      (e) => {
+        setEntry(e);
+        setFetching(null);
+        onUpdated();
+      },
+      (e) => {
+        setFetchError(e instanceof Error ? e.message : String(e));
+        setFetching(null);
+      },
+    );
+  };
   const [error, setError] = useState<string | null>(null);
   /** 開いているタブ: 結果セットの番号、パラメータ、SQL */
   const [tab, setTab] = useState<number | 'params' | 'sql'>(0);
@@ -429,8 +451,39 @@ function HistoryDetail({
           )}
           {t && (
             <>
-              {t.truncated && <p className="hint">先頭 {t.rows.length} 行だけを取りました</p>}
-              <DataTable columns={t.columns} types={t.columnTypes} rows={t.rows} onCell={onCell} />
+              {fetchError && <pre className="render-error">{fetchError}</pre>}
+              <DataTable
+                columns={t.columns}
+                types={t.columnTypes}
+                rows={t.rows}
+                onCell={onCell}
+                truncated={t.truncated}
+                actions={
+                  <>
+                    {t.truncated && (
+                      <button
+                        type="button"
+                        disabled={fetching !== null}
+                        title="同じ SQL をもう一度流し、取った行の次から取ります（その間に行が増減していれば、ずれます）"
+                        onClick={() => fetchRows(Math.min(tab as number, sets.length - 1), false)}
+                      >
+                        {fetching === 'more' ? '取得中…' : '続きを取得'}
+                      </button>
+                    )}
+                    {entry.updateCounts.length === 0 && (
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={fetching !== null}
+                        title="同じ SQL で、今ある行数を最初から取り直します"
+                        onClick={() => fetchRows(Math.min(tab as number, sets.length - 1), true)}
+                      >
+                        {fetching === 'refetch' ? '再取得中…' : '再取得'}
+                      </button>
+                    )}
+                  </>
+                }
+              />
             </>
           )}
           {!t && !entry.error && <p className="hint">結果の表はありません</p>}

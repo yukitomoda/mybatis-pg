@@ -68,7 +68,17 @@ final class ResultHistory {
       return id;
     }
     Files.createDirectories(dir);
-    Path file = dir.resolve(id + ".json");
+    write(dir.resolve(id + ".json"), entry);
+    // 古いものを消す
+    List<Path> files = files();
+    for (int i = 0; i < files.size() - KEEP; i++) {
+      Files.deleteIfExists(files.get(i));
+    }
+    return id;
+  }
+
+  /** 自分だけが読めるファイルに、置き換えて書く */
+  private void write(Path file, JsonObject entry) throws IOException {
     Path tmp = Files.createTempFile(dir, "result", ".tmp");
     try {
       try {
@@ -87,12 +97,6 @@ final class ResultHistory {
     } finally {
       Files.deleteIfExists(tmp);
     }
-    // 古いものを消す
-    List<Path> files = files();
-    for (int i = 0; i < files.size() - KEEP; i++) {
-      Files.deleteIfExists(files.get(i));
-    }
-    return id;
   }
 
   /** 古い順 */
@@ -110,6 +114,22 @@ final class ResultHistory {
     }
     Collections.sort(out);
     return out;
+  }
+
+  /** 1 件を書き換える（続きを取った、取り直した） */
+  synchronized void replace(String id, JsonObject entry) throws IOException {
+    if (dir == null) {
+      for (int i = 0; i < memory.size(); i++) {
+        if (memory.get(i).get("id").getAsString().equals(id)) {
+          memory.set(i, entry);
+        }
+      }
+      return;
+    }
+    if (!id.matches("\\d{13}-\\d{4}") || !Files.isRegularFile(dir.resolve(id + ".json"))) {
+      throw new IOException("履歴がありません: " + id);
+    }
+    write(dir.resolve(id + ".json"), entry);
   }
 
   /** 1 件。なければ null */

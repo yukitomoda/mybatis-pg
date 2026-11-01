@@ -2764,13 +2764,21 @@ button.icon.suggest-relation:hover {
 
 .data-table-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
   margin: 0.3rem 0;
 }
 
-.data-table-bar input {
-  width: 14rem;
+.data-table-bar > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 狭いときは、絞り込みの欄のほうを縮める */
+.data-table-bar > input {
+  flex: 0 1 14rem;
+  min-width: 6rem;
 }
 
 .data-table-scroll {

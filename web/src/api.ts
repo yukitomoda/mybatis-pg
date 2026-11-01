@@ -569,6 +569,9 @@ export function createApi(token: string) {
     result: (id: string) => call<HistoryEntry>('api/results', post(JSON.stringify({ id }))),
     /** 実行の履歴をすべて消す */
     clearResults: () => call<{ ok: boolean }>('api/results', post(JSON.stringify({ clear: true }))),
+    /** 履歴の結果の続きを取る（refetch なら最初から取り直す）。書き換えた履歴の 1 件を返す */
+    moreResult: (id: string, resultSet: number, refetch: boolean) =>
+      call<HistoryEntry>('api/results/more', post(JSON.stringify({ id, resultSet, refetch }))),
     tables: (connectionId: string, tables: string[]) =>
       call<{ tables: TableInfo[]; notFound: string[] }>('api/tables', post(JSON.stringify({ connectionId, tables }))),
     /** mapper が読み込み直されるまで待つ（最大 25 秒） */

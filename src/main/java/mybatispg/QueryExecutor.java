@@ -426,13 +426,105 @@ public final class QueryExecutor {
     }
   }
 
+  /**
+   * 結果の「続き」を取る: SQL を読み取り専用でもう一度流し、resultSet 番目の結果セットの offset 行を読み飛ばして、limit 行を読む。
+   * 前に取った後で行が増えたり減ったりしていれば、ずれる（それは許す。最初から取り直すなら offset を 0 にする）。
+   *
+   * @param countSql 全体の件数を数える SQL（null なら数えない）
+   */
+  public static PartResult fetch(String sql, ParameterSetter parameters, ConnectionFactory connections, int resultSet, int offset,
+      int limit, String countSql, int timeoutSeconds) throws ExecutionException {
+    Connection c;
+    try {
+      c = connections.open();
+    } catch (SQLException | RuntimeException e) {
+      throw new ExecutionException("接続できません\n" + Errors.describe(e), e);
+    }
+    try {
+      c.setAutoCommit(false);
+      try (java.sql.Statement s = c.createStatement()) {
+        s.execute("SET TRANSACTION READ ONLY");
+      }
+      PartResult result = new PartResult();
+      long start = System.nanoTime();
+      try (PreparedStatement ps = c.prepareStatement(sql)) {
+        ps.setQueryTimeout(timeoutSeconds);
+        // 読み飛ばす行を、まとめて受け取らないように少しずつ読む
+        ps.setFetchSize(1000);
+        ps.setMaxRows((int) Math.min(Integer.MAX_VALUE, (long) offset + limit + 1));
+        if (parameters != null) {
+          parameters.set(ps);
+        }
+        boolean isResultSet = ps.execute();
+        int index = 0;
+        while (true) {
+          if (isResultSet) {
+            if (index == resultSet) {
+              try (ResultSet rs = ps.getResultSet()) {
+                result.table = read(rs, offset, limit);
+              }
+              break;
+            }
+            index++;
+          } else if (ps.getUpdateCount() < 0) {
+            break;
+          }
+          isResultSet = ps.getMoreResults();
+        }
+      }
+      result.elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+      if (result.table == null) {
+        throw new SQLException("結果セットがありません（" + (resultSet + 1) + " 番目）");
+      }
+      if (countSql != null) {
+        if (result.table.truncated) {
+          try (PreparedStatement ps = c.prepareStatement(countSql)) {
+            ps.setQueryTimeout(timeoutSeconds);
+            if (parameters != null) {
+              parameters.set(ps);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+              result.total = rs.next() ? rs.getLong(1) : null;
+            }
+          }
+        } else {
+          result.total = (long) offset + result.table.rows.size();
+        }
+      }
+      c.rollback();
+      return result;
+    } catch (SQLException | RuntimeException e) {
+      String rollback = rollback(c);
+      // 25006: 読み取り専用のトランザクションで、更新しようとした
+      String head = e instanceof SQLException && "25006".equals(((SQLException) e).getSQLState())
+          ? "続き・再取得は読み取り専用で流すので、更新する文ではできません\n" : "";
+      throw new ExecutionException(head + Errors.describe(e) + "\n" + rollback, e);
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ignored) {
+        // 閉じられなくても結果は変わらない
+      }
+    }
+  }
+
   private static ResultTable read(ResultSet rs, int maxRows) throws SQLException {
+    return read(rs, 0, maxRows);
+  }
+
+  /** skip 行を読み飛ばしてから、maxRows 行を読む */
+  private static ResultTable read(ResultSet rs, int skip, int maxRows) throws SQLException {
     ResultTable table = new ResultTable();
     ResultSetMetaData meta = rs.getMetaData();
     int n = meta.getColumnCount();
     for (int i = 1; i <= n; i++) {
       table.columns.add(meta.getColumnLabel(i));
       table.columnTypes.add(meta.getColumnTypeName(i));
+    }
+    for (int i = 0; i < skip; i++) {
+      if (!rs.next()) {
+        return table;
+      }
     }
     while (rs.next()) {
       if (table.rows.size() >= maxRows) {

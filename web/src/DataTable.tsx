@@ -1,5 +1,5 @@
 // 結果ビューの表: 並べ替え・絞り込み・TSV でコピー・強調する列・セルを押してパラメータに値を入れる
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PValue } from './params';
 
 const NUMBER_TYPES = /^(int2|int4|int8|smallint|integer|bigint|numeric|decimal|float4|float8|real|double precision|serial|bigserial|oid)\b/;
@@ -31,6 +31,8 @@ export function DataTable({
   rowClass,
   highlight,
   onCell,
+  actions,
+  truncated,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -44,13 +46,18 @@ export function DataTable({
   highlight?: string | null;
   /** セルを押したとき（パラメータに値を入れる）。なければ押せない */
   onCell?: (text: string | null, type: string) => void;
+  /** 帯に足す操作（結果の「続きを取得」など） */
+  actions?: ReactNode;
+  /** 取った行のほかにも行がある（続きがある） */
+  truncated?: boolean;
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   // 手で変えた列の幅（px。列の番号ごと）。列が変わったら（別の結果を見たら）戻す
   const [widths, setWidths] = useState<Record<number, number>>({});
-  useEffect(() => setWidths({}), [columns]);
+  const columnsKey = columns.join('\u0000');
+  useEffect(() => setWidths({}), [columnsKey]);
   // 幅を変えるドラッグの直後の click で、並べ替えないため
   const resizing = useRef(false);
 
@@ -111,7 +118,11 @@ export function DataTable({
     <div className="data-table">
       <div className="data-table-bar">
         <input type="search" placeholder="絞り込む" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <span className="hint">{order.length === rows.length ? `${rows.length} 行` : `${order.length} / ${rows.length} 行`}</span>
+        <span className="hint">
+          {order.length === rows.length ? `${rows.length} 行` : `${order.length} / ${rows.length} 行`}
+          {truncated && '（続きあり）'}
+        </span>
+        {actions}
         {copied && <span className="hint">コピーしました</span>}
         <TableMenu
           items={[{ label: 'TSV でコピー', title: '見えている行を、タブ区切りでコピーします（Excel に貼れます）', onSelect: copy }]}

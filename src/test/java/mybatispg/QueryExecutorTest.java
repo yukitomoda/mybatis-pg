@@ -130,4 +130,28 @@ class QueryExecutorTest {
     assertTrue(r.warnings.get(0).contains("selectKey"), r.warnings.toString());
     assertEquals(Collections.singletonList(1), r.updateCounts);
   }
+
+  @Test
+  void 続きは読み飛ばして次の分を取り_件数も数える() throws Exception {
+    String pg = System.getenv("MYBATIS_PG_TEST_URL");
+    org.junit.jupiter.api.Assumptions.assumeTrue(pg != null, "MYBATIS_PG_TEST_URL がない");
+    String sql = "SELECT g AS n FROM generate_series(1, ?) g ORDER BY g";
+    QueryExecutor.ParameterSetter p = ps -> ps.setInt(1, 25);
+    QueryExecutor.PartResult first = QueryExecutor.fetch(sql, p, () -> DriverManager.getConnection(pg), 0, 0, 10, null, 30);
+    assertEquals(Arrays.asList("1"), first.table.rows.get(0));
+    assertTrue(first.table.truncated);
+    QueryExecutor.PartResult next = QueryExecutor.fetch(sql, p, () -> DriverManager.getConnection(pg), 0, 20, 10, null, 30);
+    assertEquals(5, next.table.rows.size());
+    assertEquals(Arrays.asList("21"), next.table.rows.get(0));
+    assertFalse(next.table.truncated);
+    assertEquals(null, next.total);
+    // 件数を数える（切り捨てたときだけ数える）
+    QueryExecutor.PartResult counted = QueryExecutor.fetch("SELECT * FROM (\n" + sql + "\n) AS part", p,
+        () -> DriverManager.getConnection(pg), 0, 0, 10, "SELECT count(*) FROM (\n" + sql + "\n) AS part", 30);
+    assertEquals(Long.valueOf(25), counted.total);
+    // 読み取り専用で流すので、更新する文はできない
+    QueryExecutor.ExecutionException e = assertThrows(QueryExecutor.ExecutionException.class, () -> QueryExecutor.fetch(
+        "CREATE TEMP TABLE t AS SELECT 1", null, () -> DriverManager.getConnection(pg), 0, 0, 10, null, 30));
+    assertTrue(e.getMessage().startsWith("続き・再取得は読み取り専用で流すので"), e.getMessage());
+  }
 }

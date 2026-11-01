@@ -418,6 +418,11 @@ public final class ToolServer {
           history(ex);
         }
         break;
+      case "/api/results/more":
+        if (requireMethod(ex, method, "POST")) {
+          moreResults(ex);
+        }
+        break;
       case "/api/param-sources":
         if (requireMethod(ex, method, "POST")) {
           paramSources(ex);
@@ -1075,7 +1080,8 @@ public final class ToolServer {
       // SQL のエラー、接続できない、OGNL の評価エラーなど
       String message = e instanceof QueryExecutor.ExecutionException ? e.getMessage() : Errors.describe(e);
       Map<String, Object> err = error(message);
-      err.put("historyId", record("execute", null, req, statementId, connectionId, null, null, null, null, null, null, 0, message));
+      err.put("historyId", record("execute", null, req, statementId, connectionId, null, null, null, null, null, null, 0, message,
+          options.maxRows, null));
       sendJson(ex, 422, err);
       return;
     }
@@ -1087,7 +1093,7 @@ public final class ToolServer {
     body.put("committed", r.committed);
     body.put("elapsedMillis", r.elapsedMillis);
     body.put("historyId", record("execute", null, req, statementId, connectionId, r.sql, r.resultSets, r.updateCounts, r.warnings, r.committed,
-        null, r.elapsedMillis, null));
+        null, r.elapsedMillis, null, options.maxRows, r.sql));
     sendJson(ex, 200, body);
   }
 
@@ -1110,7 +1116,7 @@ public final class ToolServer {
   /** 実行を履歴に残し、id を返す。残せなければ null（実行の結果は返す） */
   private String record(String kind, String label, JsonObject req, String statementId, String connectionId, String sql,
       List<QueryExecutor.ResultTable> resultSets, List<Integer> updateCounts, List<String> warnings, Boolean committed, Long total,
-      long elapsedMillis, String error) {
+      long elapsedMillis, String error, int pageSize, String boundSql) {
     JsonObject o = new JsonObject();
     o.addProperty("kind", kind);
     o.addProperty("label", label);
@@ -1129,6 +1135,10 @@ public final class ToolServer {
     o.addProperty("committed", committed);
     o.addProperty("total", total);
     o.addProperty("error", error);
+    // 続きを取る・取り直すときに使う（1 回に取る行数、実際に流した SQL、編集中の XML）
+    o.addProperty("pageSize", pageSize);
+    o.addProperty("boundSql", boundSql);
+    o.add("draftSource", req.has("draft") ? req.get("draft") : null);
     try {
       return results().add(o);
     } catch (IOException e) {
@@ -1156,12 +1166,116 @@ public final class ToolServer {
         sendJson(ex, 404, error("履歴がありません: " + id));
         return;
       }
-      sendJson(ex, 200, o);
+      sendJson(ex, 200, forClient(o));
       return;
     }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("entries", results().list());
     sendJson(ex, 200, body);
+  }
+
+  /** 画面に返す履歴の 1 件（編集中の XML の中身は返さない） */
+  private static JsonObject forClient(JsonObject o) {
+    JsonObject c = o.deepCopy();
+    c.remove("draftSource");
+    c.remove("boundSql");
+    return c;
+  }
+
+  /**
+   * 履歴の結果の続きを取る（"refetch": true なら、最初から取り直す）: {"id", "resultSet": 結果セットの番号}。
+   * 残した statement・パラメータ・編集中の XML で SQL を組み立て直し、読み取り専用でもう一度流す。続きは、取った行を読み飛ばして
+   * 次の分を取る（その間に行が増えたり減ったりしていれば、ずれる）。取り直しは、今ある行数（少なくとも 1 回分）を最初から取る。
+   * 応答: 書き換えた履歴の 1 件。
+   */
+  private void moreResults(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String id = string(req, "id");
+    boolean refetch = req.has("refetch") && req.get("refetch").getAsBoolean();
+    int index = req.has("resultSet") ? req.get("resultSet").getAsInt() : 0;
+    JsonObject entry = id == null ? null : results().get(id);
+    if (entry == null) {
+      sendJson(ex, 404, error("履歴がありません: " + id));
+      return;
+    }
+    com.google.gson.JsonArray sets = entry.getAsJsonArray("resultSets");
+    if (index < 0 || index >= sets.size()) {
+      sendJson(ex, 400, error("結果セットがありません"));
+      return;
+    }
+    boolean draft = entry.has("draft") && entry.get("draft").getAsBoolean();
+    if (draft && (!entry.has("draftSource") || entry.get("draftSource").isJsonNull())) {
+      sendJson(ex, 422, error("前の版で残した履歴なので、続きを取れません。もう一度実行してください"));
+      return;
+    }
+    String kind = string(entry, "kind");
+    String statementId = string(entry, "statementId");
+    String connectionId = string(entry, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    JsonObject rreq = new JsonObject();
+    rreq.add("draft", draft ? entry.get("draftSource") : null);
+    SqlRenderer renderer = rendererFor(ex, rreq, statementId);
+    if (renderer == null) {
+      return;
+    }
+    SqlRenderer.Bound bound;
+    try {
+      Object parameters = entry.has("parameters") && !entry.get("parameters").isJsonNull()
+          ? TypedValues.decode(Json.GSON.fromJson(entry.get("parameters"), Object.class)) : null;
+      bound = renderer.bind(statementId, parameters);
+      if ("part".equals(kind)) {
+        bound = bound.part(string(entry, "sql"));
+      }
+    } catch (RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    String boundSql = string(entry, "boundSql");
+    if (!refetch && boundSql != null && !boundSql.equals(bound.sql())) {
+      sendJson(ex, 409, error("mapper XML が変わり、SQL が前と違うので、続きを取れません。「再取得」で最初から取り直してください"));
+      return;
+    }
+    JsonObject set = sets.get(index).getAsJsonObject();
+    com.google.gson.JsonArray rows = set.getAsJsonArray("rows");
+    int page = entry.has("pageSize") && entry.get("pageSize").getAsInt() > 0 ? entry.get("pageSize").getAsInt() : Math.max(1, rows.size());
+    int offset = refetch ? 0 : rows.size();
+    int limit = refetch ? Math.min(MAX_ROWS_LIMIT, Math.max(page, rows.size())) : page;
+    String sql = "part".equals(kind) ? "SELECT * FROM (\n" + bound.sql() + "\n) AS part" : bound.sql();
+    String countSql = "part".equals(kind) && refetch ? "SELECT count(*) FROM (\n" + bound.sql() + "\n) AS part" : null;
+    QueryExecutor.PartResult r;
+    try {
+      r = QueryExecutor.fetch(sql, bound::setParameters, () -> connections.open(connectionId), index, offset, limit, countSql, 300);
+    } catch (QueryExecutor.ExecutionException e) {
+      sendJson(ex, 422, error(e.getMessage()));
+      return;
+    }
+    if (!refetch && !Json.GSON.toJsonTree(r.table.columns).equals(set.get("columns"))) {
+      sendJson(ex, 409, error("列が前と違うので、続きを取れません。「再取得」で最初から取り直してください"));
+      return;
+    }
+    if (refetch) {
+      sets.set(index, Json.GSON.toJsonTree(r.table));
+      entry.addProperty("executedAt", System.currentTimeMillis());
+      entry.addProperty("elapsedMillis", r.elapsedMillis);
+      entry.addProperty("boundSql", bound.sql());
+      if (!"part".equals(kind)) {
+        entry.addProperty("sql", bound.sql());
+      }
+      if (r.total != null) {
+        entry.addProperty("total", r.total);
+      }
+    } else {
+      rows.addAll(Json.GSON.toJsonTree(r.table.rows).getAsJsonArray());
+      set.addProperty("truncated", r.table.truncated);
+    }
+    results().replace(id, entry);
+    sendJson(ex, 200, forClient(entry));
   }
 
   // ---- 下書き（保存していない mapper XML の編集内容） ----
@@ -1473,14 +1587,14 @@ public final class ToolServer {
       // 「すべての部分を実行」（部分ごとの件数を見る）は、履歴に残さない（"history": false）
       boolean keep = !req.has("history") || req.get("history").getAsBoolean();
       err.put("historyId", keep ? record("part", string(req, "label"), req, statementId, connectionId, sql, null, null, null, null, null, 0,
-          e.getMessage()) : null);
+          e.getMessage(), maxRows, null) : null);
       sendJson(ex, 422, err);
       return;
     }
     Map<String, Object> body = new LinkedHashMap<>();
     boolean keep = !req.has("history") || req.get("history").getAsBoolean();
     body.put("historyId", keep ? record("part", string(req, "label"), req, statementId, connectionId, sql,
-        java.util.Collections.singletonList(r.table), null, null, null, r.total, r.elapsedMillis, null) : null);
+        java.util.Collections.singletonList(r.table), null, null, null, r.total, r.elapsedMillis, null, maxRows, part.sql()) : null);
     body.put("columns", r.table.columns);
     body.put("columnTypes", r.table.columnTypes);
     body.put("rows", r.table.rows);
