@@ -29,6 +29,8 @@ export interface RelatedNode {
   /** たどってきたつながり（起点なら null） */
   step: Step | null;
   rows: RelatedRows;
+  /** 元の箱の、選んだ行だけからたどった */
+  partial?: boolean;
 }
 
 /** 関連データの 1 件（起点の行ごと） */
@@ -248,14 +250,26 @@ export function RelatedPane({
       active = false;
     };
   }, [node?.id]);
+  // 箱ごとの、選んだ行（選んでいれば、その行だけからたどる）
+  const [checkedByNode, setCheckedByNode] = useState<Map<string, Set<number>>>(new Map());
+  const checked = (node && checkedByNode.get(node.id)) || new Set<number>();
+  const setChecked = (rows: Set<number>) => node && setCheckedByNode((old) => new Map(old).set(node.id, rows));
   const done = (n: RelatedNeighbor) =>
     entry.nodes.some(
-      (c) => c.parent === node?.id && c.step?.direction === n.direction && c.step.table === n.table && sameSet(c.step.columns, n.columns),
+      (c) =>
+        !c.partial &&
+        c.parent === node?.id &&
+        c.step?.direction === n.direction &&
+        c.step.table === n.table &&
+        sameSet(c.step.columns, n.columns),
     );
   const follow = (n: RelatedNeighbor) =>
     run(async () => {
-      const c = node && (await step(api, entry.connectionId, node, n));
-      if (c) add(c, true);
+      if (!node) return;
+      // 行を選んでいれば、その行だけからたどる
+      const from = checked.size > 0 ? { ...node, rows: { ...node.rows, rows: node.rows.rows.filter((_, i) => checked.has(i)) } } : node;
+      const c = await step(api, entry.connectionId, from, n);
+      if (c) add({ ...c, parent: node.id, partial: checked.size > 0 }, true);
     });
 
   const buttons = (direction: 'parent' | 'child', label: string) => {
@@ -263,12 +277,15 @@ export function RelatedPane({
     if (list.length === 0) return null;
     return (
       <div className="related-children">
-        <span className="hint">{label}</span>
+        <span className="hint">
+          {label}
+          {checked.size > 0 && `（選んだ ${checked.size} 行から）`}
+        </span>
         {list.map((n) => (
           <button
             key={`${n.table} ${n.columns.join(',')}`}
             type="button"
-            disabled={entry.busy || done(n) || !node || node.rows.rows.length === 0}
+            disabled={entry.busy || (checked.size === 0 && done(n)) || !node || node.rows.rows.length === 0}
             title={[
               comments.tables[n.table],
               `${n.columns.join(', ')} → ${n.table}.${n.otherColumns.join(', ')}`,
@@ -317,6 +334,8 @@ export function RelatedPane({
               truncated={node.rows.truncated}
               titles={node.rows.columns.map((c) => comments.columns[`${node.table}.${c}`])}
               onCell={onCell}
+              checked={checked}
+              onCheck={setChecked}
             />
           </div>
         )}

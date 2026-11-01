@@ -35,6 +35,8 @@ export function DataTable({
   truncated,
   titles,
   onRow,
+  checked,
+  onCheck,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -56,6 +58,9 @@ export function DataTable({
   titles?: (string | undefined)[];
   /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
   onRow?: (index: number) => void;
+  /** 選んだ行（元の行の番号）。onCheck があれば、行の左端にチェックボックスを出す */
+  checked?: Set<number>;
+  onCheck?: (rows: Set<number>) => void;
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
@@ -143,6 +148,23 @@ export function DataTable({
         <table>
           <thead>
             <tr>
+              {onCheck && (
+                <th className="row-check">
+                  <input
+                    type="checkbox"
+                    aria-label="見えている行をすべて選ぶ"
+                    checked={order.length > 0 && order.every((i) => checked?.has(i))}
+                    onChange={(e) => {
+                      const next = new Set(checked);
+                      for (const i of order) {
+                        if (e.target.checked) next.add(i);
+                        else next.delete(i);
+                      }
+                      onCheck(next);
+                    }}
+                  />
+                </th>
+              )}
               {onRow && <th className="row-action" aria-label="関連データ" />}
               {lead && <th className="lead">{lead.header}</th>}
               {columns.map((c, i) => (
@@ -179,6 +201,21 @@ export function DataTable({
           <tbody>
             {order.map((r) => (
               <tr key={r} className={rowClass?.(r)}>
+                {onCheck && (
+                  <td className="row-check">
+                    <input
+                      type="checkbox"
+                      aria-label="この行を選ぶ"
+                      checked={!!checked?.has(r)}
+                      onChange={(e) => {
+                        const next = new Set(checked);
+                        if (e.target.checked) next.add(r);
+                        else next.delete(r);
+                        onCheck(next);
+                      }}
+                    />
+                  </td>
+                )}
                 {onRow && (
                   <td className="row-action">
                     <button

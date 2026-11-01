@@ -3427,3 +3427,9 @@ div.relations-comment {
   stroke-width: 4px;
   stroke-linejoin: round;
 }
+
+.data-table .row-check {
+  width: 1.4rem;
+  padding: 0 0.2rem;
+  text-align: center;
+}
