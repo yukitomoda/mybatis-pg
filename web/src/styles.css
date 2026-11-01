@@ -3223,3 +3223,17 @@ body.col-resizing {
   gap: 1rem;
   margin-top: 0.8rem;
 }
+
+/* DB のコメント（表や列の説明） */
+.relations-comment {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+div.relations-comment {
+  margin-left: 0;
+  white-space: normal;
+}

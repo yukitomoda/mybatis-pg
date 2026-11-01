@@ -1,9 +1,10 @@
 // リレーションの関係図（試作）: 選んだ表のまわりの表を、ELK（段ごとに並べる配置）で、親を上、子を下に描く。
 // 線は箱を避けた縦横の折れ線にし、表にマウスを乗せるとその表の線だけを強調する。
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { RelationLink } from './api';
+import { CommentsContext } from './comments';
 import { Popover } from './Popover';
 
 const tableOf = (col: string) => col.slice(0, col.lastIndexOf('.'));
@@ -84,7 +85,9 @@ export function neighborhood(center: string, edges: TableEdge[], depth: number, 
 }
 
 const NODE_H = 46;
-const nodeWidth = (label: string, sub: string) => Math.min(300, Math.max(120, Math.max(label.length, sub.length) * 7.4 + 24));
+/** 文字の幅（px）。全角の文字は、半角の倍近くで数える */
+const textWidth = (text: string, half: number) => [...text].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? half * 1.75 : half), 0);
+const nodeWidth = (label: string, sub: string) => Math.min(300, Math.max(120, Math.max(textWidth(label, 7.4), textWidth(sub, 6.4)) + 24));
 
 type Placed = { table: string; x: number; y: number; w: number; label: string; sub: string };
 type Routed = { edge: TableEdge; points: { x: number; y: number }[] };
@@ -201,7 +204,11 @@ export function RelationDiagram({
     }
     return by;
   }, [keys]);
+  // 箱の 2 行目: 表のコメントがあればそれを（長ければ省く）、なければ主キーの列
+  const comments = useContext(CommentsContext);
   const sub = (t: string) => {
+    const c = comments.tables[t];
+    if (c) return c.length > 24 ? `${c.slice(0, 23)}…` : c;
     const pk = pkOf.get(t);
     return pk ? `PK: ${pk.cols.join(', ')}` : '';
   };
@@ -223,7 +230,7 @@ export function RelationDiagram({
     return () => {
       active = false;
     };
-  }, [shown, shownEdges, oneSchema, pkOf]);
+  }, [shown, shownEdges, oneSchema, pkOf, comments]);
 
   // 中心の表が見えるようにスクロールする（配置し直したときと、拡大・縮小したとき）
   const scroller = useRef<HTMLDivElement>(null);
@@ -353,7 +360,7 @@ export function RelationDiagram({
                 onMouseEnter={() => setHover(n.table)}
                 onMouseLeave={() => setHover(null)}
               >
-                <title>{n.table === center ? n.table : `${n.table}（押すと、この表を中心にします）`}</title>
+                <title>{comments.tables[n.table] ? `${n.table}: ${comments.tables[n.table]}` : n.table}</title>
                 <rect width={n.w} height={NODE_H} rx="6" />
                 <text x={n.w / 2} y={n.sub ? 19 : 28} className="node-name">
                   {n.label}

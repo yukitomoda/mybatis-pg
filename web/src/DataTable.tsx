@@ -33,6 +33,7 @@ export function DataTable({
   onCell,
   actions,
   truncated,
+  titles,
 }: {
   columns: string[];
   /** 列の型（なければ空文字） */
@@ -50,6 +51,8 @@ export function DataTable({
   actions?: ReactNode;
   /** 取った行のほかにも行がある（続きがある） */
   truncated?: boolean;
+  /** 列の説明（DB のコメント。見出しにマウスを乗せると出す） */
+  titles?: (string | undefined)[];
 }) {
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
@@ -137,7 +140,7 @@ export function DataTable({
                 <th
                   key={i}
                   className={i === target ? 'target' : undefined}
-                  title={types[i] ? `${types[i]}（押すと並べ替え）` : '押すと並べ替え'}
+                  title={[titles?.[i], types[i]].filter(Boolean).join('\n') || undefined}
                   style={widthStyle(i)}
                   onClick={() => {
                     if (resizing.current) return;

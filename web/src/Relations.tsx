@@ -4,6 +4,7 @@ import type { Api, RelationLink, RelationStatement, RelationsResult, RelationsTi
 import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
+import { CommentsContext, useDbComments } from './comments';
 import { InfoButton } from './Popover';
 import { RelationDiagram, type TableEdge } from './RelationDiagram';
 import { SideSplitter, useSideWidth } from './Splitter';
@@ -64,6 +65,8 @@ export function RelationsScreen({
 }) {
   const side = useSideWidth('relations');
   const connectionId = conn.current?.id;
+  // DB の表と列のコメント（表と列の説明として出す）
+  const comments = useDbComments(api, connectionId);
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -155,7 +158,11 @@ export function RelationsScreen({
     for (const t of allTables) if (!count.has(t)) count.set(t, 0);
     return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [links, focus, allTables]);
-  const shown = tables.filter(([t]) => t.toLowerCase().includes(filter.trim().toLowerCase()));
+  // 表の名前か、表のコメントで絞り込む
+  const shown = tables.filter(([t]) => {
+    const q = filter.trim().toLowerCase();
+    return t.toLowerCase().includes(q) || (comments.tables[t] ?? '').toLowerCase().includes(q);
+  });
   const origins = useMemo(() => new Map((result?.origins ?? []).map((o) => [o.column, o.origins])), [result]);
   // 表の一覧をスキーマごとのツリーにする（リレーションのある表を含むスキーマを先に、あとは名前の順。表の順は shown のまま）
   const schemaTree = useMemo(() => {
@@ -239,243 +246,258 @@ export function RelationsScreen({
   );
 
   return (
-    <SourceContext.Provider value={sourceOfStatement}>
-      <div className="relations">
-        <div className="relations-head">
-          <h2>リレーション</h2>
-          <ConnectionPicker conn={conn} />
-          <select
-            aria-label="解析に使う共通パラメータ"
-            title="選んだ共通パラメータの値（スキーマを決める ${schema} など）を、すべての statement の解析に使います。値のない項目は仮の値で埋めます"
-            value={chosen ? chosen.id : ''}
-            onChange={(e) => chooseSet(e.target.value)}
-            disabled={running}
-          >
-            <option value="">共通パラメータなし</option>
-            {globalSets.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-          {running ? (
-            <button type="button" disabled={result?.progress?.stopping} onClick={stop}>
-              {result?.progress?.stopping ? '止めています…' : '一時停止'}
-            </button>
-          ) : (
-            <button type="button" className="run" disabled={!connectionId} onClick={start}>
-              {partial ? '続きから解析する' : '解析する'}
-            </button>
-          )}
-          {sources.length > 0 && (
-            <label className="relations-source">
-              ソース
-              <select value={filterBySource ? sourceFilter : ''} onChange={(e) => setSourceFilter(e.target.value)}>
-                <option value="">すべて</option>
-                {sources.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        {error && <p className="error-text">{error}</p>}
-        {result?.sharedFrom && (
-          <p className="hint">
-            {conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom} の結果を共有しています
-          </p>
-        )}
-        {result?.progress && (
-          <p className="hint">
-            {result.progress.done} / {result.progress.total}
-            {result.progress.remainingMillis !== undefined && `　残り約 ${duration(result.progress.remainingMillis)}`}
-            {perStatement(result.progress)}　{result.progress.current}
-          </p>
-        )}
-        {result && !running && (
-          <p className="hint">
-            {result.updatedAt
-              ? `${new Date(result.updatedAt).toLocaleString('ja-JP')} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ''}　つながり ${links.length} 組　表 ${tables.filter(([, n]) => n > 0).length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ''}`
-              : 'まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。'}
-          </p>
-        )}
-        {result?.errors && result.errors.length > 0 && !running && (
-          <details className="relations-errors">
-            <summary>解析できなかった statement（{result.errors.length} 件）</summary>
-            <ul>
-              {result.errors.map((e) => (
-                <li key={e.id}>
-                  <button type="button" className="link" onClick={() => onOpen(e.id)}>
-                    {e.id}
-                  </button>
-                  <span className="hint"> {e.error.split('\n')[0]}</span>
-                </li>
+    <CommentsContext.Provider value={comments}>
+      <SourceContext.Provider value={sourceOfStatement}>
+        <div className="relations">
+          <div className="relations-head">
+            <h2>リレーション</h2>
+            <ConnectionPicker conn={conn} />
+            <select
+              aria-label="解析に使う共通パラメータ"
+              title="選んだ共通パラメータの値（スキーマを決める ${schema} など）を、すべての statement の解析に使います。値のない項目は仮の値で埋めます"
+              value={chosen ? chosen.id : ''}
+              onChange={(e) => chooseSet(e.target.value)}
+              disabled={running}
+            >
+              <option value="">共通パラメータなし</option>
+              {globalSets.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
               ))}
-            </ul>
-          </details>
-        )}
-        {connectionId && !running && (
-          <div className="relations-body" style={side.style}>
-            <div className="relations-tables">
-              <div className="relations-views" role="tablist">
-                {(
-                  [
-                    ['tables', '表と列'],
-                    ['statements', 'statement'],
-                    ['names', 'パラメータ名'],
-                  ] as const
-                ).map(([v, label]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    role="tab"
-                    aria-selected={view === v}
-                    className={view === v ? 'active' : undefined}
-                    onClick={() => setView(v)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="search"
-                placeholder={view === 'tables' ? '表を絞り込む' : view === 'statements' ? 'statement を絞り込む' : 'パラメータ名を絞り込む'}
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
+            </select>
+            {running ? (
+              <button type="button" disabled={result?.progress?.stopping} onClick={stop}>
+                {result?.progress?.stopping ? '止めています…' : '一時停止'}
+              </button>
+            ) : (
+              <button type="button" className="run" disabled={!connectionId} onClick={start}>
+                {partial ? '続きから解析する' : '解析する'}
+              </button>
+            )}
+            {sources.length > 0 && (
+              <label className="relations-source">
+                ソース
+                <select value={filterBySource ? sourceFilter : ''} onChange={(e) => setSourceFilter(e.target.value)}>
+                  <option value="">すべて</option>
+                  {sources.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          {error && <p className="error-text">{error}</p>}
+          {result?.sharedFrom && (
+            <p className="hint">
+              {conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom} の結果を共有しています
+            </p>
+          )}
+          {result?.progress && (
+            <p className="hint">
+              {result.progress.done} / {result.progress.total}
+              {result.progress.remainingMillis !== undefined && `　残り約 ${duration(result.progress.remainingMillis)}`}
+              {perStatement(result.progress)}　{result.progress.current}
+            </p>
+          )}
+          {result && !running && (
+            <p className="hint">
+              {result.updatedAt
+                ? `${new Date(result.updatedAt).toLocaleString('ja-JP')} に解析　statement ${result.statements} 件${partial ? `（途中まで。残り ${result.pending} 件）` : ''}　つながり ${links.length} 組　表 ${tables.filter(([, n]) => n > 0).length}${result.lastRun && result.lastRun.analyzed > 0 ? `　前回 ${result.lastRun.analyzed} 件を ${duration(result.lastRun.elapsedMillis)}${perStatement(result.lastRun)}` : ''}`
+                : 'まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。'}
+            </p>
+          )}
+          {result?.errors && result.errors.length > 0 && !running && (
+            <details className="relations-errors">
+              <summary>解析できなかった statement（{result.errors.length} 件）</summary>
               <ul>
-                {view === 'tables' &&
-                  schemaTree.map(([schema, ts]) => {
-                    // 絞り込んでいる間と、選んでいる表のスキーマは開く
-                    const open = q !== '' || !closedSchemas.has(schema) || (table !== null && table.startsWith(`${schema}.`));
-                    const related = ts.filter(([, n]) => n > 0).length;
-                    return (
-                      <li key={schema} className="schema-node">
-                        <button type="button" className="schema-toggle" aria-expanded={open} onClick={() => toggleSchema(schema)}>
-                          <span>
-                            <span className="caret">{open ? '▾' : '▸'}</span> {schema}
-                          </span>
-                          <span className="count" title="リレーションのある表 / 表">
-                            {related > 0 ? `${related} / ${ts.length}` : ts.length}
-                          </span>
+                {result.errors.map((e) => (
+                  <li key={e.id}>
+                    <button type="button" className="link" onClick={() => onOpen(e.id)}>
+                      {e.id}
+                    </button>
+                    <span className="hint"> {e.error.split('\n')[0]}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {connectionId && !running && (
+            <div className="relations-body" style={side.style}>
+              <div className="relations-tables">
+                <div className="relations-views" role="tablist">
+                  {(
+                    [
+                      ['tables', '表と列'],
+                      ['statements', 'statement'],
+                      ['names', 'パラメータ名'],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      role="tab"
+                      aria-selected={view === v}
+                      className={view === v ? 'active' : undefined}
+                      onClick={() => setView(v)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="search"
+                  placeholder={
+                    view === 'tables' ? '表を絞り込む' : view === 'statements' ? 'statement を絞り込む' : 'パラメータ名を絞り込む'
+                  }
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+                <ul>
+                  {view === 'tables' &&
+                    schemaTree.map(([schema, ts]) => {
+                      // 絞り込んでいる間と、選んでいる表のスキーマは開く
+                      const open = q !== '' || !closedSchemas.has(schema) || (table !== null && table.startsWith(`${schema}.`));
+                      const related = ts.filter(([, n]) => n > 0).length;
+                      return (
+                        <li key={schema} className="schema-node">
+                          <button type="button" className="schema-toggle" aria-expanded={open} onClick={() => toggleSchema(schema)}>
+                            <span>
+                              <span className="caret">{open ? '▾' : '▸'}</span> {schema}
+                            </span>
+                            <span className="count" title="リレーションのある表 / 表">
+                              {related > 0 ? `${related} / ${ts.length}` : ts.length}
+                            </span>
+                          </button>
+                          {open && (
+                            <ul>
+                              {ts.map(([t, n]) => (
+                                <li key={t}>
+                                  <button type="button" className={t === table ? 'selected' : undefined} onClick={() => setTable(t)}>
+                                    <span title={comments.tables[t]}>
+                                      {t.slice(t.indexOf('.') + 1)}
+                                      {comments.tables[t] && <span className="relations-comment">{comments.tables[t]}</span>}
+                                    </span>
+                                    <span className="count">{n || ''}</span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      );
+                    })}
+                  {view === 'statements' &&
+                    shownStatements.map((d) => (
+                      <li key={d.id}>
+                        <button
+                          type="button"
+                          className={d.id === statement ? 'selected' : undefined}
+                          onClick={() => setStatement(d.id)}
+                          title={d.id}
+                        >
+                          <span>{d.id}</span>
+                          <span className="count">{d.error ? '⚠' : `${d.joins.length}・${Object.keys(d.params).length}`}</span>
                         </button>
-                        {open && (
-                          <ul>
-                            {ts.map(([t, n]) => (
-                              <li key={t}>
-                                <button type="button" className={t === table ? 'selected' : undefined} onClick={() => setTable(t)}>
-                                  <span>{t.slice(t.indexOf('.') + 1)}</span>
-                                  <span className="count">{n || ''}</span>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
                       </li>
-                    );
-                  })}
-                {view === 'statements' &&
-                  shownStatements.map((d) => (
-                    <li key={d.id}>
+                    ))}
+                  {view === 'names' &&
+                    shownNames.map((n) => (
+                      <li key={n}>
+                        <button type="button" className={n === name ? 'selected' : undefined} onClick={() => setName(n)}>
+                          <span>{n}</span>
+                          <span className="count">{names[n].length}</span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+                {view === 'statements' && <p className="hint">数は「結合の組・パラメータ」。⚠ は解析できなかったもの</p>}
+              </div>
+              <SideSplitter label="一覧の幅" side={side} />
+              <div className={view === 'tables' && table && tableMode === 'diagram' ? 'relations-detail diagram' : 'relations-detail'}>
+                {view === 'tables' && table && (
+                  <>
+                    <h2 className="relations-detail-title">
+                      <code>{table}</code>
+                      {comments.tables[table] && <span className="relations-comment">{comments.tables[table]}</span>}
+                    </h2>
+                    <div className="tabs" role="tablist" aria-label="表示の仕方">
                       <button
                         type="button"
-                        className={d.id === statement ? 'selected' : undefined}
-                        onClick={() => setStatement(d.id)}
-                        title={d.id}
+                        role="tab"
+                        aria-selected={tableMode === 'columns'}
+                        className={tableMode === 'columns' ? 'tab selected' : 'tab'}
+                        onClick={() => setTableMode('columns')}
                       >
-                        <span>{d.id}</span>
-                        <span className="count">{d.error ? '⚠' : `${d.joins.length}・${Object.keys(d.params).length}`}</span>
+                        列
                       </button>
-                    </li>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tableMode === 'diagram'}
+                        className={tableMode === 'diagram' ? 'tab selected' : 'tab'}
+                        onClick={() => setTableMode('diagram')}
+                      >
+                        図
+                      </button>
+                    </div>
+                  </>
+                )}
+                {view === 'tables' && table && tableMode === 'diagram' && (
+                  <>
+                    <RelationDiagram
+                      center={table}
+                      links={links}
+                      keys={keys}
+                      oneSchema={oneSchema}
+                      onCenter={setTable}
+                      edgeInfo={edgeInfo}
+                    />
+                  </>
+                )}
+                {view === 'tables' &&
+                  tableMode === 'columns' &&
+                  (table ? (
+                    <TableRelations
+                      table={table}
+                      links={links}
+                      origins={origins}
+                      keys={keys}
+                      details={details}
+                      detailOf={detailOf}
+                      s={s}
+                      onOpen={onOpen}
+                      focus={column}
+                      onGoColumn={goColumn}
+                      onChange={change}
+                      api={api}
+                      connectionId={connectionId}
+                      allTables={allTables}
+                    />
+                  ) : (
+                    <p className="hint">表を選んでください</p>
+                  ))}
+                {view === 'tables' && !table && tableMode === 'diagram' && <p className="hint">表を選んでください</p>}
+                {view === 'statements' &&
+                  (statement && detailOf.get(statement) ? (
+                    <StatementDetail detail={detailOf.get(statement)!} keys={keys} s={s} onOpen={onOpen} onGoColumn={goColumn} />
+                  ) : (
+                    <p className="hint">statement を選んでください</p>
                   ))}
                 {view === 'names' &&
-                  shownNames.map((n) => (
-                    <li key={n}>
-                      <button type="button" className={n === name ? 'selected' : undefined} onClick={() => setName(n)}>
-                        <span>{n}</span>
-                        <span className="count">{names[n].length}</span>
-                      </button>
-                    </li>
+                  (name && names[name] ? (
+                    <NameDetail name={name} uses={names[name]} minName={result?.minName ?? 3} s={s} onOpen={onOpen} onGoColumn={goColumn} />
+                  ) : (
+                    <p className="hint">パラメータ名を選んでください</p>
                   ))}
-              </ul>
-              {view === 'statements' && <p className="hint">数は「結合の組・パラメータ」。⚠ は解析できなかったもの</p>}
+              </div>
             </div>
-            <SideSplitter label="一覧の幅" side={side} />
-            <div className={view === 'tables' && table && tableMode === 'diagram' ? 'relations-detail diagram' : 'relations-detail'}>
-              {view === 'tables' && table && (
-                <>
-                  <h2 className="relations-detail-title">
-                    <code>{table}</code>
-                  </h2>
-                  <div className="tabs" role="tablist" aria-label="表示の仕方">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tableMode === 'columns'}
-                      className={tableMode === 'columns' ? 'tab selected' : 'tab'}
-                      onClick={() => setTableMode('columns')}
-                    >
-                      列
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tableMode === 'diagram'}
-                      className={tableMode === 'diagram' ? 'tab selected' : 'tab'}
-                      onClick={() => setTableMode('diagram')}
-                    >
-                      図
-                    </button>
-                  </div>
-                </>
-              )}
-              {view === 'tables' && table && tableMode === 'diagram' && (
-                <>
-                  <RelationDiagram center={table} links={links} keys={keys} oneSchema={oneSchema} onCenter={setTable} edgeInfo={edgeInfo} />
-                </>
-              )}
-              {view === 'tables' &&
-                tableMode === 'columns' &&
-                (table ? (
-                  <TableRelations
-                    table={table}
-                    links={links}
-                    origins={origins}
-                    keys={keys}
-                    details={details}
-                    detailOf={detailOf}
-                    s={s}
-                    onOpen={onOpen}
-                    focus={column}
-                    onGoColumn={goColumn}
-                    onChange={change}
-                    api={api}
-                    connectionId={connectionId}
-                    allTables={allTables}
-                  />
-                ) : (
-                  <p className="hint">表を選んでください</p>
-                ))}
-              {view === 'tables' && !table && tableMode === 'diagram' && <p className="hint">表を選んでください</p>}
-              {view === 'statements' &&
-                (statement && detailOf.get(statement) ? (
-                  <StatementDetail detail={detailOf.get(statement)!} keys={keys} s={s} onOpen={onOpen} onGoColumn={goColumn} />
-                ) : (
-                  <p className="hint">statement を選んでください</p>
-                ))}
-              {view === 'names' &&
-                (name && names[name] ? (
-                  <NameDetail name={name} uses={names[name]} minName={result?.minName ?? 3} s={s} onOpen={onOpen} onGoColumn={goColumn} />
-                ) : (
-                  <p className="hint">パラメータ名を選んでください</p>
-                ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </SourceContext.Provider>
+          )}
+        </div>
+      </SourceContext.Provider>
+    </CommentsContext.Provider>
   );
 }
 
@@ -559,6 +581,7 @@ function TableRelations({
   onGoColumn: (col: string) => void;
   onChange: (c: Parameters<Api['changeManualRelation']>[0]) => Promise<void>;
 }) {
+  const comments = useContext(CommentsContext);
   const mine = links.filter((l) => tableOf(l.a) === table || tableOf(l.b) === table);
   // 列ごとの、比べているパラメータ
   const params = new Map<string, { statement: string; property: string }[]>();
@@ -724,6 +747,7 @@ function TableRelations({
               <>
                 <td rowSpan={span} className="relations-grid-col">
                   <code>{name(col)}</code>
+                  {comments.columns[col] && <div className="relations-comment">{comments.columns[col]}</div>}
                 </td>
                 <td rowSpan={span}>{key && <span className={isPrimaryKey(keys[col]) ? 'badge pk' : 'badge'}>{key}</span>}</td>
               </>
@@ -761,12 +785,12 @@ function TableRelations({
                           <code className="relations-grid-schema">{other.slice(0, other.indexOf('.'))}</code>
                         </td>
                         <td>
-                          <button type="button" className="link" onClick={() => onGoColumn(other)}>
+                          <button type="button" className="link" onClick={() => onGoColumn(other)} title={comments.tables[tableOf(other)]}>
                             <code>{tableOf(other).slice(other.indexOf('.') + 1)}</code>
                           </button>
                         </td>
                         <td>
-                          <code>{other.slice(other.lastIndexOf('.') + 1)}</code>
+                          <code title={comments.columns[other]}>{other.slice(other.lastIndexOf('.') + 1)}</code>
                           {l.manual && <span className="badge">手動</span>}
                           {l.disabled && <span className="badge muted">無効</span>}
                         </td>

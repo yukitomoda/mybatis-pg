@@ -644,6 +644,11 @@ public final class ToolServer {
           dbColumns(ex);
         }
         break;
+      case "/api/db-comments":
+        if (requireMethod(ex, method, "POST")) {
+          dbComments(ex);
+        }
+        break;
       case "/api/relations/stop":
         if (requireMethod(ex, method, "POST")) {
           stopRelations(ex);
@@ -2151,6 +2156,48 @@ public final class ToolServer {
    * DB の表と列（リレーションを手で追加するときに選ぶ）。{"connectionId"} なら表（schema.table）の一覧、
    * {"connectionId", "table": "schema.table"} ならその表の列の一覧
    */
+  /**
+   * DB の表と列のコメント（COMMENT ON TABLE・COLUMN）: {"connectionId"} →
+   * {"tables": {"schema.table": コメント}, "columns": {"schema.table.column": コメント}}。コメントのないものは入れない
+   */
+  private void dbComments(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    Map<String, String> tables = new java.util.TreeMap<>();
+    Map<String, String> columns = new java.util.TreeMap<>();
+    try (java.sql.Connection c = connections.open(connectionId);
+        java.sql.Statement s = c.createStatement();
+        java.sql.ResultSet rs = s.executeQuery("SELECT n.nspname, c.relname, a.attname, d.description FROM pg_description d"
+            + " JOIN pg_class c ON c.oid = d.objoid AND d.classoid = 'pg_class'::regclass"
+            + " JOIN pg_namespace n ON n.oid = c.relnamespace"
+            + " LEFT JOIN pg_attribute a ON d.objsubid > 0 AND a.attrelid = c.oid AND a.attnum = d.objsubid AND NOT a.attisdropped"
+            + " WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
+            + " AND n.nspname NOT LIKE 'pg\\_%' AND (d.objsubid = 0 OR a.attname IS NOT NULL)")) {
+      while (rs.next()) {
+        String table = rs.getString(1) + "." + rs.getString(2);
+        if (rs.getString(3) == null) {
+          tables.put(table, rs.getString(4));
+        } else {
+          columns.put(table + "." + rs.getString(3), rs.getString(4));
+        }
+      }
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("tables", tables);
+    body.put("columns", columns);
+    sendJson(ex, 200, body);
+  }
+
   private void dbColumns(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
     if (req == null) {

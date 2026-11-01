@@ -2,6 +2,7 @@
 // セルを押すと、入れる先のパラメータにその値を入れる（比べている列を強調し、「この列の値を使うのが普通」と分かるようにする）
 import { useEffect, useState } from 'react';
 import type { SourceColumn } from './api';
+import { useDbComments } from './comments';
 import { DataTable } from './DataTable';
 import type { Connections } from './Execution';
 import { message } from './Execution';
@@ -99,6 +100,7 @@ export function CandidatePane({
   const [values, setValues] = useState<Values | null>(null);
   const [error, setError] = useState<string | null>(null);
   const connectionId = conn.current?.id;
+  const comments = useDbComments(conn.api, connectionId);
   /** 再取得で、最初から取り直す件数（null なら 1 回分） */
   const [reload, setReload] = useState<{ limit: number } | null>(null);
 
@@ -238,6 +240,9 @@ export function CandidatePane({
             {column.table}.{column.column}
           </code>
         )}
+        {comments.columns[`${column.schema}.${column.table}.${column.column}`] && (
+          <span className="relations-comment">{comments.columns[`${column.schema}.${column.table}.${column.column}`]}</span>
+        )}
         {column.role === 'origin' ? (
           <span className="suggest-condition" title="リレーションでたどった経路">
             リレーション: {column.condition}（{column.manual ? '手動' : `${column.count} 件の SQL`}）
@@ -308,6 +313,7 @@ export function CandidatePane({
               lead={{ header: '件数', cells: lead }}
               rowClass={(i) => (i < currentRows.length ? 'current' : undefined)}
               highlight={column.column}
+              titles={tableColumns.map((c) => comments.columns[`${column.schema}.${column.table}.${c}`])}
               onCell={onCell}
               truncated={more}
               actions={

@@ -557,6 +557,9 @@ export function createApi(token: string) {
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
     dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
+    /** DB の表と列のコメント（COMMENT ON）。キーは schema.table と schema.table.column */
+    dbComments: (connectionId: string) =>
+      call<{ tables: Record<string, string>; columns: Record<string, string> }>('api/db-comments', post(JSON.stringify({ connectionId }))),
     /** 表（schema.table）の列の一覧 */
     dbColumns: (connectionId: string, table: string) =>
       call<{ columns: string[] }>('api/db-columns', post(JSON.stringify({ connectionId, table }))),
