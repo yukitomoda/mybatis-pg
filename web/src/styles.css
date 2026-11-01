@@ -1419,75 +1419,6 @@ button.open-file:focus-visible {
   word-break: break-all;
 }
 
-/* ---- 一括チェック ---- */
-
-button.bulk-open {
-  width: 100%;
-  margin-bottom: 0.5rem;
-}
-
-.bulk input[type='search'] {
-  min-width: 14rem;
-}
-
-.bulk-scroll {
-  flex: 1;
-  max-height: none;
-}
-
-.bulk-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.bulk-table th,
-.bulk-table td {
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  padding: 0.2rem 0.5rem;
-  white-space: nowrap;
-}
-
-.bulk-table th {
-  position: sticky;
-  top: 0;
-  background: var(--code-bg);
-}
-
-.bulk-table td.num {
-  text-align: right;
-}
-
-.bulk-table tbody tr {
-  cursor: pointer;
-}
-
-.bulk-table tbody tr:hover td {
-  background: var(--code-bg);
-}
-
-.bulk-table .bulk-id {
-  font-family: var(--mono);
-  max-width: 28rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bulk-table .bulk-error {
-  max-width: 40rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bulk-table .severity {
-  margin-left: 0.3rem;
-}
-
-.bulk-table th .link.sorted {
-  font-weight: 700;
-}
-
 /* ---- PostgreSQL の型を指定した値 ---- */
 
 .pg-editor {
@@ -1558,12 +1489,6 @@ button.bulk-open {
 .page {
   max-width: 90rem;
   padding: 1rem;
-}
-
-.bulk.page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
 }
 
 .connections.page {
@@ -1744,118 +1669,11 @@ button.bulk-open {
   cursor: pointer;
 }
 
-/* ---- 一括チェック: 実行するものを選ぶ ---- */
-
-.bulk-body {
-  display: grid;
-  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
-  gap: 1rem;
-  flex: 1;
-  min-height: 0;
-}
-
-.bulk-main {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
-.bulk-picker {
-  border-right: 1px solid var(--border);
-  padding-right: 0.8rem;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.bulk-picker fieldset {
-  border: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-height: 0;
-  flex: 1;
-}
-
-.bulk-picker input[type='search'] {
-  width: 100%;
-}
-
-.bulk-picker-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.8rem;
-  font-size: 13px;
-}
-
-.bulk-picker .tree-list {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
-
-.pick-line {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.pick-line.stmt {
-  cursor: pointer;
-  padding-left: 1.2rem;
-}
-
-.pick-line .node {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-}
-
-@media (max-width: 720px) {
-  .bulk-body {
-    grid-template-columns: 1fr;
-  }
-  .bulk-picker {
-    border-right: none;
-    max-height: 50vh;
-  }
-}
-
 .badge.warn {
   color: var(--warn);
   background: var(--warn-bg);
   border-color: var(--warn);
   font-weight: 600;
-}
-
-.pick-line.not-ready .node {
-  color: var(--muted);
-}
-
-.pick-line button.badge {
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.bulk-confirm p {
-  margin: 0 0 0.4rem;
-}
-
-.bulk-confirm ul {
-  margin: 0 0 0.6rem;
-  padding-left: 1.2rem;
-  font-size: 13px;
-}
-
-.bulk-confirm .actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
 }
 
 /* ---- mapper XML の編集 ---- */
@@ -3259,7 +3077,53 @@ body.col-resizing {
   color: var(--accent);
 }
 
-.workspace.page {
+.workspace {
+  display: grid;
+  grid-template-columns: 12rem 1fr;
+  min-height: 100%;
+}
+
+/* 左のサブメニュー */
+.workspace-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 1rem 0.5rem;
+  border-right: 1px solid var(--border);
+}
+
+.workspace-nav-name {
+  margin: 0 0.5rem 0.6rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-nav button {
+  padding: 0.35rem 0.6rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.workspace-nav button:hover {
+  background: var(--code-bg);
+}
+
+.workspace-nav button.selected {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 700;
+}
+
+.workspace-content {
+  min-width: 0;
+}
+
+.workspace-content > .page {
   max-width: 72rem;
 }
 

@@ -2,7 +2,17 @@
 // ほかのワークスペースを開いたり、作ったり、消したりする
 import { useEffect, useRef, useState } from 'react';
 import type { Api, WorkspaceSnapshot, WorkspaceSource } from './api';
-import { message } from './Execution';
+import type { Connections } from './Execution';
+import { ConnectionsScreen, message } from './Execution';
+
+/** ワークスペースの画面で見るもの（左のサブメニュー） */
+export type WorkspaceSection = 'sources' | 'connections' | 'list';
+
+const SECTIONS: [WorkspaceSection, string][] = [
+  ['sources', '全般'],
+  ['connections', '接続先'],
+  ['list', 'ワークスペースの一覧'],
+];
 
 const TYPES: [WorkspaceSource['type'], string][] = [
   ['project', 'プロジェクト'],
@@ -28,17 +38,21 @@ export function WorkspaceScreen({
   active,
   onOpened,
   onSaved,
-  connections,
+  conn,
+  section,
+  onSection,
 }: {
   api: Api;
-  /** 接続先（リレーションの解析の結果を共有する接続先を選ぶ） */
-  connections: { id: string; name: string }[];
+  conn: Connections;
+  section: WorkspaceSection;
+  onSection: (s: WorkspaceSection) => void;
   active: boolean;
   /** ほかのワークスペースを開いた（画面を読み込み直す） */
   onOpened: () => void;
   /** ソースを変えた（プロジェクトの接続先を読み直す） */
   onSaved: () => void;
 }) {
+  const connections = conn.connections;
   const [snap, setSnap] = useState<WorkspaceSnapshot | null>(null);
   const [name, setName] = useState('');
   const [sources, setSources] = useState<WorkspaceSource[]>([]);
@@ -120,219 +134,249 @@ export function WorkspaceScreen({
   if (!snap.current) return <div className="workspace page">ワークスペースを使っていません。</div>;
   const others = snap.workspaces.filter((w) => !w.current);
 
+  const messages = (
+    <>
+      {error && <pre className="render-error">{error}</pre>}
+      {notice && <p className="ok-text">{notice}</p>}
+    </>
+  );
   return (
-    <div className="workspace page">
-      <header className="panel-header">
-        <h2>ワークスペース</h2>
-      </header>
-
-      <section className="workspace-current">
-        <label className="workspace-name">
-          名前
-          <input
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setDirty(true);
-            }}
-          />
-        </label>
-
-        <h3>ソース</h3>
-        <table className="workspace-sources">
-          <thead>
-            <tr>
-              <th>有効</th>
-              <th>名前</th>
-              <th>種類</th>
-              <th>パス</th>
-              <th>mapper XML</th>
-              <th aria-label="操作" />
-            </tr>
-          </thead>
-          <tbody>
-            {sources.map((s, i) => (
-              <tr key={s.id ?? `new-${i}`} className={s.enabled ? undefined : 'disabled'}>
-                <td>
-                  <input type="checkbox" checked={s.enabled} aria-label="有効" onChange={(e) => edit(i, { enabled: e.target.checked })} />
-                </td>
-                <td>
-                  <input
-                    className="workspace-source-name"
-                    value={s.name}
-                    placeholder={lastName(s.path) || '名前'}
-                    onChange={(e) => edit(i, { name: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <select value={s.type} onChange={(e) => edit(i, { type: e.target.value as WorkspaceSource['type'] })}>
-                    {TYPES.map(([t, label]) => (
-                      <option key={t} value={t}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    className="workspace-source-path"
-                    value={s.path}
-                    placeholder={PLACEHOLDER[s.type]}
-                    onChange={(e) => edit(i, { path: e.target.value, error: null, files: null })}
-                  />
-                </td>
-                <td className="workspace-source-state">
-                  {s.error ? (
-                    <span className="error-text">{s.error}</span>
-                  ) : !s.enabled ? (
-                    <span className="hint">無効</span>
-                  ) : s.files === -1 ? (
-                    <span className="error-text">読めません</span>
-                  ) : s.files != null ? (
-                    `${s.files} 件`
-                  ) : null}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => {
-                      setSources((old) => old.filter((_, k) => k !== i));
-                      setDirty(true);
-                    }}
-                  >
-                    外す
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {sources.length === 0 && (
-              <tr>
-                <td colSpan={6} className="hint">
-                  ソースがありません
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        <div className="workspace-actions">
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              setSources((old) => [...old, { name: '', type: 'project', path: '', enabled: true }]);
-              setDirty(true);
-            }}
-          >
-            ＋ ソースを追加
+    <div className="workspace">
+      <nav className="workspace-nav">
+        <div className="workspace-nav-name">{snap.current.name}</div>
+        {SECTIONS.map(([key, label]) => (
+          <button key={key} type="button" className={section === key ? 'selected' : undefined} onClick={() => onSection(key)}>
+            {label}
           </button>
-          <span className="spacer" />
-          <button
-            type="button"
-            disabled={busy || !dirty}
-            onClick={() =>
-              run(
-                () =>
-                  api.saveWorkspace(
-                    name,
-                    sources.map((s) => ({ ...s, name: s.name.trim() || lastName(s.path) })),
-                    relationConnection,
-                  ),
-                '保存しました',
-                false,
-                true,
-              )
-            }
-          >
-            保存
-          </button>
-          {dirty && (
-            <button type="button" className="link" disabled={busy} onClick={() => run(() => api.workspace())}>
-              元に戻す
-            </button>
-          )}
-        </div>
-        <h3>リレーションの解析の結果</h3>
-        <label className="workspace-relation">
-          <select
-            value={relationConnection ?? ''}
-            onChange={(e) => {
-              setRelationConnection(e.target.value || null);
-              setDirty(true);
-            }}
-          >
-            <option value="">接続先ごと</option>
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} の結果を共有
-              </option>
-            ))}
-            {relationConnection && !connections.some((c) => c.id === relationConnection) && (
-              <option value={relationConnection}>（今はない接続先: {relationConnection}）</option>
-            )}
-          </select>
-        </label>
-        {error && <pre className="render-error">{error}</pre>}
-        {notice && <p className="ok-text">{notice}</p>}
-      </section>
+        ))}
+      </nav>
+      <div className="workspace-content">
+        {section === 'sources' && (
+          <div className="page">
+            <header className="panel-header">
+              <h2>全般</h2>
+            </header>
+            {messages}
+            <section className="workspace-current">
+              <label className="workspace-name">
+                名前
+                <input
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setDirty(true);
+                  }}
+                />
+              </label>
 
-      <section className="workspace-others">
-        <h3>ほかのワークスペース</h3>
-        {others.length === 0 ? (
-          <p className="hint">ありません</p>
-        ) : (
-          <ul>
-            {others.map((w) => (
-              <li key={w.id}>
-                <span className="workspace-other-name">{w.name}</span>
-                <span className="hint">ソース {w.sources} 件</span>
-                <button type="button" disabled={busy || dirty} onClick={() => run(() => api.openWorkspace(w.id), undefined, true)}>
-                  開く
-                </button>
+              <h3>ソース</h3>
+              <table className="workspace-sources">
+                <thead>
+                  <tr>
+                    <th>有効</th>
+                    <th>名前</th>
+                    <th>種類</th>
+                    <th>パス</th>
+                    <th>mapper XML</th>
+                    <th aria-label="操作" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sources.map((s, i) => (
+                    <tr key={s.id ?? `new-${i}`} className={s.enabled ? undefined : 'disabled'}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={s.enabled}
+                          aria-label="有効"
+                          onChange={(e) => edit(i, { enabled: e.target.checked })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="workspace-source-name"
+                          value={s.name}
+                          placeholder={lastName(s.path) || '名前'}
+                          onChange={(e) => edit(i, { name: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <select value={s.type} onChange={(e) => edit(i, { type: e.target.value as WorkspaceSource['type'] })}>
+                          {TYPES.map(([t, label]) => (
+                            <option key={t} value={t}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="workspace-source-path"
+                          value={s.path}
+                          placeholder={PLACEHOLDER[s.type]}
+                          onChange={(e) => edit(i, { path: e.target.value, error: null, files: null })}
+                        />
+                      </td>
+                      <td className="workspace-source-state">
+                        {s.error ? (
+                          <span className="error-text">{s.error}</span>
+                        ) : !s.enabled ? (
+                          <span className="hint">無効</span>
+                        ) : s.files === -1 ? (
+                          <span className="error-text">読めません</span>
+                        ) : s.files != null ? (
+                          `${s.files} 件`
+                        ) : null}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="link"
+                          onClick={() => {
+                            setSources((old) => old.filter((_, k) => k !== i));
+                            setDirty(true);
+                          }}
+                        >
+                          外す
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {sources.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="hint">
+                        ソースがありません
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div className="workspace-actions">
                 <button
                   type="button"
                   className="link"
-                  disabled={busy}
-                  onClick={() => window.confirm(`「${w.name}」を消しますか？`) && run(() => api.deleteWorkspace(w.id))}
+                  onClick={() => {
+                    setSources((old) => [...old, { name: '', type: 'project', path: '', enabled: true }]);
+                    setDirty(true);
+                  }}
                 >
-                  消す
+                  ＋ ソースを追加
                 </button>
-              </li>
-            ))}
-          </ul>
+                <span className="spacer" />
+                <button
+                  type="button"
+                  disabled={busy || !dirty}
+                  onClick={() =>
+                    run(
+                      () =>
+                        api.saveWorkspace(
+                          name,
+                          sources.map((s) => ({ ...s, name: s.name.trim() || lastName(s.path) })),
+                          relationConnection,
+                        ),
+                      '保存しました',
+                      false,
+                      true,
+                    )
+                  }
+                >
+                  保存
+                </button>
+                {dirty && (
+                  <button type="button" className="link" disabled={busy} onClick={() => run(() => api.workspace())}>
+                    元に戻す
+                  </button>
+                )}
+              </div>
+              <h3>リレーションの解析の結果</h3>
+              <label className="workspace-relation">
+                <select
+                  value={relationConnection ?? ''}
+                  onChange={(e) => {
+                    setRelationConnection(e.target.value || null);
+                    setDirty(true);
+                  }}
+                >
+                  <option value="">接続先ごと</option>
+                  {connections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} の結果を共有
+                    </option>
+                  ))}
+                  {relationConnection && !connections.some((c) => c.id === relationConnection) && (
+                    <option value={relationConnection}>（今はない接続先: {relationConnection}）</option>
+                  )}
+                </select>
+              </label>
+            </section>
+          </div>
         )}
-        <div className="workspace-transfer">
-          <button type="button" className="link" onClick={exportDefinition}>
-            書き出す
-          </button>
-          <button type="button" className="link" disabled={busy} onClick={() => importFile.current?.click()}>
-            読み込む
-          </button>
-          <input
-            ref={importFile}
-            type="file"
-            accept=".json,application/json"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (f) importDefinition(f);
-            }}
-          />
-        </div>
-        <form
-          className="workspace-create"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(() => api.createWorkspace(newName.trim()), undefined, true).then(() => setNewName(''));
-          }}
-        >
-          <input value={newName} placeholder="新しいワークスペース" onChange={(e) => setNewName(e.target.value)} />
-          <button type="submit" disabled={busy || dirty}>
-            作る
-          </button>
-        </form>
-      </section>
+        {section === 'connections' && <ConnectionsScreen conn={conn} />}
+        {section === 'list' && (
+          <div className="page">
+            <header className="panel-header">
+              <h2>ワークスペースの一覧</h2>
+            </header>
+            {messages}
+            <section className="workspace-others">
+              {others.length === 0 ? (
+                <p className="hint">ありません</p>
+              ) : (
+                <ul>
+                  {others.map((w) => (
+                    <li key={w.id}>
+                      <span className="workspace-other-name">{w.name}</span>
+                      <span className="hint">ソース {w.sources} 件</span>
+                      <button type="button" disabled={busy || dirty} onClick={() => run(() => api.openWorkspace(w.id), undefined, true)}>
+                        開く
+                      </button>
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        onClick={() => window.confirm(`「${w.name}」を消しますか？`) && run(() => api.deleteWorkspace(w.id))}
+                      >
+                        消す
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="workspace-transfer">
+                <button type="button" className="link" onClick={exportDefinition}>
+                  書き出す
+                </button>
+                <button type="button" className="link" disabled={busy} onClick={() => importFile.current?.click()}>
+                  読み込む
+                </button>
+                <input
+                  ref={importFile}
+                  type="file"
+                  accept=".json,application/json"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (f) importDefinition(f);
+                  }}
+                />
+              </div>
+              <form
+                className="workspace-create"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  run(() => api.createWorkspace(newName.trim()), undefined, true).then(() => setNewName(''));
+                }}
+              >
+                <input value={newName} placeholder="新しいワークスペース" onChange={(e) => setNewName(e.target.value)} />
+                <button type="submit" disabled={busy || dirty}>
+                  作る
+                </button>
+              </form>
+            </section>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

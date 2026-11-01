@@ -2,10 +2,10 @@ import { RelationsScreen } from './Relations';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, SourceColumn, TemplateResponse } from './api';
 import { ApiError, createApi, takeToken } from './api';
-import { BulkCheck } from './Bulk';
 import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
 import { CandidatePane } from './Suggest';
+import type { WorkspaceSection } from './Workspace';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
@@ -17,7 +17,6 @@ import type { Drafts } from './drafts';
 import { draftParam, useDrafts } from './drafts';
 import { FileEditor } from './FileEditor';
 import { CopyToGlobal, GlobalsScreen, StatementGlobals, useGlobals } from './Globals';
-import { ConnectionsScreen } from './Execution';
 import { applicable, combine, originAt } from './globalModel';
 import { ParamTree } from './ParamTree';
 import { Splitter, usePaneWidths } from './Splitter';
@@ -69,14 +68,12 @@ function saveTab(tab: Tab) {
 
 // ---- 画面の切り替えと URL ----
 
-type Screen = 'query' | 'globals' | 'bulk' | 'relations' | 'connections' | 'workspace';
+type Screen = 'query' | 'globals' | 'relations' | 'workspace';
 
 const SCREENS: [Screen, string][] = [
   ['query', 'クエリ'],
   ['globals', '共通パラメータ'],
-  ['bulk', '一括チェック'],
   ['relations', 'リレーション'],
-  ['connections', '接続先'],
   ['workspace', 'ワークスペース'],
 ];
 
@@ -100,9 +97,15 @@ const tableOfColumn = (col: string) => col.slice(0, col.lastIndexOf('.'));
  * #/relations（/table/表、/column/列、/statement/statement の id、/name/パラメータ名）。
  * 以前の形（#statement の id、#/relations/列）も読む。
  */
-function parseHash(): { screen: Screen; statement: string | null; global: string | null; relation: RelationLoc } {
+function parseHash(): {
+  screen: Screen;
+  statement: string | null;
+  global: string | null;
+  relation: RelationLoc;
+  workspace: WorkspaceSection;
+} {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  const none = { statement: null, global: null, relation: NO_RELATION };
+  const none = { statement: null, global: null, relation: NO_RELATION, workspace: 'sources' as WorkspaceSection };
   if (!hash) return { screen: 'query', ...none };
   if (!hash.startsWith('/')) return { screen: 'query', ...none, statement: hash };
   const [, screen, ...rest] = hash.split('/');
@@ -110,6 +113,9 @@ function parseHash(): { screen: Screen; statement: string | null; global: string
   const arg = rest.join('/');
   if (screen === 'query') return { screen: 'query', ...none, statement: arg || null };
   if (screen === 'globals') return { screen: 'globals', ...none, global: arg || null };
+  // 接続先は、ワークスペースの中（前の #/connections も読む）
+  if (screen === 'connections') return { screen: 'workspace', ...none, workspace: 'connections' };
+  if (screen === 'workspace') return { screen: 'workspace', ...none, workspace: arg === 'connections' || arg === 'list' ? arg : 'sources' };
   if (screen === 'relations') {
     const [kind, ...more] = rest;
     const value = more.join('/') || null;
@@ -132,7 +138,14 @@ function parseHash(): { screen: Screen; statement: string | null; global: string
 
 const enc = encodeURIComponent;
 
-function hashOf(screen: Screen, statement: string | null, global: string | null = null, relation: RelationLoc = NO_RELATION): string {
+function hashOf(
+  screen: Screen,
+  statement: string | null,
+  global: string | null = null,
+  relation: RelationLoc = NO_RELATION,
+  workspace: WorkspaceSection = 'sources',
+): string {
+  if (screen === 'workspace') return workspace === 'sources' ? '#/workspace' : `#/workspace/${workspace}`;
   if (screen === 'query') return `#/query/${statement ? enc(statement) : ''}`;
   if (screen === 'globals') return global ? `#/globals/${enc(global)}` : '#/globals';
   if (screen === 'relations') {
@@ -238,6 +251,13 @@ function Workspace({ api }: { api: Api }) {
   const [copying, setCopying] = useState(false);
   const panes = usePaneWidths();
   const [screen, setScreen] = useState<Screen>(() => parseHash().screen);
+  /** ワークスペースの画面で見ているもの（ソース・接続先・一覧） */
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>(() => parseHash().workspace);
+  const navigateWorkspace = (section: WorkspaceSection) => {
+    setScreen('workspace');
+    setWorkspaceSection(section);
+    pushHash(hashOf('workspace', null, null, NO_RELATION, section));
+  };
   /** リレーションの画面で見ているもの（アドレスに残し、戻る・進むで戻す） */
   const [relationLoc, setRelationLoc] = useState<RelationLoc>(() => parseHash().relation);
   const navigateRelation = (loc: RelationLoc) => {
@@ -265,7 +285,7 @@ function Workspace({ api }: { api: Api }) {
   const drafts = useDrafts(api, generation, handleError);
 
   const opener = useOpener(api, handleError);
-  const conn = useConnections(api, handleError, () => go('connections'));
+  const conn = useConnections(api, handleError, () => navigateWorkspace('connections'));
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -521,7 +541,7 @@ function Workspace({ api }: { api: Api }) {
   /** 画面を切り替える（ブラウザの履歴に残す。画面の中で選んでいるものも残す） */
   const go = (next: Screen) => {
     setScreen(next);
-    pushHash(hashOf(next, selected, globalFocus, relationLoc));
+    pushHash(hashOf(next, selected, globalFocus, relationLoc, workspaceSection));
   };
 
   // ブラウザの戻る・進むで、画面と statement を合わせる
@@ -531,6 +551,7 @@ function Workspace({ api }: { api: Api }) {
       setScreen(h.screen);
       if (h.screen === 'relations') setRelationLoc(h.relation);
       if (h.screen === 'globals') setGlobalFocus(h.global);
+      if (h.screen === 'workspace') setWorkspaceSection(h.workspace);
       if (h.statement && h.statement !== selectedRef.current) select(h.statement, 'none');
     };
     window.addEventListener('popstate', onPop);
@@ -944,30 +965,6 @@ function Workspace({ api }: { api: Api }) {
         />
       </div>
 
-      <div className="screen scroll" hidden={screen !== 'bulk'}>
-        <BulkCheck
-          api={api}
-          conn={conn}
-          statements={statements}
-          globalSets={globals.sets}
-          globalStatements={globals.statements}
-          active={screen === 'bulk'}
-          sourceVersion={`${generation}:${drafts.version}`}
-          draftOf={(file) => draftParam(drafts.get(file))}
-          onOpen={(id) => {
-            setTab('explain');
-            saveTab('explain');
-            setScreen('query');
-            select(id);
-          }}
-          onOpenParams={(id) => {
-            setParamTab('local');
-            setScreen('query');
-            select(id);
-          }}
-        />
-      </div>
-
       <div className="screen scroll" hidden={screen !== 'relations'}>
         <RelationsScreen
           api={api}
@@ -983,13 +980,12 @@ function Workspace({ api }: { api: Api }) {
         />
       </div>
 
-      <div className="screen scroll" hidden={screen !== 'connections'}>
-        <ConnectionsScreen conn={conn} />
-      </div>
-
       <div className="screen scroll" hidden={screen !== 'workspace'}>
         <WorkspaceScreen
           api={api}
+          conn={conn}
+          section={workspaceSection}
+          onSection={navigateWorkspace}
           active={screen === 'workspace'}
           onOpened={() => {
             // 別のワークスペースは、statement・接続先・共通パラメータなどがすべて違うので、画面を読み込み直す
@@ -997,7 +993,6 @@ function Workspace({ api }: { api: Api }) {
             window.location.reload();
           }}
           onSaved={conn.reload}
-          connections={conn.connections}
         />
       </div>
 
