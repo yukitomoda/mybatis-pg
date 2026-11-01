@@ -1,6 +1,8 @@
-// リレーションの関係図（試作）: 選んだ表を中心に、親を上、子を下、兄弟を横に、段ごとに並べて描く。
+// リレーションの関係図（試作）: 選んだ表のまわりの表を、ELK（段ごとに並べる配置）で、親を上、子を下に描く。
+// 線は箱を避けた縦横の折れ線にし、表にマウスを乗せるとその表の線だけを強調する。
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { RelationLink } from './api';
 import { Popover } from './Popover';
 
@@ -10,7 +12,7 @@ const tableOf = (col: string) => col.slice(0, col.lastIndexOf('.'));
 export type TableEdge = {
   /** 親子なら子の表、兄弟・1 対 1 なら名前の小さいほう */
   from: string;
-  /** 親子なら親の表 */
+  /** 親子なら親の表（自己参照なら from と同じ） */
   to: string;
   kind: 'parent' | 'sibling' | 'one-to-one';
   links: RelationLink[];
@@ -20,14 +22,14 @@ export type TableEdge = {
   manual: boolean;
 };
 
-/** 列のつながりを、表の組ごとにまとめる（無効にしたものと、同じ表の中のものは除く） */
+/** 列のつながりを、表の組ごとにまとめる（無効にしたものと、同じ表の中の兄弟は除く。自己参照の親子は残す） */
 export function tableEdges(links: RelationLink[]): TableEdge[] {
   const out = new Map<string, TableEdge & { ids: Set<string> }>();
   for (const l of links) {
     if (l.disabled) continue;
     const ta = tableOf(l.a);
     const tb = tableOf(l.b);
-    if (ta === tb) continue;
+    if (ta === tb && l.kind === 'sibling') continue;
     const parent = l.kind === 'parent';
     const [from, to] = parent ? [ta, tb] : ta < tb ? [ta, tb] : [tb, ta];
     const key = `${l.kind}\u0000${from}\u0000${to}`;
@@ -44,100 +46,121 @@ export function tableEdges(links: RelationLink[]): TableEdge[] {
   return [...out.values()];
 }
 
-type Node = { table: string; level: number; x: number; y: number; w: number; label: string; sub: string };
-
-const NODE_H = 46;
-const ROW_GAP = 74;
-const COL_GAP = 28;
-const MARGIN = 24;
-/** 1 段に出す表の上限（多すぎる段は、残りを数だけ出す） */
+/** 1 つの方向に出す表の上限（多すぎるときは、残りを数だけ出す） */
 const MAX_PER_LEVEL = 24;
 
-/** 段ごとに並べる。中心は 0 段、親は上（負）、子は下（正）、兄弟・1 対 1 は中心と同じ段 */
-function layout(
-  center: string,
-  edges: TableEdge[],
-  depth: number,
-  siblings: boolean,
-  label: (t: string) => string,
-  sub: (t: string) => string,
-): { nodes: Node[]; hidden: Map<number, number>; width: number; height: number } {
-  const level = new Map<string, number>([[center, 0]]);
-  const hidden = new Map<number, number>();
-  const place = (ts: string[], lv: number) => {
-    const fresh = [...new Set(ts)].filter((t) => !level.has(t));
-    fresh.slice(0, MAX_PER_LEVEL).forEach((t) => level.set(t, lv));
-    if (fresh.length > MAX_PER_LEVEL) hidden.set(lv, fresh.length - MAX_PER_LEVEL);
+/**
+ * 図に出す表を選ぶ: 中心から親の方向・子の方向に depth 段まで、兄弟・1 対 1、中心の子のほかの親。
+ * 段ごとに多すぎる表は省いて、省いた数を返す
+ */
+export function neighborhood(center: string, edges: TableEdge[], depth: number, siblings: boolean) {
+  const shown = new Set<string>([center]);
+  let hidden = 0;
+  const place = (ts: string[]) => {
+    const fresh = [...new Set(ts)].filter((t) => !shown.has(t));
+    fresh.slice(0, MAX_PER_LEVEL).forEach((t) => shown.add(t));
+    hidden += Math.max(0, fresh.length - MAX_PER_LEVEL);
     return fresh.slice(0, MAX_PER_LEVEL);
   };
   if (siblings) {
     place(
       edges.filter((e) => e.kind !== 'parent' && (e.from === center || e.to === center)).map((e) => (e.from === center ? e.to : e.from)),
-      0,
     );
   }
+  let children: string[] = [];
   for (const dir of [-1, 1]) {
     let frontier = [center];
     for (let d = 1; d <= depth && frontier.length > 0; d++) {
       const next = edges
-        .filter((e) => e.kind === 'parent' && frontier.includes(dir < 0 ? e.from : e.to))
+        .filter((e) => e.kind === 'parent' && e.from !== e.to && frontier.includes(dir < 0 ? e.from : e.to))
         .map((e) => (dir < 0 ? e.to : e.from));
-      frontier = place(next, dir * d);
+      frontier = place(next);
+      if (dir > 0 && d === 1) children = frontier;
     }
   }
-  // 中心の子の、ほかの親（order_items の親の products など）も、中心と同じ段に出す
-  const children = [...level].filter(([, lv]) => lv === 1).map(([t]) => t);
-  place(
-    edges.filter((e) => e.kind === 'parent' && children.includes(e.from)).map((e) => e.to),
-    0,
-  );
+  // 中心の子の、ほかの親（order_items の親の products など）
+  place(edges.filter((e) => e.kind === 'parent' && children.includes(e.from)).map((e) => e.to));
+  return { shown, hidden };
+}
 
-  // 段ごとの並び: 中心の段は中心を真ん中に、ほかの段はつながる表の位置の平均の順（線の交わりを減らす）
-  const width = (t: string) => Math.min(280, Math.max(120, Math.max(label(t).length, sub(t).length) * 7.4 + 24));
-  const xs = new Map<string, number>();
-  const rows = new Map<number, string[]>();
-  for (const [t, lv] of level) rows.set(lv, [...(rows.get(lv) ?? []), t]);
-  const lay = (ts: string[]) => {
-    const total = ts.reduce((n, t) => n + width(t), 0) + COL_GAP * (ts.length - 1);
-    let x = -total / 2;
-    for (const t of ts) {
-      xs.set(t, x + width(t) / 2);
-      x += width(t) + COL_GAP;
-    }
+const NODE_H = 46;
+const nodeWidth = (label: string, sub: string) => Math.min(300, Math.max(120, Math.max(label.length, sub.length) * 7.4 + 24));
+
+type Placed = { table: string; x: number; y: number; w: number; label: string; sub: string };
+type Routed = { edge: TableEdge; points: { x: number; y: number }[] };
+type Laid = { nodes: Placed[]; edges: Routed[]; width: number; height: number };
+
+/** ELK は大きいので、図を開いたときに読み込む */
+let elk: Promise<{ layout: (g: ElkNode) => Promise<ElkNode> }> | null = null;
+const loadElk = () => (elk ??= import('elkjs/lib/elk.bundled.js').then((m) => new m.default()));
+
+async function layoutWithElk(
+  tables: string[],
+  edges: TableEdge[],
+  label: (t: string) => string,
+  sub: (t: string) => string,
+): Promise<Laid> {
+  const engine = await loadElk();
+  const graph: ElkNode = {
+    id: 'root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      // 親を上に（線は親 → 子の向きで渡す）
+      'elk.direction': 'DOWN',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '36',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '64',
+      'elk.spacing.edgeNode': '16',
+      'elk.spacing.edgeEdge': '10',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '20',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '10',
+      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.cycleBreaking.strategy': 'GREEDY',
+      'elk.padding': '[top=24,left=24,bottom=24,right=24]',
+    },
+    children: tables.map((t) => ({ id: t, width: nodeWidth(label(t), sub(t)), height: NODE_H })),
+    edges: edges.map((e, i): ElkExtendedEdge => ({
+      id: `e${i}`,
+      // 親子は親 → 子（親が上の段になる）。兄弟・1 対 1 は名前の順
+      sources: [e.kind === 'parent' ? e.to : e.from],
+      targets: [e.kind === 'parent' ? e.from : e.to],
+    })),
   };
-  const side = (rows.get(0) ?? []).filter((t) => t !== center).sort();
-  lay([...side.slice(0, Math.ceil(side.length / 2)), center, ...side.slice(Math.ceil(side.length / 2))]);
-  const neighbors = (t: string) => edges.filter((e) => e.from === t || e.to === t).map((e) => (e.from === t ? e.to : e.from));
-  const levels = [...rows.keys()];
-  for (const dir of [-1, 1]) {
-    for (let d = 1; levels.includes(dir * d); d++) {
-      const ts = rows.get(dir * d)!;
-      const bary = (t: string) => {
-        const near = neighbors(t).filter((n) => level.get(n) === dir * (d - 1) && xs.has(n));
-        return near.length ? near.reduce((n, x) => n + xs.get(x)!, 0) / near.length : 0;
-      };
-      lay([...ts].sort((a, b) => bary(a) - bary(b) || a.localeCompare(b)));
-    }
-  }
-
-  const minLevel = Math.min(...levels);
-  const nodes: Node[] = [...level].map(([t, lv]) => ({
-    table: t,
-    level: lv,
-    x: xs.get(t)!,
-    y: (lv - minLevel) * (NODE_H + ROW_GAP),
-    w: width(t),
-    label: label(t),
-    sub: sub(t),
+  const out = await engine.layout(graph);
+  const nodes = (out.children ?? []).map((n) => ({
+    table: n.id,
+    x: n.x ?? 0,
+    y: n.y ?? 0,
+    w: n.width ?? 120,
+    label: label(n.id),
+    sub: sub(n.id),
   }));
-  const minX = Math.min(...nodes.map((n) => n.x - n.w / 2));
-  const maxX = Math.max(...nodes.map((n) => n.x + n.w / 2));
-  for (const n of nodes) {
-    n.x += MARGIN - minX;
-    n.y += MARGIN;
+  const routed = (out.edges ?? []).map((oe, i) => {
+    const s = (oe as ElkExtendedEdge).sections?.[0];
+    const points = s ? [s.startPoint, ...(s.bendPoints ?? []), s.endPoint] : [];
+    return { edge: edges[i], points };
+  });
+  return { nodes, edges: routed, width: out.width ?? 0, height: out.height ?? 0 };
+}
+
+/** 折れ線を、角を丸めた path にする */
+function roundedPath(points: { x: number; y: number }[], r = 8): string {
+  if (points.length < 2) return '';
+  let d = `M${points[0].x},${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i - 1];
+    const c = points[i];
+    const n = points[i + 1];
+    const d1 = Math.hypot(c.x - p.x, c.y - p.y);
+    const d2 = Math.hypot(n.x - c.x, n.y - c.y);
+    const k = Math.min(r, d1 / 2, d2 / 2);
+    const a = { x: c.x - ((c.x - p.x) / (d1 || 1)) * k, y: c.y - ((c.y - p.y) / (d1 || 1)) * k };
+    const b = { x: c.x + ((n.x - c.x) / (d2 || 1)) * k, y: c.y + ((n.y - c.y) / (d2 || 1)) * k };
+    d += ` L${a.x},${a.y} Q${c.x},${c.y} ${b.x},${b.y}`;
   }
-  const maxY = Math.max(...nodes.map((n) => n.y + NODE_H));
-  return { nodes, hidden, width: maxX - minX + MARGIN * 2 + 120, height: maxY + MARGIN };
+  const last = points[points.length - 1];
+  return `${d} L${last.x},${last.y}`;
 }
 
 export function RelationDiagram({
@@ -161,6 +184,8 @@ export function RelationDiagram({
   const [siblings, setSiblings] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [open, setOpen] = useState<{ edge: TableEdge; at: DOMRect } | null>(null);
+  /** マウスを乗せている表（その表の線だけを強調する） */
+  const [hover, setHover] = useState<string | null>(null);
   const edges = useMemo(() => tableEdges(links), [links]);
   const label = (t: string) => (oneSchema ? t.slice(t.indexOf('.') + 1) : t);
   // 主キーの列（列の一意の順位が偶数で、いちばん小さいもの）
@@ -180,42 +205,43 @@ export function RelationDiagram({
     const pk = pkOf.get(t);
     return pk ? `PK: ${pk.cols.join(', ')}` : '';
   };
-  const { nodes, hidden, width, height } = useMemo(
-    () => layout(center, edges, depth, siblings, label, sub),
-    [center, edges, depth, siblings, oneSchema, pkOf],
-  );
-  const at = new Map(nodes.map((n) => [n.table, n]));
-  const shownEdges = edges.filter((e) => at.has(e.from) && at.has(e.to) && (siblings || e.kind === 'parent'));
 
-  // 中心の表が見えるようにスクロールする
+  const { shown, hidden } = useMemo(() => neighborhood(center, edges, depth, siblings), [center, edges, depth, siblings]);
+  const shownEdges = useMemo(
+    () => edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (siblings || e.kind === 'parent')),
+    [edges, shown, siblings],
+  );
+  const [laid, setLaid] = useState<Laid | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    layoutWithElk([...shown], shownEdges, label, sub).then(
+      (l) => active && setLaid(l),
+      (e) => active && setError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      active = false;
+    };
+  }, [shown, shownEdges, oneSchema, pkOf]);
+
+  // 中心の表が見えるようにスクロールする（配置し直したときと、拡大・縮小したとき）
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scroller.current;
-    const c = at.get(center);
+    const c = laid?.nodes.find((n) => n.table === center);
     if (!el || !c) return;
-    el.scrollLeft = c.x * zoom - el.clientWidth / 2;
+    el.scrollLeft = (c.x + c.w / 2) * zoom - el.clientWidth / 2;
     el.scrollTop = (c.y + NODE_H / 2) * zoom - el.clientHeight / 2;
-  }, [center, depth, siblings, zoom]);
+  }, [laid, zoom]);
 
-  const path = (e: TableEdge) => {
-    const a = at.get(e.from)!;
-    const b = at.get(e.to)!;
-    if (a.level === b.level) {
-      // 同じ段: 上に弧を描いて、横の箱どうしをつなぐ
-      const [l, r] = a.x < b.x ? [a, b] : [b, a];
-      const x1 = l.x + l.w / 2;
-      const x2 = r.x - r.w / 2;
-      const y = l.y + NODE_H / 2;
-      const lift = Math.min(60, 18 + (x2 - x1) / 4);
-      return { d: `M${x1},${y} C${x1 + 30},${y - lift} ${x2 - 30},${y - lift} ${x2},${y}`, mx: (x1 + x2) / 2, my: y - lift * 0.75 };
-    }
-    // 上下: 上の箱の下の辺から、下の箱の上の辺へ
-    const [top, bottom] = a.y < b.y ? [a, b] : [b, a];
-    const y1 = top.y + NODE_H;
-    const y2 = bottom.y;
-    const my = (y1 + y2) / 2;
-    return { d: `M${top.x},${y1} C${top.x},${my} ${bottom.x},${my} ${bottom.x},${y2}`, mx: (top.x + bottom.x) / 2, my };
-  };
+  // マウスを乗せた表と、つながる表
+  const near = useMemo(() => {
+    if (!hover) return null;
+    const s = new Set([hover]);
+    for (const e of shownEdges) if (e.from === hover || e.to === hover) s.add(e.from === hover ? e.to : e.from);
+    return s;
+  }, [hover, shownEdges]);
 
   return (
     <div className="relation-diagram">
@@ -234,13 +260,13 @@ export function RelationDiagram({
           <input type="checkbox" checked={siblings} onChange={(e) => setSiblings(e.target.checked)} /> 兄弟・1 対 1
         </label>
         <span className="relation-diagram-zoom">
-          <button type="button" className="icon" title="縮小" onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}>
+          <button type="button" className="icon" title="縮小" onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}>
             −
           </button>
           <button type="button" className="link" title="元の大きさ" onClick={() => setZoom(1)}>
             {Math.round(zoom * 100)}%
           </button>
-          <button type="button" className="icon" title="拡大" onClick={() => setZoom((z) => Math.min(2, z + 0.2))}>
+          <button type="button" className="icon" title="拡大" onClick={() => setZoom((z) => Math.min(2, z + 0.1))}>
             ＋
           </button>
         </span>
@@ -262,81 +288,88 @@ export function RelationDiagram({
           </svg>
           手動　線の太さは根拠の SQL の数
         </span>
+        {hidden > 0 && <span className="hint">多すぎる {hidden} 表は省きました</span>}
       </div>
       <div className="relation-diagram-scroll" ref={scroller}>
-        <svg
-          width={width * zoom}
-          height={height * zoom}
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label={`${label(center)} の関係図`}
-        >
-          <defs>
-            <marker id="rd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" className="edge-arrow" />
-            </marker>
-            <marker id="rd-arrow-manual" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" className="edge-arrow manual" />
-            </marker>
-          </defs>
-          {shownEdges.map((e) => {
-            const p = path(e);
-            const a = at.get(e.from)!;
-            const b = at.get(e.to)!;
-            // 親子の矢印は親の側に付ける（子 → 親）
-            const toParentAtEnd = e.kind === 'parent' && (a.level === b.level ? a.x < b.x : a.y < b.y);
-            const marker = e.kind === 'parent' ? (e.manual ? 'url(#rd-arrow-manual)' : 'url(#rd-arrow)') : undefined;
-            const cls = ['edge', e.kind, e.manual ? 'manual' : '', open?.edge === e ? 'active' : ''].filter(Boolean).join(' ');
-            const cols = e.links.map((l) => `${l.a.slice(l.a.lastIndexOf('.') + 1)} = ${l.b.slice(l.b.lastIndexOf('.') + 1)}`).join(', ');
-            return (
-              <g key={`${e.kind} ${e.from} ${e.to}`}>
-                <path
-                  d={p.d}
-                  className={cls}
-                  style={{ strokeWidth: 1.2 + Math.min(2.8, Math.log2(e.statements + 1) * 0.7) }}
-                  markerEnd={toParentAtEnd ? marker : undefined}
-                  markerStart={!toParentAtEnd ? marker : undefined}
-                />
-                {/* 押しやすいように、太い透明の線を重ねる */}
-                <path d={p.d} className="edge-hit" onClick={(ev) => setOpen({ edge: e, at: new DOMRect(ev.clientX, ev.clientY, 0, 0) })}>
-                  <title>
-                    {cols}（{e.manual && e.statements === 0 ? '手で設定' : `${e.statements} 件の SQL`}）
-                  </title>
-                </path>
-              </g>
-            );
-          })}
-          {nodes.map((n) => (
-            <g
-              key={n.table}
-              className={n.table === center ? 'node center' : 'node'}
-              transform={`translate(${n.x - n.w / 2},${n.y})`}
-              onClick={() => n.table !== center && onCenter(n.table)}
-            >
-              <title>{n.table === center ? n.table : `${n.table}（押すと、この表を中心にします）`}</title>
-              <rect width={n.w} height={NODE_H} rx="6" />
-              <text x={n.w / 2} y={n.sub ? 19 : 28} className="node-name">
-                {n.label}
-              </text>
-              {n.sub && (
-                <text x={n.w / 2} y={36} className="node-sub">
-                  {n.sub}
+        {error && <p className="error-text">図を配置できません: {error}</p>}
+        {!laid && !error && <p className="hint">配置しています…</p>}
+        {laid && (
+          <svg
+            width={laid.width * zoom}
+            height={laid.height * zoom}
+            viewBox={`0 0 ${laid.width} ${laid.height}`}
+            role="img"
+            aria-label={`${label(center)} の関係図`}
+            className={near ? 'hovering' : undefined}
+          >
+            <defs>
+              <marker id="rd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" className="edge-arrow" />
+              </marker>
+              <marker
+                id="rd-arrow-manual"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0 L10,5 L0,10 z" className="edge-arrow manual" />
+              </marker>
+            </defs>
+            {laid.edges.map(({ edge: e, points }) => {
+              const d = roundedPath(points);
+              // 親子の矢印は親の側（線の始まり。親 → 子の向きで配置している）に付ける
+              const marker = e.kind === 'parent' ? (e.manual ? 'url(#rd-arrow-manual)' : 'url(#rd-arrow)') : undefined;
+              const lit = hover !== null && (e.from === hover || e.to === hover);
+              const cls = ['edge', e.kind, e.manual ? 'manual' : '', open?.edge === e ? 'active' : '', lit ? 'lit' : '']
+                .filter(Boolean)
+                .join(' ');
+              const cols = e.links.map((l) => `${l.a.slice(l.a.lastIndexOf('.') + 1)} = ${l.b.slice(l.b.lastIndexOf('.') + 1)}`).join(', ');
+              return (
+                <g key={`${e.kind} ${e.from} ${e.to}`}>
+                  <path
+                    d={d}
+                    className={cls}
+                    style={{ strokeWidth: 1.2 + Math.min(2.8, Math.log2(e.statements + 1) * 0.7) }}
+                    markerStart={marker}
+                  />
+                  {/* 押しやすいように、太い透明の線を重ねる */}
+                  <path d={d} className="edge-hit" onClick={(ev) => setOpen({ edge: e, at: new DOMRect(ev.clientX, ev.clientY, 0, 0) })}>
+                    <title>
+                      {label(e.from)} {e.kind === 'parent' ? '→' : '＝'} {label(e.to)}: {cols}（
+                      {e.manual && e.statements === 0 ? '手で設定' : `${e.statements} 件の SQL`}）
+                    </title>
+                  </path>
+                </g>
+              );
+            })}
+            {laid.nodes.map((n) => (
+              <g
+                key={n.table}
+                className={['node', n.table === center ? 'center' : '', near && !near.has(n.table) ? 'dim' : ''].filter(Boolean).join(' ')}
+                transform={`translate(${n.x},${n.y})`}
+                onClick={() => n.table !== center && onCenter(n.table)}
+                onMouseEnter={() => setHover(n.table)}
+                onMouseLeave={() => setHover(null)}
+              >
+                <title>{n.table === center ? n.table : `${n.table}（押すと、この表を中心にします）`}</title>
+                <rect width={n.w} height={NODE_H} rx="6" />
+                <text x={n.w / 2} y={n.sub ? 19 : 28} className="node-name">
+                  {n.label}
                 </text>
-              )}
-            </g>
-          ))}
-          {[...hidden].map(([lv, count]) => {
-            const row = nodes.filter((n) => n.level === lv);
-            const right = Math.max(...row.map((n) => n.x + n.w / 2));
-            return (
-              <text key={lv} x={right + 12} y={row[0].y + NODE_H / 2 + 4} className="node-more">
-                ほか {count} 表
-              </text>
-            );
-          })}
-        </svg>
+                {n.sub && (
+                  <text x={n.w / 2} y={36} className="node-sub">
+                    {n.sub}
+                  </text>
+                )}
+              </g>
+            ))}
+          </svg>
+        )}
       </div>
-      {nodes.length === 1 && <p className="hint">この表には、推定したリレーションがありません。</p>}
+      {shown.size === 1 && <p className="hint">この表には、推定したリレーションがありません。</p>}
       {open && (
         <Popover anchor={open.at} onClose={() => setOpen(null)}>
           {edgeInfo(open.edge)}

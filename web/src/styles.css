@@ -3193,3 +3193,16 @@ body.col-resizing {
   stroke-width: 12;
   cursor: pointer;
 }
+
+/* 表にマウスを乗せている間は、その表の線とつながる表だけを強調する */
+.relation-diagram svg.hovering .edge:not(.lit) {
+  opacity: 0.15;
+}
+
+.relation-diagram svg .edge.lit {
+  stroke: var(--accent);
+}
+
+.relation-diagram svg .node.dim {
+  opacity: 0.35;
+}
