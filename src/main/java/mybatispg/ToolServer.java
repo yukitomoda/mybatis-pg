@@ -664,6 +664,11 @@ public final class ToolServer {
           history(ex);
         }
         break;
+      case "/api/table-rows":
+        if (requireMethod(ex, method, "POST")) {
+          tableRows(ex);
+        }
+        break;
       case "/api/results/more":
         if (requireMethod(ex, method, "POST")) {
           moreResults(ex);
@@ -1426,6 +1431,68 @@ public final class ToolServer {
     sendJson(ex, 200, body);
   }
 
+  /**
+   * 表の中身を、読み取り専用で読み、実行の履歴に残す（結果ビューで見る。続きの取得・再取得もできる）:
+   * {"connectionId", "table": schema.table, "maxRows"?} → {"historyId"}。主キーがあれば主キーの順に並べる（続きを取ってもずれないように）
+   */
+  private void tableRows(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    String table = string(req, "table");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    if (table == null || table.indexOf('.') <= 0) {
+      sendJson(ex, 400, error("表を schema.table で指定してください"));
+      return;
+    }
+    int maxRows = req.has("maxRows") ? Math.max(1, Math.min(MAX_ROWS_LIMIT, req.get("maxRows").getAsInt())) : 1000;
+    String schema = table.substring(0, table.indexOf('.'));
+    String name = table.substring(table.indexOf('.') + 1);
+    List<String> pk = new ArrayList<>();
+    try (java.sql.Connection c = connections.open(connectionId);
+        java.sql.PreparedStatement ps = c.prepareStatement("SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid"
+            + " JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)"
+            + " WHERE i.indisprimary AND n.nspname = ?::name AND c.relname = ?::name ORDER BY array_position(i.indkey::int2[], a.attnum)")) {
+      ps.setString(1, schema);
+      ps.setString(2, name);
+      try (java.sql.ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          pk.add(rs.getString(1));
+        }
+      }
+    } catch (java.sql.SQLException | RuntimeException e) {
+      sendJson(ex, 422, error(Errors.describe(e)));
+      return;
+    }
+    StringBuilder sql = new StringBuilder("SELECT * FROM ").append(quoteIdent(schema)).append('.').append(quoteIdent(name));
+    for (int i = 0; i < pk.size(); i++) {
+      sql.append(i == 0 ? " ORDER BY " : ", ").append(quoteIdent(pk.get(i)));
+    }
+    QueryExecutor.PartResult r;
+    try {
+      r = QueryExecutor.fetch(sql.toString(), null, () -> connections.open(connectionId), 0, 0, maxRows, null, 30);
+    } catch (QueryExecutor.ExecutionException e) {
+      Map<String, Object> err = error(e.getMessage());
+      err.put("historyId", record("table", table, req, null, connectionId, sql.toString(), null, null, null, null, null, 0, e.getMessage(),
+          maxRows, sql.toString()));
+      sendJson(ex, 422, err);
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("historyId", record("table", table, req, null, connectionId, sql.toString(), java.util.Collections.singletonList(r.table), null,
+        null, null, null, r.elapsedMillis, null, maxRows, sql.toString()));
+    sendJson(ex, 200, body);
+  }
+
+  private static String quoteIdent(String name) {
+    return "\"" + name.replace("\"", "\"\"") + "\"";
+  }
+
   /** 画面に返す履歴の 1 件（編集中の XML の中身は返さない） */
   private static JsonObject forClient(JsonObject o) {
     JsonObject c = o.deepCopy();
@@ -1470,39 +1537,49 @@ public final class ToolServer {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
-    JsonObject rreq = new JsonObject();
-    rreq.add("draft", draft ? entry.get("draftSource") : null);
-    SqlRenderer renderer = rendererFor(ex, rreq, statementId);
-    if (renderer == null) {
-      return;
-    }
-    SqlRenderer.Bound bound;
-    try {
-      Object parameters = entry.has("parameters") && !entry.get("parameters").isJsonNull()
-          ? TypedValues.decode(Json.GSON.fromJson(entry.get("parameters"), Object.class)) : null;
-      bound = renderer.bind(statementId, parameters);
-      if ("part".equals(kind)) {
-        bound = bound.part(string(entry, "sql"));
+    // 流す SQL と、バインド変数の設定（表の中身なら、保存した SQL をそのまま流す）
+    String nowSql;
+    QueryExecutor.ParameterSetter setter;
+    if ("table".equals(kind)) {
+      nowSql = string(entry, "boundSql");
+      setter = null;
+    } else {
+      JsonObject rreq = new JsonObject();
+      rreq.add("draft", draft ? entry.get("draftSource") : null);
+      SqlRenderer renderer = rendererFor(ex, rreq, statementId);
+      if (renderer == null) {
+        return;
       }
-    } catch (RuntimeException e) {
-      sendJson(ex, 422, error(Errors.describe(e)));
-      return;
-    }
-    String boundSql = string(entry, "boundSql");
-    if (!refetch && boundSql != null && !boundSql.equals(bound.sql())) {
-      sendJson(ex, 409, error("mapper XML が変わり、SQL が前と違うので、続きを取れません。「再取得」で最初から取り直してください"));
-      return;
+      SqlRenderer.Bound bound;
+      try {
+        Object parameters = entry.has("parameters") && !entry.get("parameters").isJsonNull()
+            ? TypedValues.decode(Json.GSON.fromJson(entry.get("parameters"), Object.class)) : null;
+        bound = renderer.bind(statementId, parameters);
+        if ("part".equals(kind)) {
+          bound = bound.part(string(entry, "sql"));
+        }
+      } catch (RuntimeException e) {
+        sendJson(ex, 422, error(Errors.describe(e)));
+        return;
+      }
+      String boundSql = string(entry, "boundSql");
+      if (!refetch && boundSql != null && !boundSql.equals(bound.sql())) {
+        sendJson(ex, 409, error("mapper XML が変わり、SQL が前と違うので、続きを取れません。「再取得」で最初から取り直してください"));
+        return;
+      }
+      nowSql = bound.sql();
+      setter = bound::setParameters;
     }
     JsonObject set = sets.get(index).getAsJsonObject();
     com.google.gson.JsonArray rows = set.getAsJsonArray("rows");
     int page = entry.has("pageSize") && entry.get("pageSize").getAsInt() > 0 ? entry.get("pageSize").getAsInt() : Math.max(1, rows.size());
     int offset = refetch ? 0 : rows.size();
     int limit = refetch ? Math.min(MAX_ROWS_LIMIT, Math.max(page, rows.size())) : page;
-    String sql = "part".equals(kind) ? "SELECT * FROM (\n" + bound.sql() + "\n) AS part" : bound.sql();
-    String countSql = "part".equals(kind) && refetch ? "SELECT count(*) FROM (\n" + bound.sql() + "\n) AS part" : null;
+    String sql = "part".equals(kind) ? "SELECT * FROM (\n" + nowSql + "\n) AS part" : nowSql;
+    String countSql = "part".equals(kind) && refetch ? "SELECT count(*) FROM (\n" + nowSql + "\n) AS part" : null;
     QueryExecutor.PartResult r;
     try {
-      r = QueryExecutor.fetch(sql, bound::setParameters, () -> connections.open(connectionId), index, offset, limit, countSql, 300);
+      r = QueryExecutor.fetch(sql, setter, () -> connections.open(connectionId), index, offset, limit, countSql, 300);
     } catch (QueryExecutor.ExecutionException e) {
       sendJson(ex, 422, error(e.getMessage()));
       return;
@@ -1515,9 +1592,9 @@ public final class ToolServer {
       sets.set(index, Json.GSON.toJsonTree(r.table));
       entry.addProperty("executedAt", System.currentTimeMillis());
       entry.addProperty("elapsedMillis", r.elapsedMillis);
-      entry.addProperty("boundSql", bound.sql());
+      entry.addProperty("boundSql", nowSql);
       if (!"part".equals(kind)) {
-        entry.addProperty("sql", bound.sql());
+        entry.addProperty("sql", nowSql);
       }
       if (r.total != null) {
         entry.addProperty("total", r.total);

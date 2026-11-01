@@ -3294,3 +3294,11 @@ div.relations-comment {
   gap: 0.2rem 0.5rem;
   margin-top: 0.4rem;
 }
+
+/* リレーション: 表の中身を見る */
+.relations-detail-title .relations-rows {
+  flex: none;
+  margin-left: 0.8rem;
+  font-size: 13px;
+  font-weight: normal;
+}

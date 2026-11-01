@@ -1,5 +1,6 @@
 // 結果ビュー: クエリの実行結果（実行タブ・サブクエリの部分）と値の候補を、非モーダルの浮いたウィンドウにまとめて表で出す。
 // 実行の履歴（サーバに直近の 50 件）と、それぞれの結果がどこから得られたものかも出す。
+import { useDbComments } from './comments';
 import type { PointerEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, HistoryEntry, HistorySummary, SourceColumn } from './api';
@@ -292,11 +293,18 @@ export function ResultView({
                   type="button"
                   className={historyId === h.id ? 'selected' : undefined}
                   onClick={() => rv.setSelection({ kind: 'history', id: h.id })}
-                  title={h.statementId}
+                  title={h.statementId ?? h.label ?? undefined}
                 >
                   <span className="result-view-item-title">
                     {h.error && <span className="warn-mark">⚠ </span>}
-                    {shortId(h.statementId)}
+                    {h.kind === 'table' ? (
+                      <>
+                        <span className="hint">表 </span>
+                        {h.label}
+                      </>
+                    ) : (
+                      shortId(h.statementId ?? '')
+                    )}
                     {h.kind === 'part' && <span className="hint"> {h.label ?? '部分'}</span>}
                   </span>
                   <span className="hint">
@@ -355,6 +363,8 @@ function HistoryDetail({
   onUpdated: () => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
+  // 表の中身なら、列の見出しに DB のコメントを出す
+  const comments = useDbComments(api, entry?.kind === 'table' ? entry.connectionId : null);
   /** 続きを取っている・取り直している */
   const [fetching, setFetching] = useState<'more' | 'refetch' | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -393,10 +403,16 @@ function HistoryDetail({
   return (
     <div className="history-detail">
       <div className="history-source">
-        <span className="badge">{entry.kind === 'part' ? `サブクエリ: ${entry.label ?? '部分'}` : '実行'}</span>
-        <button type="button" className="link" onClick={() => onOpenStatement(entry.statementId)} title="この statement を開く">
-          {entry.statementId}
-        </button>
+        <span className="badge">
+          {entry.kind === 'part' ? `サブクエリ: ${entry.label ?? '部分'}` : entry.kind === 'table' ? '表' : '実行'}
+        </span>
+        {entry.statementId ? (
+          <button type="button" className="link" onClick={() => onOpenStatement(entry.statementId!)} title="この statement を開く">
+            {entry.statementId}
+          </button>
+        ) : (
+          <code>{entry.label}</code>
+        )}
         {entry.draft && <span className="badge warn">編集中の XML</span>}
         <span className="hint">
           {entry.connectionName}　{time(entry.executedAt)}　{entry.elapsedMillis} ms
@@ -418,15 +434,17 @@ function HistoryDetail({
             {sets.length <= 1 ? '結果' : `結果 ${i + 1}`}
           </button>
         ))}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'params'}
-          className={tab === 'params' ? 'active' : undefined}
-          onClick={() => setTab('params')}
-        >
-          パラメータ
-        </button>
+        {entry.kind !== 'table' && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'params'}
+            className={tab === 'params' ? 'active' : undefined}
+            onClick={() => setTab('params')}
+          >
+            パラメータ
+          </button>
+        )}
         {entry.sql && (
           <button
             type="button"
@@ -458,6 +476,7 @@ function HistoryDetail({
                 rows={t.rows}
                 onCell={onCell}
                 truncated={t.truncated}
+                titles={entry.kind === 'table' ? t.columns.map((c) => comments.columns[`${entry.label}.${c}`]) : undefined}
                 actions={
                   <>
                     {t.truncated && (
@@ -489,9 +508,9 @@ function HistoryDetail({
           {!t && !entry.error && <p className="hint">結果の表はありません</p>}
         </>
       )}
-      {tab === 'params' && (
+      {tab === 'params' && entry.statementId && (
         <div className="history-params">
-          <button type="button" className="link" onClick={() => onRestoreParams(entry.statementId, entry.parameters)}>
+          <button type="button" className="link" onClick={() => onRestoreParams(entry.statementId!, entry.parameters)}>
             この値をパラメータ欄に戻す
           </button>
           <pre className="sql">{JSON.stringify(entry.parameters ?? {}, null, 2)}</pre>

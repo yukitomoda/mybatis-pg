@@ -557,6 +557,9 @@ export function createApi(token: string) {
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
     dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
+    /** 表の中身を読んで、実行の履歴に残す（結果ビューで見る） */
+    tableRows: (connectionId: string, table: string) =>
+      call<{ historyId: string | null }>('api/table-rows', post(JSON.stringify({ connectionId, table }))),
     /** DB の表と列のコメント（COMMENT ON）。キーは schema.table と schema.table.column */
     dbComments: (connectionId: string) =>
       call<{ tables: Record<string, string>; columns: Record<string, string> }>('api/db-comments', post(JSON.stringify({ connectionId }))),
@@ -728,10 +731,12 @@ export interface RelationsTiming {
 /** 実行の履歴の一覧の 1 件 */
 export interface HistorySummary {
   id: string;
-  kind: 'execute' | 'part';
-  /** 部分の名前（サブクエリの部分のとき） */
+  /** execute: 実行、part: サブクエリの部分、table: 表の中身（リレーションの画面から） */
+  kind: 'execute' | 'part' | 'table';
+  /** 部分の名前（サブクエリの部分のとき）、表（schema.table。表の中身のとき） */
   label: string | null;
-  statementId: string;
+  /** 表の中身なら null */
+  statementId: string | null;
   connectionName: string;
   executedAt: number;
   elapsedMillis: number;
@@ -744,9 +749,10 @@ export interface HistorySummary {
 /** 実行の履歴の 1 件の中身 */
 export interface HistoryEntry {
   id: string;
-  kind: 'execute' | 'part';
+  kind: 'execute' | 'part' | 'table';
   label: string | null;
-  statementId: string;
+  /** 表の中身なら null */
+  statementId: string | null;
   /** 編集中の下書きで実行した */
   draft: boolean;
   connectionId: string;

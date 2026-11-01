@@ -1,6 +1,7 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { Api, RelationLink, RelationStatement, RelationsResult, RelationsTiming } from './api';
+import { ApiError } from './api';
 import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
@@ -52,6 +53,7 @@ export function RelationsScreen({
   onOpen,
   loc,
   onNavigate,
+  onShowResult,
 }: {
   api: Api;
   conn: Connections;
@@ -62,9 +64,28 @@ export function RelationsScreen({
   /** 見ているもの（アドレスに残し、ブラウザの戻る・進むで戻すため、呼び出し側で持つ） */
   loc: RelationLoc;
   onNavigate: (loc: RelationLoc) => void;
+  /** 実行の履歴を、結果ビューで開く（表の中身を見たとき） */
+  onShowResult: (historyId: string) => void;
 }) {
   const side = useSideWidth('relations');
   const connectionId = conn.current?.id;
+  // 表の中身を読んで、結果ビューで見る
+  const [reading, setReading] = useState<string | null>(null);
+  const showRows = (t: string) => {
+    if (!connectionId) return;
+    setReading(t);
+    api
+      .tableRows(connectionId, t)
+      .then(
+        (r) => r.historyId && onShowResult(r.historyId),
+        (e) => {
+          const id = e instanceof ApiError ? e.historyId : null;
+          if (id) onShowResult(id);
+          else setError(message(e));
+        },
+      )
+      .finally(() => setReading(null));
+  };
   // DB の表と列のコメント（表と列の説明として出す）
   const comments = useDbComments(api, connectionId);
   const [result, setResult] = useState<RelationsResult | null>(null);
@@ -426,6 +447,14 @@ export function RelationsScreen({
                           {comments.tables[table]}
                         </span>
                       )}
+                      <button
+                        type="button"
+                        className="link relations-rows"
+                        disabled={!connectionId || reading === table}
+                        onClick={() => showRows(table)}
+                      >
+                        {reading === table ? '読んでいます…' : '中身を見る'}
+                      </button>
                     </h2>
                     <div className="tabs" role="tablist" aria-label="表示の仕方">
                       <button

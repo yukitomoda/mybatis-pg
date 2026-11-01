@@ -977,6 +977,7 @@ function Workspace({ api }: { api: Api }) {
             setScreen('query');
             select(id);
           }}
+          onShowResult={(id) => rv.showHistory(id)}
         />
       </div>
 
