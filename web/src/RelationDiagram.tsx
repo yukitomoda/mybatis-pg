@@ -52,36 +52,22 @@ export function tableEdges(links: RelationLink[]): TableEdge[] {
 const MAX_PER_LEVEL = 24;
 
 /**
- * 図に出す表を選ぶ: 中心から親の方向・子の方向に depth 段まで、兄弟・1 対 1、中心の子のほかの親（子 → 親の 2 段なので、depth が 2 以上のとき）。
- * 段ごとに多すぎる表は省いて、省いた数を返す
+ * 図に出す表を選ぶ: 中心から、つながりを depth 回までたどって届く表（親等のように、親・子の向きを問わず 1 回で 1 段と数える）。
+ * 兄弟・1 対 1 のつながりは、siblings のときだけたどる。段ごとに多すぎる表は省いて、省いた数を返す
  */
 export function neighborhood(center: string, edges: TableEdge[], depth: number, siblings: boolean) {
   const shown = new Set<string>([center]);
   let hidden = 0;
-  const place = (ts: string[]) => {
-    const fresh = [...new Set(ts)].filter((t) => !shown.has(t));
+  let frontier = [center];
+  for (let d = 1; d <= depth && frontier.length > 0; d++) {
+    const next = edges
+      .filter((e) => e.from !== e.to && (siblings || e.kind === 'parent') && (frontier.includes(e.from) || frontier.includes(e.to)))
+      .flatMap((e) => [e.from, e.to]);
+    const fresh = [...new Set(next)].filter((t) => !shown.has(t));
     fresh.slice(0, MAX_PER_LEVEL).forEach((t) => shown.add(t));
     hidden += Math.max(0, fresh.length - MAX_PER_LEVEL);
-    return fresh.slice(0, MAX_PER_LEVEL);
-  };
-  if (siblings) {
-    place(
-      edges.filter((e) => e.kind !== 'parent' && (e.from === center || e.to === center)).map((e) => (e.from === center ? e.to : e.from)),
-    );
+    frontier = fresh.slice(0, MAX_PER_LEVEL);
   }
-  let children: string[] = [];
-  for (const dir of [-1, 1]) {
-    let frontier = [center];
-    for (let d = 1; d <= depth && frontier.length > 0; d++) {
-      const next = edges
-        .filter((e) => e.kind === 'parent' && e.from !== e.to && frontier.includes(dir < 0 ? e.from : e.to))
-        .map((e) => (dir < 0 ? e.to : e.from));
-      frontier = place(next);
-      if (dir > 0 && d === 1) children = frontier;
-    }
-  }
-  // 中心の子の、ほかの親（order_items の親の products など）。中心から 2 段なので、段数が 2 以上のときだけ
-  if (depth >= 2) place(edges.filter((e) => e.kind === 'parent' && children.includes(e.from)).map((e) => e.to));
   return { shown, hidden };
 }
 

@@ -35,18 +35,22 @@ describe('tableEdges', () => {
 });
 
 describe('neighborhood', () => {
-  it('親の方向・子の方向に段数まで、兄弟と、中心の子のほかの親（段数が 2 以上のとき）を選ぶ', () => {
+  it('親等のように、向きを問わず、つながりをたどった回数で段数を数える', () => {
     const edges = tableEdges([
       link('s.order_items.order_id', 's.orders.id', 'parent', ['m']),
       link('s.order_items.product_id', 's.products.id', 'parent', ['m']),
       link('s.orders.customer_id', 's.customers.id', 'parent', ['m']),
       link('s.customers.tenant_id', 's.tenants.id', 'parent', ['m']),
+      link('s.invoices.customer_id', 's.customers.id', 'parent', ['m']),
       link('s.orders.customer_id', 's.points.customer_id', 'sibling', ['m']),
       link('s.orders.manager_id', 's.orders.id', 'parent', ['m']),
     ]);
+    // 1 段: 親・子と、兄弟
     expect([...neighborhood('s.orders', edges, 1, true).shown].sort()).toEqual(['s.customers', 's.order_items', 's.orders', 's.points']);
+    // 2 段: 親の親（tenants）、子のほかの親（products）、親のほかの子（invoices）。兄弟はたどらない
     expect([...neighborhood('s.orders', edges, 2, false).shown].sort()).toEqual([
       's.customers',
+      's.invoices',
       's.order_items',
       's.orders',
       's.products',
