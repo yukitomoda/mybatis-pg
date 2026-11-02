@@ -738,7 +738,16 @@ export interface RelationsResult {
   sources?: string[];
   progress?: {
     done: number;
+    /** statement の数 */
     total: number;
+    /** prepare: SQL を組み立てて変わったものを数える、plan: 変わったものの計画を取る、finish: 主キー・保存・結果をまとめる */
+    phase?: 'prepare' | 'plan' | 'finish';
+    /** 準備で組み立てた数 */
+    prepared?: number;
+    /** 計画を取る statement の数（前から変わったもの） */
+    toAnalyze?: number;
+    /** 仕上げの今の作業 */
+    step?: string | null;
     current: string | null;
     stopping: boolean;
   } & RelationsTiming;

@@ -3520,3 +3520,30 @@ div.relations-comment {
   outline: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
   border-radius: 2px;
 }
+
+/* リレーション: 解析の進み具合 */
+.analyze-progress ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.2rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.analyze-progress li.todo {
+  color: var(--muted);
+}
+
+.analyze-progress li.done {
+  color: var(--muted);
+}
+
+.analyze-progress li.current {
+  font-weight: 600;
+}
+
+.analyze-progress .hint {
+  margin: 0.2rem 0 0;
+}

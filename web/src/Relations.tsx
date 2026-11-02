@@ -46,6 +46,35 @@ function perStatement(t: RelationsTiming): string {
   return `（1 件 ${(t.perStatementMillis / 1000).toFixed(2)} 秒、うち計画 ${((t.planPerStatementMillis ?? 0) / 1000).toFixed(2)} 秒）`;
 }
 
+/** 解析の進み具合: フェーズ（準備 → 計画 → 仕上げ）ごとの数と、今のフェーズの残り時間 */
+function AnalyzeProgress({ p }: { p: NonNullable<RelationsResult['progress']> }) {
+  const phase = p.phase ?? 'plan';
+  const order = ['prepare', 'plan', 'finish'];
+  const state = (x: string) => (order.indexOf(x) < order.indexOf(phase) ? 'done' : x === phase ? 'current' : 'todo');
+  const steps: [string, string][] = [
+    ['prepare', `準備 ${p.prepared ?? 0} / ${p.total}`],
+    ['plan', phase === 'prepare' ? '計画' : `計画 ${p.analyzed} / ${p.toAnalyze ?? 0}`],
+    ['finish', phase === 'finish' && p.step ? `仕上げ: ${p.step}` : '仕上げ'],
+  ];
+  return (
+    <div className="analyze-progress">
+      <ol>
+        {steps.map(([k, label]) => (
+          <li key={k} className={state(k)}>
+            {state(k) === 'done' ? '✓ ' : ''}
+            {label}
+          </li>
+        ))}
+      </ol>
+      <p className="hint">
+        {p.remainingMillis !== undefined && `残り約 ${duration(p.remainingMillis)}　`}
+        {phase === 'plan' && perStatement(p)}
+        {phase !== 'finish' && p.current && `　${p.current}`}
+      </p>
+    </div>
+  );
+}
+
 export function RelationsScreen({
   api,
   conn,
@@ -333,13 +362,7 @@ export function RelationsScreen({
               {conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom} の結果を共有しています
             </p>
           )}
-          {result?.progress && (
-            <p className="hint">
-              {result.progress.done} / {result.progress.total}
-              {result.progress.remainingMillis !== undefined && `　残り約 ${duration(result.progress.remainingMillis)}`}
-              {perStatement(result.progress)}　{result.progress.current}
-            </p>
-          )}
+          {result?.progress && <AnalyzeProgress p={result.progress} />}
           {result && !running && (
             <p className="hint">
               {result.updatedAt

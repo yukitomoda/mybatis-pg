@@ -700,6 +700,25 @@ final class Relations {
     /** そのうち、PostgreSQL が計画を作るのにかかった時間の合計（ミリ秒） */
     volatile double planMillis;
     final long startedAt = System.currentTimeMillis();
+    /** 終えた時間（終えていなければ 0） */
+    volatile long finishedAt;
+    /**
+     * フェーズ。prepare: SQL を組み立てて、前から変わったものを数える、plan: 変わったものの計画を取る、
+     * finish: 主キー・UNIQUE を読み、保存し、画面に返す結果をまとめる
+     */
+    volatile String phase = "prepare";
+    volatile long phaseStartedAt = startedAt;
+    /** 準備で組み立てた数（total のうち） */
+    volatile int prepared;
+    /** 計画を取る statement の数（前から変わったもの） */
+    volatile int toAnalyze;
+    /** 仕上げの今の作業 */
+    volatile String step;
+
+    void phase(String p) {
+      phase = p;
+      phaseStartedAt = System.currentTimeMillis();
+    }
   }
 
   /**
@@ -732,15 +751,15 @@ final class Relations {
     // 往復を減らすため、トランザクションなどを件をまたいで使い回す
     ParamSources.Session ses = new ParamSources.Session(c);
     try {
+      // 準備: SQL を組み立てて、前から変わったもの（計画を取るもの）を数える
+      List<Object[]> pending = new ArrayList<>();
       for (String id : ids) {
         if (progress.stop) {
           stopped = true;
-          DbLog.event("relations", "一時停止（" + progress.done + " / " + progress.total + "）");
+          DbLog.event("relations", "一時停止（準備 " + progress.prepared + " / " + progress.total + "）");
           break;
         }
         progress.current = id;
-        DbLog.event("relations", "statement " + id);
-        Entry entry;
         ParamNode schema = renderer.parameters(id).root;
         String script = renderer.scriptText(id);
         java.util.Set<String> collections = ParamSources.collectionPaths(script);
@@ -755,12 +774,36 @@ final class Relations {
         }
         String h = full == null ? "" : hash(full.numberedSql);
         Entry old = store.statements.get(id);
+        progress.prepared++;
         // 計画を残していない前の版の結果（planned が null）は、解析し直して計画を残す
         if (full != null && old != null && old.hash.equals(h) && (old.error == null || resume) && old.params != null && old.planned != null
             && boundProperties(full).containsAll(old.params.keySet())) {
           progress.done++;
           continue;
         }
+        pending.add(new Object[] {id, schema, collections, guess, full, renderError, h});
+      }
+      progress.toAnalyze = pending.size();
+      DbLog.event("relations", "計画を取る statement " + pending.size() + " 件");
+      progress.phase("plan");
+      for (Object[] pe : stopped ? new ArrayList<Object[]>() : pending) {
+        if (progress.stop) {
+          stopped = true;
+          DbLog.event("relations", "一時停止（" + progress.analyzed + " / " + progress.toAnalyze + "）");
+          break;
+        }
+        String id = (String) pe[0];
+        ParamNode schema = (ParamNode) pe[1];
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> collections = (java.util.Set<String>) pe[2];
+        @SuppressWarnings("unchecked")
+        java.util.function.Function<String, String> guess = (java.util.function.Function<String, String>) pe[3];
+        SqlRenderer.Result full = (SqlRenderer.Result) pe[4];
+        RuntimeException renderError = (RuntimeException) pe[5];
+        String h = (String) pe[6];
+        progress.current = id;
+        DbLog.event("relations", "statement " + id);
+        Entry entry;
         long t0 = System.nanoTime();
         entry = full == null ? null : explainEntry(ses, store, id, full, h, progress);
         if (entry == null || entry.error != null) {
@@ -769,6 +812,7 @@ final class Relations {
           try {
             if (allTrue[0] == null) {
               DbLog.event("relations", "if・when の条件をすべて true にした mapper を読み込む");
+              progress.current = "if・when の条件をすべて通す mapper を読み込む";
               allTrue[0] = renderer.withAllConditionsTrue();
             }
             if (allTrue[0].hasStatement(id)) {
@@ -808,6 +852,7 @@ final class Relations {
         progress.done++;
         // 途中で止まっても、そこまでの結果が残るように、ときどき保存する
         if (++sinceSave >= 50) {
+          progress.current = "途中の結果を保存";
           DbLog.event("relations", "途中の結果を保存する（" + progress.done + " / " + progress.total + "）");
           store.complete = false;
           endQuietly(ses);
@@ -821,7 +866,11 @@ final class Relations {
     } finally {
       ses.close();
     }
+    progress.phase("finish");
+    progress.current = null;
+    progress.step = "主キー・UNIQUE を読む";
     updateKeys(store, c);
+    progress.step = "保存";
     store.save();
     DbLog.event("relations", (stopped ? "止めた" : "終えた") + "（解析 " + progress.analyzed + " 件、" + progress.done + " / " + progress.total + "）");
   }

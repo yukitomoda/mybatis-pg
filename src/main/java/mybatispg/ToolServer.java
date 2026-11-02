@@ -154,6 +154,7 @@ public final class ToolServer {
     relationStores.clear();
     relationLast.clear();
     relationGraphs.clear();
+    relationBodies.clear();
     suspiciousCache.clear();
     manualRelations = null;
     connections.useProjects(workspace.projectDirs());
@@ -260,6 +261,7 @@ public final class ToolServer {
             def.schemas = stringList(req.get("schemas"));
           }
           relationGraphs.clear();
+          relationBodies.clear();
           workspaces.save(def);
           workspace.configure(def);
           connections.useProjects(workspace.projectDirs());
@@ -2425,6 +2427,7 @@ public final class ToolServer {
           Relations.analyze(renderer, ids, parameters, c, store, progress);
         }
         // コメントもここで読み直しておく（ほとんど変わらないので、ほかのときは覚えておいたものを使う）
+        progress.step = "コメントを読む";
         try {
           if (!c.getAutoCommit()) {
             c.rollback();
@@ -2433,9 +2436,13 @@ public final class ToolServer {
         } catch (java.sql.SQLException | RuntimeException e) {
           // 読めなければ、次に画面が読むときに読む
         }
+        // 画面に返す結果（源流・疑わしい結合など。組の数によっては重い）を、ここでまとめて覚えておく
+        progress.step = "つながり・源流・疑わしい結合をまとめる";
+        relationsBody(connectionId, store);
       } catch (Exception e) {
         progress.current = "エラー: " + Errors.describe(e);
       } finally {
+        progress.finishedAt = System.currentTimeMillis();
         relationLast.put(connectionId, progress);
         relationRuns.remove(connectionId);
       }
@@ -2658,6 +2665,10 @@ public final class ToolServer {
       Map<String, Object> pm = new LinkedHashMap<>();
       pm.put("done", p.done);
       pm.put("total", p.total);
+      pm.put("phase", p.phase);
+      pm.put("prepared", p.prepared);
+      pm.put("toAnalyze", p.toAnalyze);
+      pm.put("step", p.step);
       pm.put("current", p.current);
       pm.put("stopping", p.stop);
       pm.putAll(timing(p));
@@ -2668,19 +2679,38 @@ public final class ToolServer {
       sendJson(ex, 200, body);
       return;
     }
+    body.putAll(relationsBody(connectionId, store));
+    Relations.Progress last = relationLast.get(connectionId);
+    if (last != null) {
+      body.put("lastRun", timing(last));
+    }
+    sendJson(ex, 200, body);
+  }
+
+  /** 接続先ごとの、画面に返すリレーションの結果（解析の結果・手で設定したもの・読み込んだ mapper が変わらなければ使い回す） */
+  private final Map<String, Object[]> relationBodies = new java.util.concurrent.ConcurrentHashMap<>();
+
+  /** 画面に返すリレーションの結果（源流・疑わしい結合など）。解析の結果と手で設定したものと mapper が前と同じなら、前のものを使う */
+  private Map<String, Object> relationsBody(String connectionId, Relations.Store store) throws IOException {
+    ManualRelations manual = manualRelations();
+    SqlRenderer renderer = workspace.renderer();
     synchronized (store) {
+      Object[] cached = relationBodies.get(connectionId);
+      if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()
+          && (Long) cached[2] == manual.version && cached[3] == renderer && cached[4] == manual) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) cached[5];
+        return body;
+      }
+      Map<String, Object> body = new LinkedHashMap<>();
       body.put("updatedAt", store.updatedAt == 0 ? null : store.updatedAt);
       // ほかの接続先の解析の結果を使っているとき、その接続先
       body.put("sharedFrom", relationKey(connectionId).equals(connectionId) ? null : relationKey(connectionId));
       body.put("statements", store.statements.size());
       body.put("complete", store.complete);
-      Relations.Progress last = relationLast.get(connectionId);
-      if (last != null) {
-        body.put("lastRun", timing(last));
-      }
       // まだ解析していない statement の数（一時停止した後や、statement が増えたとき）
       int pending = 0;
-      for (String id : workspace.renderer().statementIds()) {
+      for (String id : renderer.statementIds()) {
         if (!store.statements.containsKey(id)) {
           pending++;
         }
@@ -2697,7 +2727,6 @@ public final class ToolServer {
       }
       body.put("errors", errors);
       // 解析で推し量ったものに、手で設定したもの（追加・無効）を重ねる
-      ManualRelations manual = manualRelations();
       List<Relations.Link> all = Relations.links(store, manual);
       Relations.Graph graph = new Relations.Graph(store, all, manual);
       // 疑わしい結合（組の数の 2 乗に比例するので、解析の結果と手で設定したものが変わらなければ前のものを使う）
@@ -2764,7 +2793,7 @@ public final class ToolServer {
       List<Map<String, Object>> details = new ArrayList<>();
       // ワークスペースのソース（statement ごとに、どのソースのものかを付ける。リレーションの画面で絞り込む）
       List<String> sourceNames = workspace.sourceNames();
-      SqlRenderer current = workspace.renderer();
+      SqlRenderer current = renderer;
       body.put("sources", sourceNames);
       // パラメータ名ごとの、statement・項目・比べている列・源流と判断した列
       Map<String, List<Map<String, Object>>> names = new java.util.TreeMap<>();
@@ -2797,8 +2826,9 @@ public final class ToolServer {
       body.put("statementDetails", details);
       body.put("names", names);
       body.put("minName", Relations.MIN_NAME);
+      relationBodies.put(connectionId, new Object[] {store.updatedAt, store.statements.size(), manual.version, renderer, manual, body});
+      return body;
     }
-    sendJson(ex, 200, body);
   }
 
   /**
@@ -2807,17 +2837,19 @@ public final class ToolServer {
    */
   private static Map<String, Object> timing(Relations.Progress p) {
     Map<String, Object> m = new LinkedHashMap<>();
-    long elapsed = System.currentTimeMillis() - p.startedAt;
+    long now = p.finishedAt > 0 ? p.finishedAt : System.currentTimeMillis();
     m.put("analyzed", p.analyzed);
-    m.put("elapsedMillis", elapsed);
+    m.put("elapsedMillis", now - p.startedAt);
     if (p.analyzed > 0) {
       m.put("perStatementMillis", Math.round(p.millis / p.analyzed));
       m.put("planPerStatementMillis", Math.round(p.planMillis / p.analyzed));
     }
-    // 数件では平均がぶれるので、3 件から出す
-    if (p.analyzed >= 3 && p.total > p.done) {
-      // 続きからのときは、解析済みの件を最初にまとめて飛ばすので、解析した件の数で割る
-      m.put("remainingMillis", Math.round((double) elapsed / p.analyzed * (p.total - p.done)));
+    // 今のフェーズの残り（そのフェーズの経過時間 ÷ 済んだ数 × 残りの数。数件では平均がぶれるので、少し進んでから出す）
+    long phaseElapsed = now - p.phaseStartedAt;
+    if ("prepare".equals(p.phase) && p.prepared >= 20 && p.total > p.prepared) {
+      m.put("remainingMillis", Math.round((double) phaseElapsed / p.prepared * (p.total - p.prepared)));
+    } else if ("plan".equals(p.phase) && p.analyzed >= 3 && p.toAnalyze > p.analyzed) {
+      m.put("remainingMillis", Math.round((double) phaseElapsed / p.analyzed * (p.toAnalyze - p.analyzed)));
     }
     return m;
   }
