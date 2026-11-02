@@ -52,7 +52,7 @@ export function tableEdges(links: RelationLink[]): TableEdge[] {
 const MAX_PER_LEVEL = 24;
 
 /**
- * 図に出す表を選ぶ: 中心から親の方向・子の方向に depth 段まで、兄弟・1 対 1、中心の子のほかの親。
+ * 図に出す表を選ぶ: 中心から親の方向・子の方向に depth 段まで、兄弟・1 対 1、中心の子のほかの親（子 → 親の 2 段なので、depth が 2 以上のとき）。
  * 段ごとに多すぎる表は省いて、省いた数を返す
  */
 export function neighborhood(center: string, edges: TableEdge[], depth: number, siblings: boolean) {
@@ -80,8 +80,8 @@ export function neighborhood(center: string, edges: TableEdge[], depth: number, 
       if (dir > 0 && d === 1) children = frontier;
     }
   }
-  // 中心の子の、ほかの親（order_items の親の products など）
-  place(edges.filter((e) => e.kind === 'parent' && children.includes(e.from)).map((e) => e.to));
+  // 中心の子の、ほかの親（order_items の親の products など）。中心から 2 段なので、段数が 2 以上のときだけ
+  if (depth >= 2) place(edges.filter((e) => e.kind === 'parent' && children.includes(e.from)).map((e) => e.to));
   return { shown, hidden };
 }
 

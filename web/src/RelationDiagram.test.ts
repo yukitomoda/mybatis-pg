@@ -35,7 +35,7 @@ describe('tableEdges', () => {
 });
 
 describe('neighborhood', () => {
-  it('親の方向・子の方向に段数まで、兄弟と、中心の子のほかの親を選ぶ', () => {
+  it('親の方向・子の方向に段数まで、兄弟と、中心の子のほかの親（段数が 2 以上のとき）を選ぶ', () => {
     const edges = tableEdges([
       link('s.order_items.order_id', 's.orders.id', 'parent', ['m']),
       link('s.order_items.product_id', 's.products.id', 'parent', ['m']),
@@ -44,13 +44,7 @@ describe('neighborhood', () => {
       link('s.orders.customer_id', 's.points.customer_id', 'sibling', ['m']),
       link('s.orders.manager_id', 's.orders.id', 'parent', ['m']),
     ]);
-    expect([...neighborhood('s.orders', edges, 1, true).shown].sort()).toEqual([
-      's.customers',
-      's.order_items',
-      's.orders',
-      's.points',
-      's.products',
-    ]);
+    expect([...neighborhood('s.orders', edges, 1, true).shown].sort()).toEqual(['s.customers', 's.order_items', 's.orders', 's.points']);
     expect([...neighborhood('s.orders', edges, 2, false).shown].sort()).toEqual([
       's.customers',
       's.order_items',
