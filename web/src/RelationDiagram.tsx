@@ -172,7 +172,7 @@ export function RelationDiagram({
   /** 線を押したときに出す、理由と根拠 */
   edgeInfo: (edge: TableEdge) => ReactNode;
 }) {
-  const [depth, setDepth] = useState(2);
+  const [depth, setDepth] = useState(1);
   const [siblings, setSiblings] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [open, setOpen] = useState<{ edge: TableEdge; at: DOMRect } | null>(null);
