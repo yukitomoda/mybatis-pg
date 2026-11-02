@@ -99,11 +99,20 @@ function describeMatch(columns: string[], values: (string | null)[][]): { match:
 let seq = 0;
 const newId = () => `n${++seq}`;
 
+/** 同じ表の同じ値の行（自動で親を集める間、同じものを何度も引かない） */
+type RowsMemo = Map<string, Promise<RelatedRows>>;
+
 /** 1 歩たどって、箱を作る（たどる値がなければ null） */
-async function step(api: Api, connectionId: string, from: RelatedNode, n: RelatedNeighbor): Promise<RelatedNode | null> {
+async function step(api: Api, connectionId: string, from: RelatedNode, n: RelatedNeighbor, memo?: RowsMemo): Promise<RelatedNode | null> {
   const values = tuples(from.rows, n.columns);
   if (values.length === 0) return null;
-  const rows = await api.relatedRows(connectionId, n.table, { columns: n.otherColumns, values }, LIMIT);
+  const key = JSON.stringify([n.table, n.otherColumns, values]);
+  let p = memo?.get(key);
+  if (!p) {
+    p = api.relatedRows(connectionId, n.table, { columns: n.otherColumns, values }, LIMIT);
+    memo?.set(key, p);
+  }
+  const rows = await p;
   return {
     id: newId(),
     table: n.table,
@@ -126,19 +135,26 @@ export async function startRelated(api: Api, e: RelatedEntry, add: (n: RelatedNo
   const rows = await api.relatedRows(e.connectionId, e.table, { row: e.row }, LIMIT);
   const root: RelatedNode = { id: newId(), table: e.table, parent: null, direction: 'start', step: null, rows };
   add(root);
-  await collectParents(api, e.connectionId, root, add, [root]);
+  await collectParents(api, e.connectionId, root, add, [root], new Map());
 }
 
 /** 起点から、親を自動でたどる。たどってきた道に同じ表の同じ行があれば、戻るだけなので足さない */
-async function collectParents(api: Api, connectionId: string, node: RelatedNode, add: (n: RelatedNode) => void, path: RelatedNode[]) {
+async function collectParents(
+  api: Api,
+  connectionId: string,
+  node: RelatedNode,
+  add: (n: RelatedNode) => void,
+  path: RelatedNode[],
+  memo: RowsMemo,
+) {
   if (path.length > MAX_PARENT_DEPTH || node.rows.rows.length === 0) return;
   for (const n of await neighborsOf(api, connectionId, node.table)) {
     if (n.direction !== 'parent') continue;
-    const p = await step(api, connectionId, node, n);
+    const p = await step(api, connectionId, node, n, memo);
     if (!p || p.rows.rows.length === 0) continue;
     if (path.some((x) => x.table === p.table && sameRows(x.rows, p.rows))) continue;
     add(p);
-    await collectParents(api, connectionId, p, add, [...path, p]);
+    await collectParents(api, connectionId, p, add, [...path, p], memo);
   }
 }
 

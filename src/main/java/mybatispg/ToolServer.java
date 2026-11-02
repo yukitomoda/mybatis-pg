@@ -1593,6 +1593,11 @@ public final class ToolServer {
    * 関連データ: 表の隣の表（親・子）。{"connectionId", "table"} →
    * {"neighbors": [{"direction": "parent" | "child", "table", "columns", "otherColumns", "manual", "indexed"}]}
    */
+  /** 関連データで使う表の定義（列の型・主キー、インデックスの有無）を覚えておく時間 */
+  private static final long RELATED_CACHE_MILLIS = 10 * 60_000L;
+  /** 接続先・表ごとの、表の定義（[覚えた時間, 中身]） */
+  private final Map<String, Object[]> relatedCache = new java.util.concurrent.ConcurrentHashMap<>();
+
   private void relatedNeighbors(HttpExchange ex) throws IOException {
     JsonObject req = readJson(ex);
     if (req == null) {
@@ -1610,13 +1615,31 @@ public final class ToolServer {
       links = Relations.links(store, manualRelations());
     }
     List<RelatedData.Neighbor> neighbors = RelatedData.neighbors(table, links);
-    try (java.sql.Connection c = connections.open(connectionId)) {
-      c.setAutoCommit(false);
-      c.setReadOnly(true);
-      RelatedData.markIndexed(c, neighbors);
-    } catch (java.sql.SQLException | RuntimeException e) {
-      sendJson(ex, 422, error(Errors.describe(e)));
-      return;
+    // インデックスの有無は、覚えておいたものを使う（表の定義はほとんど変わらない）
+    List<RelatedData.Neighbor> unknown = new ArrayList<>();
+    for (RelatedData.Neighbor n : neighbors) {
+      if ("child".equals(n.direction)) {
+        Object[] hit = relatedCache.get(connectionId + "\u0000index\u0000" + n.table + "\u0000" + new java.util.TreeSet<>(n.otherColumns));
+        if (hit != null && System.currentTimeMillis() - (Long) hit[0] < RELATED_CACHE_MILLIS) {
+          n.indexed = (Boolean) hit[1];
+        } else {
+          unknown.add(n);
+        }
+      }
+    }
+    if (!unknown.isEmpty()) {
+      try (java.sql.Connection c = connections.open(connectionId)) {
+        c.setAutoCommit(false);
+        c.setReadOnly(true);
+        RelatedData.markIndexed(c, unknown);
+      } catch (java.sql.SQLException | RuntimeException e) {
+        sendJson(ex, 422, error(Errors.describe(e)));
+        return;
+      }
+      for (RelatedData.Neighbor n : unknown) {
+        relatedCache.put(connectionId + "\u0000index\u0000" + n.table + "\u0000" + new java.util.TreeSet<>(n.otherColumns),
+            new Object[] {System.currentTimeMillis(), n.indexed});
+      }
     }
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("neighbors", neighbors);
@@ -1663,13 +1686,25 @@ public final class ToolServer {
       sendJson(ex, 200, body);
       return;
     }
+    // 列の型と主キーは、覚えておいたものを使う（表の定義はほとんど変わらない。表がなければ覚えない）
     Map<String, Object> desc;
-    try (java.sql.Connection c = connections.open(connectionId)) {
-      c.setAutoCommit(false);
-      desc = RelatedData.describe(c, table);
-    } catch (java.sql.SQLException | RuntimeException e) {
-      sendJson(ex, 422, error(Errors.describe(e)));
-      return;
+    String descKey = connectionId + "\u0000describe\u0000" + table;
+    Object[] hit = relatedCache.get(descKey);
+    if (hit != null && System.currentTimeMillis() - (Long) hit[0] < RELATED_CACHE_MILLIS) {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> d = (Map<String, Object>) hit[1];
+      desc = d;
+    } else {
+      try (java.sql.Connection c = connections.open(connectionId)) {
+        c.setAutoCommit(false);
+        desc = RelatedData.describe(c, table);
+      } catch (java.sql.SQLException | RuntimeException e) {
+        sendJson(ex, 422, error(Errors.describe(e)));
+        return;
+      }
+      if (!((Map<?, ?>) desc.get("types")).isEmpty()) {
+        relatedCache.put(descKey, new Object[] {System.currentTimeMillis(), desc});
+      }
     }
     @SuppressWarnings("unchecked")
     Map<String, String> types = (Map<String, String>) desc.get("types");

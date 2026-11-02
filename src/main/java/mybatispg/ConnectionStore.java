@@ -217,6 +217,7 @@ public final class ConnectionStore {
 
   /** パスワードをメモリに入れる（null なら消す）。ファイルには保存しない */
   public void setPassword(String id, String password) {
+    pool.closeAll(id + "\u0000");
     if (password == null) {
       passwords.remove(id);
     } else {
@@ -247,6 +248,7 @@ public final class ConnectionStore {
     p.params = p.params == null ? "" : p.params.trim();
     profiles.put(p.id, p);
     write();
+    pool.closeAll(p.id + "\u0000");
     if (password != null) {
       if (password.isEmpty()) {
         passwords.remove(p.id);
@@ -266,10 +268,17 @@ public final class ConnectionStore {
     }
     passwords.remove(id);
     write();
+    pool.closeAll(id + "\u0000");
     return true;
   }
 
-  /** 接続を開く。自動コミットは呼び出し側で切り替える */
+  /** 使い終わった接続（接続先と、URL・ユーザー・パスワードが同じなら使い回す） */
+  private final ConnectionPool pool = new ConnectionPool();
+
+  /**
+   * 接続を開く。自動コミットは呼び出し側で切り替える。前に使い終わった接続があれば、片付けたものを使い回す
+   * （close() で戻す。{@link ConnectionPool}）
+   */
   public Connection open(String id) throws SQLException {
     Profile p = get(id);
     if (p == null) {
@@ -291,19 +300,22 @@ public final class ConnectionStore {
     props.setProperty("ApplicationName", "mybatis-pg");
     // シェードした jar では DriverManager のドライバ探索に頼らず、直接使う
     String url = s != null ? s.url : jdbcUrl(p);
-    long t0 = System.currentTimeMillis();
-    Connection c;
-    try {
-      c = new org.postgresql.Driver().connect(url, props);
-    } catch (SQLException | RuntimeException e) {
-      DbLog.connectFailed(id, System.currentTimeMillis() - t0, e);
-      throw e;
-    }
-    if (c == null) {
-      throw new SQLException("JDBC URL を解釈できません: " + jdbcUrl(p));
-    }
-    // DB への操作をログに書く（ログを書いていなければ、そのまま）
-    return DbLog.wrap(c, id, System.currentTimeMillis() - t0);
+    String key = id + "\u0000" + url + "\u0000" + p.user + "\u0000" + (password == null ? "" : password);
+    return pool.borrow(key, () -> {
+      long t0 = System.currentTimeMillis();
+      Connection c;
+      try {
+        c = new org.postgresql.Driver().connect(url, props);
+      } catch (SQLException | RuntimeException e) {
+        DbLog.connectFailed(id, System.currentTimeMillis() - t0, e);
+        throw e;
+      }
+      if (c == null) {
+        throw new SQLException("JDBC URL を解釈できません: " + jdbcUrl(p));
+      }
+      // DB への操作をログに書く（ログを書いていなければ、そのまま）
+      return DbLog.wrap(c, id, System.currentTimeMillis() - t0);
+    });
   }
 
   static String jdbcUrl(Profile p) {
