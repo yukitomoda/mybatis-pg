@@ -56,12 +56,20 @@ class RelationsTest {
           // 型をそろえるために、表の枝が "*SELECT* 1" に包まれる（条件が "*SELECT* 1".baz になる）
           {"SELECT * FROM (SELECT * FROM reltest_sub.a WHERE a.foo = 1) AS sub_a JOIN (SELECT b.baz FROM reltest_sub.b WHERE b.bar = 1"
               + " UNION ALL SELECT 1::bigint AS baz) AS sub_b ON sub_a.baz = sub_b.baz", "reltest_sub.a.baz=reltest_sub.b.baz"},
-          // WITH 句の列（名前を変えたもの）
-          {"WITH s AS (SELECT a.id AS aid FROM reltest_sub.a WHERE a.foo = 1) SELECT * FROM s JOIN reltest_sub.c ON s.aid = c.a_id",
+          // WITH 句の列（名前を変えていない）
+          {"WITH s AS (SELECT a.id, a.foo FROM reltest_sub.a WHERE a.foo = 1) SELECT * FROM s JOIN reltest_sub.c ON s.id = c.a_id",
               "reltest_sub.a.id=reltest_sub.c.a_id"},
-          // 平らにできないサブクエリ（窓関数の結果で外から絞る）
+          // 平らにできないサブクエリ（名前を変えていない列だけを出す）
+          {"SELECT s.*, c.id FROM (SELECT a.id, a.foo FROM reltest_sub.a LIMIT 10) s JOIN reltest_sub.c ON c.a_id = s.id",
+              "reltest_sub.a.id=reltest_sub.c.a_id"},
+          // 名前を変えた列は、中のどの列か確実には分からないので使わない
+          {"WITH s AS (SELECT a.id AS aid FROM reltest_sub.a WHERE a.foo = 1) SELECT * FROM s JOIN reltest_sub.c ON s.aid = c.a_id", ""},
           {"SELECT * FROM (SELECT a.id AS aid, row_number() OVER () AS rn FROM reltest_sub.a) AS s JOIN reltest_sub.c ON s.aid = c.a_id"
-              + " WHERE s.rn < 10", "reltest_sub.a.id=reltest_sub.c.a_id"},
+              + " WHERE s.rn < 10", ""},
+          // サブクエリの段は外で使う列を外で使う順に出す（s.foo, s.aid）。中の段（a.id, b.bar）と位置で対応させると
+          // c.a_id = b.bar を作ってしまう
+          {"SELECT c.id, s.foo FROM (SELECT a.id AS aid, b.bar AS foo FROM reltest_sub.a JOIN reltest_sub.b ON b.baz = a.baz LIMIT 10) s"
+              + " JOIN reltest_sub.c ON c.a_id = s.aid", "reltest_sub.a.baz=reltest_sub.b.baz"},
           // 式の列は使わない
           {"SELECT * FROM (SELECT a.id + 1 AS aid, row_number() OVER () AS rn FROM reltest_sub.a) AS s JOIN reltest_sub.c"
               + " ON s.aid = c.a_id WHERE s.rn < 10", ""},

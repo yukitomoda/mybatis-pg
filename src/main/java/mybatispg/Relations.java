@@ -43,7 +43,8 @@ import com.google.gson.JsonParser;
  * <p>statement を「if をすべて通す仮の値」で組み立てて EXPLAIN（VERBOSE、ANALYZE なし）し、計画の結合の条件
  * （Hash Cond・Merge Cond・Join Filter・Index Cond など）から、別の表の列どうしを = で比べている組を取り出す。
  * 別名・サブクエリ・ビューは PostgreSQL が実際の表に直すので、SQL を構文解析しない。
- * 直さずに残る、サブクエリ・UNION の枝（"*SELECT* 1"）・WITH 句の列は、計画のその段の出力の列（VERBOSE の Output）から中の列に読み替える。
+ * 直さずに残る、サブクエリ・UNION の枝（"*SELECT* 1"）・WITH 句の列は、計画のその段の出力の列（VERBOSE の Output）から、
+ * 対応が確実に分かるときだけ中の列に読み替える（{@link #derived}）。
  *
  * <p>どちらが源流（親）かは、一意かどうかで決める。片方だけが 1 列で一意（主キー・UNIQUE）なら、その側が親。
  * どちらも一意でなければ兄弟（同じ親を指している）として扱い、兄弟をたどって親を探す。
@@ -65,7 +66,7 @@ final class Relations {
    * 残した計画からの取り出し方（結合の組・パラメータと比べている列・出てくる表）の版。変えたら、ファイルを開いたときに、
    * 残した計画から取り出し直す（DB にはつながない）。親子の決め方など、保存したものから読むたびに組み立てるものは、版を変えなくてよい
    */
-  static final int EXTRACTOR = 3;
+  static final int EXTRACTOR = 4;
   /** 結合の条件を探す計画の項目 */
   private static final String[] JOIN_KEYS = {"Hash Cond", "Merge Cond", "Join Filter", "Index Cond", "Recheck Cond", "Filter"};
   private static final String IDENT = "(?:\"(?:[^\"]|\"\")+\"|[A-Za-z_][A-Za-z0-9_$]*)";
@@ -186,17 +187,23 @@ final class Relations {
   }
 
   /**
-   * サブクエリ（Subquery Scan）と WITH 句（CTE Scan）の列の中身。別名\0列 → 中の段の出力の式。
-   * 段の出力の列と中の段の出力の列の数が同じなら位置で、違えば同じ名前の列で対応させる。
+   * サブクエリ（Subquery Scan）と WITH 句（CTE Scan）の列の中身。別名\0列 → 中の段の出力の式。確実に対応が分かるときだけ入れる:
+   * <ul>
+   * <li>UNION の枝（Append の下）: 枝は列をすべて SQL の順で出すので、位置で対応させる</li>
+   * <li>ほかのサブクエリ・WITH 句: 段の出力は外で使う列だけを、外で使う順に出すので、位置では対応しない。段の出力の列名の集まりが、
+   * 中の段の出力（どれもただの列）の列名の集まりと同じとき（名前を変えた列がない）だけ、名前で対応させる</li>
+   * </ul>
    * 同じ別名の段が複数あって中身が食い違うもの（UNION が 2 つあって、どちらも "*SELECT* 1" など）は使わない
    */
   private static Map<String, String> derived(JsonObject plan) {
     Map<String, JsonObject> ctes = new HashMap<>();
-    List<JsonObject> scans = new ArrayList<>();
-    collect(plan, ctes, scans);
+    List<JsonObject[]> scans = new ArrayList<>();
+    collect(plan, null, ctes, scans);
     Map<String, String> out = new HashMap<>();
     Set<String> conflicts = new HashSet<>();
-    for (JsonObject n : scans) {
+    for (JsonObject[] sp : scans) {
+      JsonObject n = sp[0];
+      JsonObject parent = sp[1];
       JsonObject inner;
       if (n.has("CTE Name")) {
         inner = ctes.get(n.get("CTE Name").getAsString());
@@ -207,30 +214,43 @@ final class Relations {
       List<String> own = outputs(n);
       List<String> src = inner == null ? new ArrayList<String>() : outputs(inner);
       String alias = n.get("Alias").getAsString();
-      for (int i = 0; i < own.size(); i++) {
-        Matcher m = WHOLE_COLUMN.matcher(own.get(i).trim());
-        if (!m.matches() || !unquote(m.group(1)).equals(alias)) {
-          continue;
+      // 段の出力の列名（どれも、この別名の列）
+      List<String> ownNames = new ArrayList<>();
+      for (String o : own) {
+        Matcher m = WHOLE_COLUMN.matcher(o.trim());
+        ownNames.add(m.matches() && unquote(m.group(1)).equals(alias) ? unquote(m.group(2)) : null);
+      }
+      Map<String, String> mapped = new HashMap<>();
+      String pt = parent == null ? null : str(parent, "Node Type");
+      if (("Append".equals(pt) || "Merge Append".equals(pt)) && own.size() == src.size()) {
+        for (int i = 0; i < own.size(); i++) {
+          if (ownNames.get(i) != null) {
+            mapped.put(ownNames.get(i), src.get(i));
+          }
         }
-        String column = unquote(m.group(2));
-        String expr = null;
-        if (own.size() == src.size()) {
-          expr = src.get(i);
-        } else {
-          for (String x : src) {
-            Matcher sm = WHOLE_COLUMN.matcher(bare(x));
-            if (sm.matches() && unquote(sm.group(2)).equals(column)) {
-              expr = x;
-              break;
+      } else {
+        // 中の段の出力の列名（ただの列でないものがあれば、名前では対応させない）
+        List<String> srcNames = new ArrayList<>();
+        for (String x : src) {
+          Matcher sm = WHOLE_COLUMN.matcher(bare(x));
+          srcNames.add(sm.matches() ? unquote(sm.group(2)) : null);
+        }
+        List<String> a = new ArrayList<>(ownNames);
+        List<String> b = new ArrayList<>(srcNames);
+        if (!a.contains(null) && !b.contains(null) && new HashSet<>(b).size() == b.size()) {
+          java.util.Collections.sort(a);
+          java.util.Collections.sort(b);
+          if (a.equals(b)) {
+            for (int i = 0; i < src.size(); i++) {
+              mapped.put(srcNames.get(i), src.get(i));
             }
           }
         }
-        if (expr == null) {
-          continue;
-        }
-        String k = alias + "\u0000" + column;
-        String old = out.put(k, expr);
-        if (old != null && !old.equals(expr)) {
+      }
+      for (Map.Entry<String, String> e : mapped.entrySet()) {
+        String k = alias + "\u0000" + e.getKey();
+        String old = out.put(k, e.getValue());
+        if (old != null && !old.equals(e.getValue())) {
           conflicts.add(k);
         }
       }
@@ -241,18 +261,19 @@ final class Relations {
     return out;
   }
 
-  private static void collect(JsonObject node, Map<String, JsonObject> ctes, List<JsonObject> scans) {
+  /** CTE の計画と、サブクエリ・WITH 句の段（[段, 親の段]）を集める */
+  private static void collect(JsonObject node, JsonObject parent, Map<String, JsonObject> ctes, List<JsonObject[]> scans) {
     if (node.has("Subplan Name") && node.get("Subplan Name").getAsString().startsWith("CTE ")) {
       ctes.put(node.get("Subplan Name").getAsString().substring(4), node);
     }
     if (node.has("Alias") && !node.has("Relation Name")
         && ("Subquery Scan".equals(str(node, "Node Type")) || "CTE Scan".equals(str(node, "Node Type")))) {
-      scans.add(node);
+      scans.add(new JsonObject[] {node, parent});
     }
     JsonElement plans = node.get("Plans");
     if (plans != null && plans.isJsonArray()) {
       for (JsonElement child : (JsonArray) plans) {
-        collect(child.getAsJsonObject(), ctes, scans);
+        collect(child.getAsJsonObject(), node, ctes, scans);
       }
     }
   }
