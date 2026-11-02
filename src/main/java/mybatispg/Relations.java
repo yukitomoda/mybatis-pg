@@ -156,6 +156,106 @@ final class Relations {
     return out;
   }
 
+  /**
+   * 推定の根拠: 計画の中で、列の組（a・b。向きは問わない）を拾った場所と、別名を実際の表の列に読み替えた経路。
+   * [{"path": [段, ...], "node": 段（子の段を除く）, "key": 計画の項目, "condition": 条件, "expr": 拾った式,
+   *   "left": [経路, ...], "right": [経路, ...]}]
+   */
+  static List<Map<String, Object>> trace(String planJson, String a, String b) {
+    JsonElement root = JsonParser.parseString(planJson);
+    JsonObject top = root.isJsonArray() ? root.getAsJsonArray().get(0).getAsJsonObject() : root.getAsJsonObject();
+    JsonObject plan = top.getAsJsonObject("Plan");
+    Map<String, String[]> aliases = new HashMap<>();
+    walk(plan, aliases, new ArrayList<String[]>());
+    Map<String, String> why = new HashMap<>();
+    Map<String, String> derived = derived(plan, why);
+    List<Map<String, Object>> out = new ArrayList<>();
+    traceNode(plan, new ArrayList<String>(), aliases, derived, why, a, b, out);
+    return out;
+  }
+
+  private static String nodeLabel(JsonObject n) {
+    String label = str(n, "Node Type");
+    if (n.has("Relation Name")) {
+      label += " " + str(n, "Relation Name");
+    }
+    if (n.has("Alias") && !(n.has("Relation Name") && str(n, "Alias").equals(str(n, "Relation Name")))) {
+      label += " (" + str(n, "Alias") + ")";
+    }
+    if (n.has("Subplan Name")) {
+      label += " [" + str(n, "Subplan Name") + "]";
+    }
+    return label;
+  }
+
+  private static void traceNode(JsonObject node, List<String> path, Map<String, String[]> aliases, Map<String, String> derived,
+      Map<String, String> why, String a, String b, List<Map<String, Object>> out) {
+    List<String> here = new ArrayList<>(path);
+    here.add(nodeLabel(node));
+    for (String k : JOIN_KEYS) {
+      if (!node.has(k) || !node.get(k).isJsonPrimitive()) {
+        continue;
+      }
+      String raw = node.get(k).getAsString();
+      String cond = CAST.matcher(raw).replaceAll("");
+      String prev;
+      do {
+        prev = cond;
+        cond = WRAPPED.matcher(cond).replaceAll("$1");
+      } while (!cond.equals(prev));
+      Matcher m = EQUALS.matcher(cond);
+      while (m.find()) {
+        List<String> left = new ArrayList<>();
+        List<String> right = new ArrayList<>();
+        String x = resolveTrace(aliases, derived, why, unquote(m.group(1)), unquote(m.group(2)), 0, left);
+        String y = resolveTrace(aliases, derived, why, unquote(m.group(3)), unquote(m.group(4)), 0, right);
+        if (x == null || y == null || !(x.equals(a) && y.equals(b) || x.equals(b) && y.equals(a))) {
+          continue;
+        }
+        JsonObject copy = node.deepCopy();
+        copy.remove("Plans");
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("path", here);
+        t.put("node", Json.GSON.fromJson(copy, Object.class));
+        t.put("key", k);
+        t.put("condition", raw);
+        t.put("expr", m.group(0).replaceAll("\\s+", " "));
+        t.put("left", left);
+        t.put("right", right);
+        out.add(t);
+      }
+    }
+    JsonElement plans = node.get("Plans");
+    if (plans != null && plans.isJsonArray()) {
+      for (JsonElement child : (JsonArray) plans) {
+        traceNode(child.getAsJsonObject(), here, aliases, derived, why, a, b, out);
+      }
+    }
+  }
+
+  /** {@link #resolve} と同じく読み替え、その経路を steps に書く */
+  private static String resolveTrace(Map<String, String[]> aliases, Map<String, String> derived, Map<String, String> why, String alias,
+      String column, int depth, List<String> steps) {
+    String[] t = aliases.get(alias);
+    if (t != null) {
+      String key = key(t[0], t[1], column);
+      steps.add(alias + "." + column + " → " + key + "（" + alias + " は表 " + t[0] + "." + t[1] + "）");
+      return key;
+    }
+    String expr = derived.get(alias + "\u0000" + column);
+    if (expr == null || depth > 8 || TEMPORAL_CAST.matcher(expr).find()) {
+      steps.add(alias + "." + column + " → 読み替えられない");
+      return null;
+    }
+    steps.add(alias + "." + column + " → " + expr + "（" + why.get(alias + "\u0000" + column) + "）");
+    Matcher m = WHOLE_COLUMN.matcher(bare(expr));
+    if (!m.matches()) {
+      steps.add(expr + " は列ではない");
+      return null;
+    }
+    return resolveTrace(aliases, derived, why, unquote(m.group(1)), unquote(m.group(2)), depth + 1, steps);
+  }
+
   /** 列（別名.列）を、実際の表の列（schema.table.column）に直す。サブクエリ・WITH 句の列は中の列をたどる。直せなければ null */
   private static String resolve(Map<String, String[]> aliases, Map<String, String> derived, String alias, String column, int depth) {
     String[] t = aliases.get(alias);
@@ -196,6 +296,11 @@ final class Relations {
    * 同じ別名の段が複数あって中身が食い違うもの（UNION が 2 つあって、どちらも "*SELECT* 1" など）は使わない
    */
   private static Map<String, String> derived(JsonObject plan) {
+    return derived(plan, new HashMap<String, String>());
+  }
+
+  /** @param why 別名\0列 → 対応させた理由（推定の根拠を見せるため） */
+  private static Map<String, String> derived(JsonObject plan, Map<String, String> why) {
     Map<String, JsonObject> ctes = new HashMap<>();
     List<JsonObject[]> scans = new ArrayList<>();
     collect(plan, null, ctes, scans);
@@ -221,11 +326,14 @@ final class Relations {
         ownNames.add(m.matches() && unquote(m.group(1)).equals(alias) ? unquote(m.group(2)) : null);
       }
       Map<String, String> mapped = new HashMap<>();
+      Map<String, String> reason = new HashMap<>();
+      String kind = n.has("CTE Name") ? "WITH 句 " + n.get("CTE Name").getAsString() : "サブクエリ " + alias;
       String pt = parent == null ? null : str(parent, "Node Type");
       if (("Append".equals(pt) || "Merge Append".equals(pt)) && own.size() == src.size()) {
         for (int i = 0; i < own.size(); i++) {
           if (ownNames.get(i) != null) {
             mapped.put(ownNames.get(i), src.get(i));
+            reason.put(ownNames.get(i), "UNION の枝 " + alias + " の " + (i + 1) + " 番目の列（枝は列をすべて SQL の順で出す）");
           }
         }
       } else {
@@ -243,6 +351,7 @@ final class Relations {
           if (a.equals(b)) {
             for (int i = 0; i < src.size(); i++) {
               mapped.put(srcNames.get(i), src.get(i));
+              reason.put(srcNames.get(i), kind + " の同じ名前の列（名前を変えた列がないので、名前で対応させた）");
             }
           }
         }
@@ -250,6 +359,7 @@ final class Relations {
       for (Map.Entry<String, String> e : mapped.entrySet()) {
         String k = alias + "\u0000" + e.getKey();
         String old = out.put(k, e.getValue());
+        why.put(k, reason.get(e.getKey()));
         if (old != null && !old.equals(e.getValue())) {
           conflicts.add(k);
         }

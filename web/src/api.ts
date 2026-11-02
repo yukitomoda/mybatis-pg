@@ -618,6 +618,9 @@ export function createApi(token: string) {
       call<{ columns: string[] }>('api/db-columns', post(JSON.stringify({ connectionId, table }))),
     /** リレーション（試作）の解析の結果。解析中なら進み具合だけ */
     relations: (connectionId: string) => call<RelationsResult>('api/relations', post(JSON.stringify({ connectionId }))),
+    /** 推定の根拠: その statement で列の組を拾った計画の場所と、別名を表の列に読み替えた経路 */
+    relationTrace: (connectionId: string, statement: string, a: string, b: string) =>
+      call<{ traces: JoinTrace[] }>('api/relations/trace', post(JSON.stringify({ connectionId, statement, a, b }))),
     /** リレーションの解析を始める（終わるまで待たない） */
     /** リレーションの解析を一時停止する（そこまでの結果は保存する） */
     stopRelations: (connectionId: string) => call<{ stopping: boolean }>('api/relations/stop', post(JSON.stringify({ connectionId }))),
@@ -784,6 +787,23 @@ export interface RelationsResult {
 }
 
 /** 1 つの statement で、解析で検出したもの */
+/** 推定の根拠（1 か所） */
+export interface JoinTrace {
+  /** 計画の根からの段 */
+  path: string[];
+  /** その段（子の段を除く） */
+  node: unknown;
+  /** 計画の項目（Hash Cond など） */
+  key: string;
+  /** 計画に書かれた条件 */
+  condition: string;
+  /** 拾った式 */
+  expr: string;
+  /** 式の左右を、表の列に読み替えた経路 */
+  left: string[];
+  right: string[];
+}
+
 export interface RelationStatement {
   id: string;
   /** 結合の組 [列, 列, 拾った計画の項目（Hash Cond など）] */

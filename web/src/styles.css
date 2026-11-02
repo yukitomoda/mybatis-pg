@@ -3547,3 +3547,31 @@ div.relations-comment {
 .analyze-progress .hint {
   margin: 0.2rem 0 0;
 }
+
+/* リレーション: 推定の根拠 */
+.join-trace-toggle {
+  margin-left: 0.3rem;
+  font-size: 12px;
+}
+
+.join-trace {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 2px solid var(--border);
+  font-size: 12px;
+}
+
+.join-trace-path {
+  color: var(--muted);
+}
+
+.join-trace ol {
+  margin: 0.2rem 0;
+  padding-left: 1.2rem;
+}
+
+.join-trace pre {
+  max-height: 16rem;
+  overflow: auto;
+  font-size: 11px;
+}

@@ -719,6 +719,11 @@ public final class ToolServer {
           relations(ex);
         }
         break;
+      case "/api/relations/trace":
+        if (requireMethod(ex, method, "POST")) {
+          relationTrace(ex);
+        }
+        break;
       case "/api/relations/manual":
         if (requireMethod(ex, method, "POST")) {
           changeManualRelation(ex);
@@ -1593,6 +1598,34 @@ public final class ToolServer {
    * 関連データ: 表の隣の表（親・子）。{"connectionId", "table"} →
    * {"neighbors": [{"direction": "parent" | "child", "table", "columns", "otherColumns", "manual", "indexed"}]}
    */
+  /**
+   * 推定の根拠: {"connectionId", "statement", "a", "b"} → {"traces": [{path, node, key, condition, expr, left, right}]}。
+   * 解析で残した計画から、その statement で列の組を拾った場所と、別名を表の列に読み替えた経路を組み立てる
+   */
+  private void relationTrace(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    Relations.Store store = relationStore(connectionId);
+    Relations.SavedPlan plan;
+    synchronized (store) {
+      plan = store.loadPlan(string(req, "statement"));
+    }
+    if (plan == null) {
+      sendJson(ex, 404, error("計画を残していません（解析し直すと残ります）"));
+      return;
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("traces", Relations.trace(plan.plan, string(req, "a"), string(req, "b")));
+    sendJson(ex, 200, body);
+  }
+
   /** 関連データで使う表の定義（列の型・主キー、インデックスの有無）を覚えておく時間 */
   private static final long RELATED_CACHE_MILLIS = 10 * 60_000L;
   /** 接続先・表ごとの、表の定義（[覚えた時間, 中身]） */

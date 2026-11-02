@@ -85,6 +85,16 @@ class RelationsTest {
           got.add(j[0].compareTo(j[1]) < 0 ? j[0] + "=" + j[1] : j[1] + "=" + j[0]);
         }
         assertEquals(k[1].isEmpty() ? Collections.<String>emptyList() : Collections.singletonList(k[1]), got, k[0]);
+        // 推定の根拠: 拾った場所と、読み替えた経路
+        if (k[0].contains("UNION ALL")) {
+          List<java.util.Map<String, Object>> tr = Relations.trace(plan, "reltest_sub.a.baz", "reltest_sub.b.baz");
+          assertEquals(1, tr.size(), tr.toString());
+          assertTrue(tr.get(0).get("expr").toString().contains("\"*SELECT* 1\".baz"), tr.toString());
+          assertTrue(tr.get(0).get("left").toString().contains("UNION の枝") || tr.get(0).get("right").toString().contains("UNION の枝"),
+              tr.toString());
+          assertTrue(tr.get(0).get("left").toString().contains("reltest_sub.b.baz") || tr.get(0).get("right").toString().contains("reltest_sub.b.baz"),
+              tr.toString());
+        }
       }
       s.execute("DROP SCHEMA reltest_sub CASCADE");
     }
