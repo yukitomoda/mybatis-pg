@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,6 +41,45 @@ class RelationsTest {
     // 型の変換は除く。同じ組は 1 つ。CTE の列は実際の表ではないので使わない。パラメータとの比較、日付に直した比較は使わない
     assertEquals(Arrays.asList("app.post_histories.user_id=app.users.id Hash Cond", "app.post_histories.post_id=app.posts.id Join Filter"),
         got);
+  }
+
+  @Test
+  void サブクエリ_UNIONの枝_WITH句の列を_中の列に読み替える() throws Exception {
+    assumeTrue(URL != null, "MYBATIS_PG_TEST_URL がないため省略");
+    try (Connection c = DriverManager.getConnection(URL); Statement s = c.createStatement()) {
+      s.execute("DROP SCHEMA IF EXISTS reltest_sub CASCADE");
+      s.execute("CREATE SCHEMA reltest_sub");
+      s.execute("CREATE TABLE reltest_sub.a (id int PRIMARY KEY, foo int, baz int)");
+      s.execute("CREATE TABLE reltest_sub.b (id int PRIMARY KEY, bar int, baz int)");
+      s.execute("CREATE TABLE reltest_sub.c (id int PRIMARY KEY, a_id int)");
+      String[][] cases = {
+          // 型をそろえるために、表の枝が "*SELECT* 1" に包まれる（条件が "*SELECT* 1".baz になる）
+          {"SELECT * FROM (SELECT * FROM reltest_sub.a WHERE a.foo = 1) AS sub_a JOIN (SELECT b.baz FROM reltest_sub.b WHERE b.bar = 1"
+              + " UNION ALL SELECT 1::bigint AS baz) AS sub_b ON sub_a.baz = sub_b.baz", "reltest_sub.a.baz=reltest_sub.b.baz"},
+          // WITH 句の列（名前を変えたもの）
+          {"WITH s AS (SELECT a.id AS aid FROM reltest_sub.a WHERE a.foo = 1) SELECT * FROM s JOIN reltest_sub.c ON s.aid = c.a_id",
+              "reltest_sub.a.id=reltest_sub.c.a_id"},
+          // 平らにできないサブクエリ（窓関数の結果で外から絞る）
+          {"SELECT * FROM (SELECT a.id AS aid, row_number() OVER () AS rn FROM reltest_sub.a) AS s JOIN reltest_sub.c ON s.aid = c.a_id"
+              + " WHERE s.rn < 10", "reltest_sub.a.id=reltest_sub.c.a_id"},
+          // 式の列は使わない
+          {"SELECT * FROM (SELECT a.id + 1 AS aid, row_number() OVER () AS rn FROM reltest_sub.a) AS s JOIN reltest_sub.c"
+              + " ON s.aid = c.a_id WHERE s.rn < 10", ""},
+      };
+      for (String[] k : cases) {
+        String plan;
+        try (ResultSet rs = s.executeQuery("EXPLAIN (VERBOSE, FORMAT JSON) " + k[0])) {
+          rs.next();
+          plan = rs.getString(1);
+        }
+        List<String> got = new ArrayList<>();
+        for (String[] j : Relations.joins(plan)) {
+          got.add(j[0].compareTo(j[1]) < 0 ? j[0] + "=" + j[1] : j[1] + "=" + j[0]);
+        }
+        assertEquals(k[1].isEmpty() ? Collections.<String>emptyList() : Collections.singletonList(k[1]), got, k[0]);
+      }
+      s.execute("DROP SCHEMA reltest_sub CASCADE");
+    }
   }
 
   @Test
