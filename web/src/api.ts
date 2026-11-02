@@ -591,7 +591,8 @@ export function createApi(token: string) {
     /** 手で設定したリレーションを変える（列は schema.table.column） */
     changeManualRelation: (
       change:
-        | { action: 'add' | 'remove'; child: string; parent: string }
+        | { action: 'add' | 'remove'; a: string; b: string; connectionId?: string }
+        | { action: 'table'; child: string; parent: string; kind: 'parent' | 'one-to-one' | 'sibling' | null }
         | { action: 'disable' | 'enable' | 'ignore' | 'unignore'; a: string; b: string },
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
@@ -701,8 +702,10 @@ export interface RelationLink {
   kind: 'parent' | 'one-to-one' | 'sibling';
   /** 根拠の statement */
   statements: string[];
-  /** 手で追加したリレーション（a が子、b が親） */
+  /** 手で追加したリレーション（向きは、一意かどうかと表の関係で決まる） */
   manual: boolean;
+  /** 手で決めた表の関係で、向きと種類を決めた */
+  byTable?: boolean;
   /** 手で無効にした */
   disabled: boolean;
   /** 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵（schema.table の主キー（a, b））。そうでなければ null */
@@ -727,6 +730,8 @@ export interface RelationSuspicion {
 export interface RelationsResult {
   /** 疑わしい結合 */
   suspicious?: RelationSuspicion[];
+  /** 手で決めた表の関係（parent: parent が child の親） */
+  tableKinds?: { child: string; parent: string; kind: 'parent' | 'one-to-one' | 'sibling' }[];
   /** ほかの接続先の解析の結果を使っているとき、その接続先の id（ワークスペースの設定） */
   sharedFrom?: string | null;
   /** ワークスペースのソースの名前（ソースで絞り込む。ソースが 1 つなら空） */

@@ -407,6 +407,8 @@ final class Relations {
     boolean complete;
     /** 保存した結果の取り出し方の版 */
     int extractor;
+    /** 計画に出てこなくても主キー・UNIQUE を読む表（手で追加したリレーションの表。保存しない） */
+    Set<String> extraTables = new LinkedHashSet<>();
 
     private Store(Path file, String project, String connectionId) {
       this.file = file;
@@ -896,9 +898,9 @@ final class Relations {
   }
 
   /** 結合に出てくる列が、一意かどうか（順位）を読み直す */
-  private static void updateKeys(Store store, Connection c) {
-    // 計画に出てくる表と、結合に出てくる表の、主キー・UNIQUE の列を読む（列が一意かどうかも、ここから求める）
-    Set<String> keyTables = new LinkedHashSet<>();
+  static void updateKeys(Store store, Connection c) {
+    // 計画に出てくる表と、結合に出てくる表、手で追加したリレーションの表の、主キー・UNIQUE の列を読む（列が一意かどうかも、ここから求める）
+    Set<String> keyTables = new LinkedHashSet<>(store.extraTables);
     for (Entry e : store.statements.values()) {
       keyTables.addAll(e.tables);
       for (String[] j : e.joins) {
@@ -977,8 +979,10 @@ final class Relations {
     /** 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵（schema.table の主キー（a, b））。そうでなければ null */
     String compositeKey;
     final Set<String> statements = new LinkedHashSet<>();
-    /** 手で追加したリレーション（a が子、b が親） */
+    /** 手で追加したリレーション（向きは、解析で拾ったものと同じく一意かどうかと表の関係で決める） */
     boolean manual;
+    /** 手で決めた表の関係で、向きと種類を決めた */
+    boolean byTable;
     /** 手で無効にした（源流を探すときに使わない） */
     boolean disabled;
 
@@ -996,32 +1000,93 @@ final class Relations {
 
   /**
    * 解析で推し量ったつながりに、手で設定したものを重ねる。無効にしたつながりには印を付け、手で追加したリレーションを足す
-   * （同じ列の組を推し量っていれば、根拠の statement を引き継いで、手で追加したものに置き換える）。
+   * （同じ列の組を推し量っていれば、それに印を付ける）。手で決めた表の関係があれば、その 2 つの表の間のつながりの向きと種類をそれにする。
    */
   static List<Link> links(Store store, ManualRelations manual) {
     List<Link> out = store == null ? new ArrayList<>() : links(store);
     if (manual == null) {
       return out;
     }
+    java.util.function.Predicate<String> isUnique = col -> store != null && unique(store, col);
     synchronized (manual) {
       for (Link l : out) {
         l.disabled = manual.isDisabled(l.a, l.b);
       }
       for (ManualRelations.Relation r : manual.relations) {
-        Link m = new Link(r.child, r.parent, "parent");
-        m.manual = true;
-        java.util.Iterator<Link> it = out.iterator();
-        while (it.hasNext()) {
-          Link l = it.next();
-          if (l.a.equals(r.child) && l.b.equals(r.parent) || l.a.equals(r.parent) && l.b.equals(r.child)) {
-            m.statements.addAll(l.statements);
-            it.remove();
+        Link found = null;
+        for (Link l : out) {
+          if (l.a.equals(r.a) && l.b.equals(r.b) || l.a.equals(r.b) && l.b.equals(r.a)) {
+            found = l;
           }
         }
-        out.add(m);
+        if (found == null) {
+          String[] o = orient(isUnique, null, r.a, r.b);
+          found = new Link(o[0], o[1], o[2]);
+          out.add(found);
+        }
+        found.manual = true;
+        found.disabled = false;
+      }
+      for (Link l : out) {
+        String ta = tableOfColumn(l.a);
+        String tb = tableOfColumn(l.b);
+        if (ta.equals(tb) || manual.tableKind(ta, tb) == null) {
+          continue;
+        }
+        String[] o = orient(isUnique, manual, l.a, l.b);
+        l.a = o[0];
+        l.b = o[1];
+        l.kind = o[2];
+        l.compositeKey = null;
+        l.byTable = true;
       }
     }
     return out;
+  }
+
+  /**
+   * 列の組の向きと種類。[a, b, kind]（parent なら b が親。それ以外は名前の順）。手で決めた表の関係（親子・1 対 1・兄弟）があればそれ、
+   * なければ一意かどうかで決める（片方だけが一意ならその側が親、どちらも一意なら 1 対 1、どちらも一意でなければ兄弟）
+   */
+  static String[] orient(java.util.function.Predicate<String> isUnique, ManualRelations manual, String a, String b) {
+    String ta = tableOfColumn(a);
+    String tb = tableOfColumn(b);
+    String[] t = manual == null || ta.equals(tb) ? null : manual.tableKind(ta, tb);
+    String kind;
+    if (t != null) {
+      if (t[2].equals("parent")) {
+        return t[0].equals(ta) ? new String[] {a, b, "parent"} : new String[] {b, a, "parent"};
+      }
+      kind = t[2];
+    } else {
+      boolean ua = isUnique.test(a);
+      boolean ub = isUnique.test(b);
+      if (ua != ub) {
+        return ub ? new String[] {a, b, "parent"} : new String[] {b, a, "parent"};
+      }
+      kind = ua ? "one-to-one" : "sibling";
+    }
+    return a.compareTo(b) <= 0 ? new String[] {a, b, kind} : new String[] {b, a, kind};
+  }
+
+  /**
+   * 列に手でつないだ列のうち、親になるもの（向きは {@link #orient} で決める）。テナントごとのスキーマに合わせる
+   */
+  static java.util.function.Function<String, List<String>> manualParents(java.util.function.Predicate<String> isUnique,
+      ManualRelations manual) {
+    if (manual == null) {
+      return col -> new ArrayList<String>();
+    }
+    return col -> {
+      List<String> out = new ArrayList<>();
+      for (String other : manual.pairsOf(col)) {
+        String[] o = orient(isUnique, manual, col, other);
+        if (o[2].equals("parent") && o[0].equals(col)) {
+          out.add(other);
+        }
+      }
+      return out;
+    };
   }
 
   /** 列の組ごとにまとめる。a が子（または名前の順で前）になるように向きをそろえる */
@@ -1205,8 +1270,7 @@ final class Relations {
     }
 
     List<Origin> origins(String column) {
-      return Relations.origins(unique::contains, links, column,
-          manual == null ? col -> new ArrayList<String>() : manual::parentsOf);
+      return Relations.origins(unique::contains, links, column, manualParents(unique::contains, manual));
     }
 
     /** 比べている列から、源流と判断する列（たどった源流、なければ一意の列。どちらもなければ null） */
@@ -1344,8 +1408,8 @@ final class Relations {
   }
 
   /**
-   * @param manualParents 列に手で設定した親。あれば、その列の源流は手で設定したものだけにする（解析で推し量ったものより優先する）。
-   *     兄弟をたどった先の列に手で設定した親があれば、それも源流にする
+   * @param manualParents 列に手で追加したつながりで決まった親。あれば、その列の源流は手で設定したものだけにする（解析で推し量ったものより優先する）。
+   *     兄弟をたどった先の列に、手で追加したつながりで決まった親があれば、それも源流にする
    */
   static List<Origin> origins(java.util.function.Predicate<String> isUnique, List<Link> links, String column,
       java.util.function.Function<String, List<String>> manualParents) {
@@ -1380,8 +1444,8 @@ final class Relations {
       // 同じ段では、根拠の多いつながりから
       ls.sort((x, y) -> y.statements.size() - x.statements.size());
       for (Link l : ls) {
-        // 無効にしたつながりは使わない。手で追加したものは manualParents で扱う
-        if (l.disabled || l.manual) {
+        // 無効にしたつながりは使わない。手で追加した親子は manualParents で扱う
+        if (l.disabled || l.manual && l.kind.equals("parent")) {
           continue;
         }
         String other = l.a.equals(col) ? l.b : l.a;
@@ -1389,7 +1453,7 @@ final class Relations {
         List<String> next = new ArrayList<>(path);
         next.add(col);
         if (l.kind.equals("sibling") && next.size() < MAX_HOPS && !visited.contains(other) && !manualParents.apply(other).isEmpty()) {
-          // 兄弟に手で設定した親がある
+          // 兄弟に、手で追加したつながりで決まった親がある
           visited.add(other);
           List<String> via = new ArrayList<>(next);
           via.add(other);
@@ -1420,7 +1484,7 @@ final class Relations {
 
   /**
    * 親 column から、さらに親をたどる。column が 1 列で一意か、それ以上の親がなければ column が源流。
-   * 手で設定した親があれば、それを源流にする。
+   * 手で追加したつながりで決まった親があれば、それを源流にする。
    *
    * @param path column の手前までにたどった列
    */
@@ -1441,6 +1505,7 @@ final class Relations {
       return out;
     }
     for (Link l : links) {
+      // 手で追加した親子は manualParents で扱う
       if (!l.disabled && !l.manual && l.kind.equals("parent") && l.a.equals(column) && !path.contains(l.b)) {
         out.addAll(climb(isUnique, links, l.b, via, Math.min(count, l.statements.size()), manualParents, depth + 1));
       }

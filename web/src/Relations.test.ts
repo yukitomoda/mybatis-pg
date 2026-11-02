@@ -34,6 +34,14 @@ describe('一意かどうかと、つながりの判定の理由', () => {
     expect(describeLink(parent, 'app.posts.user_id', { ...keys, 'app.posts.user_id': 4 }, s).reason).toBe(
       'users.id が主キー、この列は 1 列では一意でない（主キー（2 列））',
     );
-    expect(describeLink({ ...parent, manual: true }, 'app.posts.user_id', keys, s)).toEqual({ label: '→ 親', reason: '手で設定' });
+    // 手で追加したものも、向きの理由は同じ。表の関係を手で決めたものは、そのことを書く
+    expect(describeLink({ ...parent, manual: true }, 'app.posts.user_id', keys, s)).toEqual(
+      describeLink(parent, 'app.posts.user_id', keys, s),
+    );
+    expect(describeLink({ ...parent, byTable: true }, 'app.posts.user_id', keys, s)).toEqual({
+      label: '→ 親',
+      reason: '表の関係を手で設定',
+    });
+    expect(describeLink({ ...parent, byTable: true }, 'app.users.id', keys, s)).toEqual({ label: '← 子', reason: '表の関係を手で設定' });
   });
 });

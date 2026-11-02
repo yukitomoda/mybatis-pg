@@ -60,7 +60,7 @@ final class SuspiciousJoins {
    * @param manual 手で設定したリレーション（null なら、ないものとする）
    */
   static List<Suspicion> find(Predicate<String> isUnique, List<Relations.Link> links, ManualRelations manual) {
-    Function<String, List<String>> manualParents = manual == null ? col -> new ArrayList<String>() : manual::parentsOf;
+    Function<String, List<String>> manualParents = Relations.manualParents(isUnique, manual);
     List<Suspicion> out = new ArrayList<>();
     for (Relations.Link l : links) {
       if (l.disabled || l.manual) {

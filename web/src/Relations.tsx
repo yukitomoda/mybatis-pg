@@ -556,6 +556,7 @@ export function RelationsScreen({
                       api={api}
                       connectionId={connectionId}
                       allTables={allTables}
+                      tableKinds={result?.tableKinds ?? []}
                     />
                   ) : (
                     <p className="hint">表を選んでください</p>
@@ -622,7 +623,13 @@ export function describeLink(
   const key = (c: string) => keyLabel(keys[c]) ?? '一意でない';
   // 1 列で一意でない列の書き方（複数の列で一意なら、そのことも書く）
   const notSingle = (c: string) => (keys[c] !== undefined ? ` 1 列では一意でない（${keyLabel(keys[c])}）` : '一意でない');
-  if (l.manual) return l.a === col ? { label: '→ 親', reason: '手で設定' } : { label: '← 子', reason: '手で設定' };
+  // 手で決めた表の関係
+  if (l.byTable) {
+    const reason = '表の関係を手で設定';
+    if (l.kind === 'one-to-one') return { label: '＝ 1 対 1', reason };
+    if (l.kind === 'sibling') return { label: '＝ 兄弟', reason };
+    return l.a === col ? { label: '→ 親', reason } : { label: '← 子', reason };
+  }
   // 複数の列でできた鍵: 親の鍵のすべての列と、同じ SQL で結合している
   if (l.compositeKey) {
     const reason = `${l.compositeKey.replace(/^[^.]+\./, '')}のすべての列と、同じ SQL で結合している`;
@@ -659,11 +666,14 @@ function TableRelations({
   api,
   connectionId,
   allTables,
+  tableKinds,
 }: {
   api: Api;
   connectionId: string;
   /** DB の表（追加するときに選ぶ） */
   allTables: string[];
+  /** 手で決めた表の関係 */
+  tableKinds: NonNullable<RelationsResult['tableKinds']>;
   table: string;
   links: RelationLink[];
   origins: Map<string, Origin[]>;
@@ -716,7 +726,7 @@ function TableRelations({
       )}
       <div className="popover-actions">
         {l.manual ? (
-          <button type="button" className="link" onClick={() => onChange({ action: 'remove', child: l.a, parent: l.b })}>
+          <button type="button" className="link" onClick={() => onChange({ action: 'remove', a: l.a, b: l.b })}>
             このリレーションを削除
           </button>
         ) : l.disabled ? (
@@ -907,30 +917,20 @@ function TableRelations({
       )}
       <h3 className="relations-add-head">リレーションを追加</h3>
       <AddLink
-        key={`parent ${table} ${focus}`}
-        side="parent"
+        key={`${table} ${focus}`}
         api={api}
         connectionId={connectionId}
         allTables={allTables}
         table={table}
         initialColumn={
-          // 強調した列にまだ親がないとき（クエリの画面から「リレーションを追加」で来たときなど）は、その列を入れて開いておく
-          focus && tableOf(focus) === table && !mine.some((l) => l.a === focus && l.kind === 'parent')
+          // 強調した列にまだつながりがないとき（クエリの画面から「リレーションを追加」で来たときなど）は、その列を入れて開いておく
+          focus && tableOf(focus) === table && !mine.some((l) => l.a === focus || l.b === focus)
             ? focus.slice(focus.lastIndexOf('.') + 1)
             : null
         }
-        onAdd={(child, parent) => onChange({ action: 'add', child, parent })}
+        onAdd={(a, b) => onChange({ action: 'add', a, b, connectionId })}
       />
-      <AddLink
-        key={`child ${table}`}
-        side="child"
-        api={api}
-        connectionId={connectionId}
-        allTables={allTables}
-        table={table}
-        initialColumn={null}
-        onAdd={(child, parent) => onChange({ action: 'add', child, parent })}
-      />
+      <TableKinds table={table} links={mine} tableKinds={tableKinds} onChange={onChange} />
     </>
   );
 }
@@ -1180,11 +1180,8 @@ function OwnColumn({
   );
 }
 
-/**
- * 選んだ表のリレーションを手で追加する。parent: この表の列 → 親の列、child: 子の列 → この表の列
- */
+/** 選んだ表のリレーションを手で追加する（この表の列 = 相手の列。親子は一意かどうかと表の関係で決まる） */
 function AddLink({
-  side,
   api,
   connectionId,
   allTables,
@@ -1192,7 +1189,6 @@ function AddLink({
   initialColumn,
   onAdd,
 }: {
-  side: 'parent' | 'child';
   api: Api;
   connectionId: string;
   allTables: string[];
@@ -1200,7 +1196,7 @@ function AddLink({
   table: string;
   /** この表の列（パラメータから飛んできたとき） */
   initialColumn: string | null;
-  onAdd: (child: string, parent: string) => Promise<void>;
+  onAdd: (a: string, b: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(!!initialColumn);
   const [own, setOwn] = useState(initialColumn ?? '');
@@ -1209,44 +1205,22 @@ function AddLink({
     return (
       <p className="relations-add-open">
         <button type="button" className="link" onClick={() => setOpen(true)}>
-          {side === 'parent' ? '＋ 親を追加' : '＋ 子を追加'}
+          ＋ リレーションを追加
         </button>
       </p>
     );
   }
-  const ownColumn = (
-    <OwnColumn
-      api={api}
-      connectionId={connectionId}
-      table={table}
-      label={side === 'parent' ? 'この表の列（子）' : 'この表の列（親）'}
-      value={own}
-      onChange={setOwn}
-    />
-  );
-  const otherColumn = (
-    <ColumnPicker
-      api={api}
-      connectionId={connectionId}
-      tables={allTables}
-      label={side === 'parent' ? '親' : '子'}
-      value={other}
-      onChange={setOther}
-    />
-  );
   const ready = own !== '' && other.column !== '';
-  const mine = `${table}.${own}`;
-  const theirs = `${other.table}.${other.column}`;
   return (
     <div className="relations-add">
-      {side === 'parent' ? ownColumn : otherColumn}
-      <span className="arrow">→</span>
-      {side === 'parent' ? otherColumn : ownColumn}
+      <OwnColumn api={api} connectionId={connectionId} table={table} label="この表の列" value={own} onChange={setOwn} />
+      <span className="arrow">=</span>
+      <ColumnPicker api={api} connectionId={connectionId} tables={allTables} label="相手" value={other} onChange={setOther} />
       <button
         type="button"
         disabled={!ready}
         onClick={() =>
-          (side === 'parent' ? onAdd(mine, theirs) : onAdd(theirs, mine)).then(() => {
+          onAdd(`${table}.${own}`, `${other.table}.${other.column}`).then(() => {
             setOther({ table: '', column: '' });
             setOpen(false);
           })
@@ -1258,6 +1232,81 @@ function AddLink({
         閉じる
       </button>
     </div>
+  );
+}
+
+/** スキーマを除いた名前 */
+const noSchema = (t: string) => t.slice(t.indexOf('.') + 1);
+
+/** つながっている表ごとの関係（自動か、手で決めた親子・1 対 1） */
+function TableKinds({
+  table,
+  links,
+  tableKinds,
+  onChange,
+}: {
+  table: string;
+  /** この表のつながり */
+  links: RelationLink[];
+  tableKinds: NonNullable<RelationsResult['tableKinds']>;
+  onChange: (c: Parameters<Api['changeManualRelation']>[0]) => Promise<void>;
+}) {
+  const others = [...new Set(links.flatMap((l) => [tableOf(l.a), tableOf(l.b)]).filter((t) => t !== table))].sort();
+  if (others.length === 0) return null;
+  const same = (x: string, y: string) => noSchema(x) === noSchema(y);
+  const valueOf = (other: string) => {
+    const k = tableKinds.find((t) => (same(t.child, table) && same(t.parent, other)) || (same(t.child, other) && same(t.parent, table)));
+    if (!k) return 'auto';
+    if (k.kind === 'one-to-one') return 'one';
+    if (k.kind === 'sibling') return 'sibling';
+    return same(k.parent, table) ? 'parent' : 'child';
+  };
+  /** 自動のときに決まっている関係（つながりの種類。まちまちなら並べる） */
+  const autoOf = (other: string) => {
+    const kinds = new Set(
+      links
+        .filter((l) => !l.disabled && (tableOf(l.a) === other || tableOf(l.b) === other))
+        .map((l) => (l.kind === 'parent' ? (tableOf(l.b) === table ? '親' : '子') : l.kind === 'one-to-one' ? '1 対 1' : '兄弟')),
+    );
+    return [...kinds].join('・');
+  };
+  const set = (other: string, v: string) =>
+    onChange(
+      v === 'auto'
+        ? { action: 'table', child: table, parent: other, kind: null }
+        : v === 'parent'
+          ? { action: 'table', child: other, parent: table, kind: 'parent' }
+          : v === 'child'
+            ? { action: 'table', child: table, parent: other, kind: 'parent' }
+            : { action: 'table', child: table, parent: other, kind: v === 'sibling' ? 'sibling' : 'one-to-one' },
+    );
+  return (
+    <>
+      <h3 className="relations-add-head">表の関係</h3>
+      <table className="relations-grid table-kinds">
+        <tbody>
+          {others.map((o) => {
+            const v = valueOf(o);
+            return (
+              <tr key={o}>
+                <td>
+                  <code>{noSchema(o)}</code>
+                </td>
+                <td>
+                  <select value={v} onChange={(e) => set(o, e.target.value)}>
+                    <option value="auto">自動{v === 'auto' && autoOf(o) ? `（${autoOf(o)}）` : ''}</option>
+                    <option value="parent">この表が親</option>
+                    <option value="child">この表が子</option>
+                    <option value="one">1 対 1</option>
+                    <option value="sibling">兄弟</option>
+                  </select>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
 

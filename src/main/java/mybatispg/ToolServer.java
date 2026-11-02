@@ -2416,6 +2416,7 @@ public final class ToolServer {
       return;
     }
     Relations.Store store = relationStore(connectionId);
+    store.extraTables = manualRelations().relationTables();
     SqlRenderer renderer = workspace.renderer();
     List<String> ids = new ArrayList<>(renderer.statementIds());
     Thread t = new Thread(() -> {
@@ -2458,7 +2459,8 @@ public final class ToolServer {
   }
 
   /**
-   * 手で設定したリレーションを変える。{"action": "add" | "remove", "child", "parent"} か {"action": "disable" | "enable", "a", "b"}、
+   * 手で設定したリレーションを変える。{"action": "add" | "remove", "a", "b"}（列と列）か {"action": "disable" | "enable", "a", "b"}、
+   * 表の関係を決めるなら {"action": "table", "child", "parent", "kind": "parent" | "one-to-one" | "sibling" | null（自動）}（表は schema.table）、
    * 疑わしい結合を問題なしとして隠す・戻すなら {"action": "ignore" | "unignore", "a", "b"}。
    * 列は schema.table.column
    */
@@ -2470,10 +2472,29 @@ public final class ToolServer {
     ManualRelations manual = manualRelations();
     String action = string(req, "action");
     try {
+      // 前の版の画面（child・parent）も受け付ける
+      String a = string(req, "a") != null ? string(req, "a") : string(req, "child");
+      String b = string(req, "b") != null ? string(req, "b") : string(req, "parent");
       if ("add".equals(action)) {
-        manual.add(string(req, "child"), string(req, "parent"));
+        manual.add(a, b);
+        // 向き（親子）は一意かどうかで決めるので、計画に出てこない表なら、その主キー・UNIQUE を読んでおく
+        String connectionId = string(req, "connectionId");
+        if (connectionId != null && connections.get(connectionId) != null && !relationRuns.containsKey(connectionId)) {
+          Relations.Store store = relationStore(connectionId);
+          try (java.sql.Connection c = connections.open(connectionId)) {
+            synchronized (store) {
+              store.extraTables = manual.relationTables();
+              Relations.updateKeys(store, c);
+              store.save();
+            }
+          } catch (java.sql.SQLException | RuntimeException e) {
+            // 読めなければ、次の解析で読む
+          }
+        }
       } else if ("remove".equals(action)) {
-        manual.remove(string(req, "child"), string(req, "parent"));
+        manual.remove(a, b);
+      } else if ("table".equals(action)) {
+        manual.setTableKind(string(req, "child"), string(req, "parent"), string(req, "kind"));
       } else if ("disable".equals(action)) {
         manual.disable(string(req, "a"), string(req, "b"));
       } else if ("enable".equals(action)) {
@@ -2483,7 +2504,7 @@ public final class ToolServer {
       } else if ("unignore".equals(action)) {
         manual.unignore(string(req, "a"), string(req, "b"));
       } else {
-        sendJson(ex, 400, error("action は add・remove・disable・enable・ignore・unignore のどれかにしてください"));
+        sendJson(ex, 400, error("action は add・remove・table・disable・enable・ignore・unignore のどれかにしてください"));
         return;
       }
     } catch (IllegalArgumentException e) {
@@ -2692,9 +2713,23 @@ public final class ToolServer {
         m.put("disabled", l.disabled);
         // 複数の列でできた鍵で親子（1 対 1）と決めたとき、親の表と鍵
         m.put("compositeKey", l.compositeKey);
+        // 手で決めた表の関係で、向きと種類を決めた
+        m.put("byTable", l.byTable);
         links.add(m);
       }
       body.put("links", links);
+      // 手で決めた表の関係（子の表、親の表、parent | one-to-one | sibling）
+      List<Map<String, Object>> tableKinds = new ArrayList<>();
+      synchronized (manual) {
+        for (ManualRelations.TableKind t : manual.tables) {
+          Map<String, Object> m = new LinkedHashMap<>();
+          m.put("child", t.child);
+          m.put("parent", t.parent);
+          m.put("kind", t.kind);
+          tableKinds.add(m);
+        }
+      }
+      body.put("tableKinds", tableKinds);
       // 一意でない列ごとの源流（兄弟をたどって見つけたものも）
       java.util.Set<String> cols = new java.util.TreeSet<>();
       for (Relations.Link l : all) {
