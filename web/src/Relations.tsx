@@ -1,5 +1,6 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { JoinFocus } from './joinMarks';
 import type { Api, RelationLink, RelationStatement, RelationsResult, RelationSuspicion, RelationsTiming } from './api';
 import { ApiError } from './api';
 import type { RelationLoc } from './App';
@@ -60,7 +61,7 @@ export function RelationsScreen({
   /** 共通パラメータの設定（1 つ選んで、その値をすべての statement の解析に使う） */
   globalSets: GlobalSet[];
   active: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, join?: JoinFocus) => void;
   /** 見ているもの（アドレスに残し、ブラウザの戻る・進むで戻すため、呼び出し側で持つ） */
   loc: RelationLoc;
   onNavigate: (loc: RelationLoc) => void;
@@ -634,10 +635,10 @@ export function describeLink(
   return { label: '＝ 兄弟', reason: 'どちらも 1 列では一意でない' };
 }
 
-/** 結合の組を拾った計画の項目（Hash Cond など） */
-function joinKind(detail: RelationStatement | undefined, a: string, b: string): string | null {
+/** 根拠の SQL の一覧の行（開くと、XML でその結合をしている場所を示す） */
+function joinItem(detail: RelationStatement | undefined, id: string, a: string, b: string) {
   const j = detail?.joins.find((x) => (x[0] === a && x[1] === b) || (x[0] === b && x[1] === a));
-  return j ? j[2] : null;
+  return { id, note: j ? j[2] : null, join: { statementId: id, a, b, expr: j?.[3] ?? '' } };
 }
 
 type Origin = { column: string; path: string[]; count: number; manual: boolean };
@@ -670,7 +671,7 @@ function TableRelations({
   details: RelationStatement[];
   detailOf: Map<string, RelationStatement>;
   s: (col: string) => string;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, join?: JoinFocus) => void;
   /** 強調する列 */
   focus: string | null;
   onGoColumn: (col: string) => void;
@@ -709,7 +710,7 @@ function TableRelations({
       {l.statements.length > 0 && (
         <SqlList
           title={`根拠の SQL（${l.statements.length} 件）`}
-          items={l.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), l.a, l.b) }))}
+          items={l.statements.map((id) => joinItem(detailOf.get(id), id, l.a, l.b))}
           onOpen={onOpen}
         />
       )}
@@ -773,7 +774,7 @@ function TableRelations({
                     )}
                     {st.link && st.link.statements.length > 0 && (
                       <SqlList
-                        items={st.link.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), st.link!.a, st.link!.b) }))}
+                        items={st.link.statements.map((id) => joinItem(detailOf.get(id), id, st.link!.a, st.link!.b))}
                         onOpen={onOpen}
                       />
                     )}
@@ -945,7 +946,7 @@ function StatementDetail({
   detail: RelationStatement;
   keys: Record<string, number>;
   s: (col: string) => string;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, join?: JoinFocus) => void;
   onGoColumn: (col: string) => void;
 }) {
   const col = (c: string) => (
@@ -1023,7 +1024,7 @@ function NameDetail({
   uses: { statement: string; property: string; compared: string[]; decided: string | null }[];
   minName: number;
   s: (col: string) => string;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, join?: JoinFocus) => void;
   onGoColumn: (col: string) => void;
 }) {
   const col = (c: string) => (
@@ -1264,7 +1265,15 @@ function AddLink({
 /** statement ごとのワークスペースのソースの名前（根拠の SQL の一覧に出す） */
 const SourceContext = createContext<Map<string, string | null>>(new Map());
 
-function SqlList({ title, items, onOpen }: { title?: string; items: { id: string; note: string | null }[]; onOpen: (id: string) => void }) {
+function SqlList({
+  title,
+  items,
+  onOpen,
+}: {
+  title?: string;
+  items: { id: string; note: string | null; join?: JoinFocus }[];
+  onOpen: (id: string, join?: JoinFocus) => void;
+}) {
   const sourceOf = useContext(SourceContext);
   return (
     <>
@@ -1273,7 +1282,7 @@ function SqlList({ title, items, onOpen }: { title?: string; items: { id: string
         {items.map((it) => (
           <li key={`${it.id} ${it.note}`}>
             {sourceOf.get(it.id) && <span className="badge muted">{sourceOf.get(it.id)}</span>}
-            <button type="button" className="link" onClick={() => onOpen(it.id)}>
+            <button type="button" className="link" onClick={() => onOpen(it.id, it.join)}>
               {it.id}
             </button>
             {it.note && <span className="hint"> {it.note}</span>}
@@ -1299,7 +1308,7 @@ function SuspicionDetail({
   x: RelationSuspicion;
   s: (col: string) => string;
   detailOf: Map<string, RelationStatement>;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, join?: JoinFocus) => void;
   onGoColumn: (col: string) => void;
   onChange: (c: Parameters<Api['changeManualRelation']>[0]) => Promise<void>;
 }) {
@@ -1339,7 +1348,7 @@ function SuspicionDetail({
       </table>
       <SqlList
         title={`この結合をしている SQL（${x.statements.length} 件）`}
-        items={x.statements.map((id) => ({ id, note: joinKind(detailOf.get(id), x.a, x.b) }))}
+        items={x.statements.map((id) => joinItem(detailOf.get(id), id, x.a, x.b))}
         onOpen={onOpen}
       />
       <div className="suspicion-actions">

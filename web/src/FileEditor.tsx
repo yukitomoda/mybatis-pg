@@ -1,5 +1,6 @@
 // テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない。
 // プレイグラウンド（このアプリだけで使う mapper XML）は下書きを使わず、編集したら自動で保存する
+import { findJoinRanges, type JoinFocus } from './joinMarks';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, OpenTarget } from './api';
 import { ApiError } from './api';
@@ -24,6 +25,7 @@ export function FileEditor({
   visible,
   playground,
   readOnly,
+  join,
 }: {
   api: Api;
   statementId: string;
@@ -39,6 +41,8 @@ export function FileEditor({
   playground?: { name: string; onSaved: () => void; onRename: () => void; onDelete: () => void };
   /** ファイルに保存できない（JAR から読み込んだときなど）。編集して試すことはできる */
   readOnly?: boolean;
+  /** リレーションの画面から開いた結合（XML でその場所に印を付けて移る） */
+  join?: JoinFocus | null;
 }) {
   // プレイグラウンドは JAR から読み込んだときも保存できる
   const cannotSave = !!readOnly && !playground;
@@ -194,13 +198,20 @@ export function FileEditor({
   const [jump, setJump] = useState({ line: 0, n: 0 });
   // 別の statement を選んだら、その statement の行へ移る
   useEffect(() => setJump({ line: 0, n: 0 }), [statementId]);
+  // 結合をしている場所（開いたときの内容で探す。編集しても印は内容に合わせて動く）
+  const marks = useMemo(
+    () => (content === null || !join || join.statementId !== statementId ? [] : findJoinRanges(content, join)),
+    [join, statementId, content === null],
+  );
   const focus = !visible
     ? null
     : jump.n > 0
       ? { key: `${statementId}#${jump.n}`, line: jump.line }
-      : focusLine !== null
-        ? { key: statementId, line: focusLine }
-        : null;
+      : marks.length > 0 && join
+        ? { key: `${statementId}#join#${join.a}|${join.b}`, line: 0, from: marks[0].from, to: marks[0].to }
+        : focusLine !== null
+          ? { key: statementId, line: focusLine }
+          : null;
 
   if (loadError) return <pre className="render-error">{loadError}</pre>;
   if (content === null) return null;
@@ -274,6 +285,7 @@ export function FileEditor({
           onChange={change}
           errors={errors}
           focus={focus}
+          marks={marks}
           label={`${file} の編集`}
           // Ctrl+S では、プレイグラウンドだけをすぐに保存する（プロジェクトのファイルは、手癖で保存しないよう「ファイルに保存」ボタンだけで保存する）
           onSave={() => {

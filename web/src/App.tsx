@@ -6,6 +6,7 @@ import { ExecutePanel, useConnections } from './Execution';
 import { ExplainPanel } from './Explain';
 import { CandidatePane } from './Suggest';
 import type { WorkspaceSection } from './Workspace';
+import type { JoinFocus } from './joinMarks';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
@@ -232,6 +233,8 @@ function Workspace({ api }: { api: Api }) {
   const [result, setResult] = useState<RenderResponse | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
+  /** リレーションの画面から開いた結合（テンプレートでその場所を示す） */
+  const [joinFocus, setJoinFocus] = useState<JoinFocus | null>(null);
   /** テンプレートのタブを開いたことがあるか（エディタは開くまで読み込まない） */
   const [templateSeen, setTemplateSeen] = useState(false);
   if (tab === 'template' && !templateSeen) setTemplateSeen(true);
@@ -947,6 +950,7 @@ function Workspace({ api }: { api: Api }) {
                     visible={tab === 'template'}
                     playground={playgroundOf(editorFile)}
                     readOnly={readOnlyFile(editorFile)}
+                    join={joinFocus}
                   />
                 ) : (
                   <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
@@ -979,9 +983,12 @@ function Workspace({ api }: { api: Api }) {
           loc={relationLoc}
           onNavigate={navigateRelation}
           active={screen === 'relations'}
-          onOpen={(id) => {
+          onOpen={(id, join) => {
             setScreen('query');
             select(id);
+            // 結合の根拠から開いたら、テンプレートでその場所を示す
+            setJoinFocus(join ?? null);
+            if (join) setTab('template');
           }}
           onShowResult={(id) => rv.showHistory(id)}
         />

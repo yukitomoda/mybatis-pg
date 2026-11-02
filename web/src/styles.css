@@ -3513,3 +3513,10 @@ div.relations-comment {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* XML: リレーションの画面から開いた結合の場所 */
+.cm-join-mark {
+  background: color-mix(in srgb, var(--warn) 28%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  border-radius: 2px;
+}

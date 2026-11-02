@@ -4,8 +4,8 @@ import { HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/lang
 import { xml } from '@codemirror/lang-xml';
 import type { Diagnostic } from '@codemirror/lint';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
-import { Annotation, EditorState } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { Decoration, type DecorationSet, EditorView, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
@@ -79,11 +79,28 @@ const tabKeys = keymap.of([
   },
 ]);
 
+/** 印（リレーションの画面から開いた結合の場所）を差し替える */
+const setMarks = StateEffect.define<{ from: number; to: number }[]>();
+const markDeco = Decoration.mark({ class: 'cm-join-mark' });
+const marksField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setMarks))
+        deco = Decoration.set(e.value.filter((m) => m.to <= tr.state.doc.length).map((m) => markDeco.range(m.from, m.to)));
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 export function XmlEditor({
   value,
   onChange,
   errors,
   focus,
+  marks = [],
   label,
   onSave,
 }: {
@@ -91,7 +108,9 @@ export function XmlEditor({
   onChange: (value: string) => void;
   errors: EditorError[];
   /** 表示する行（1 始まり）。key が変わったときだけ移る（同じ key のまま表示し直しても、スクロールの位置を保つ） */
-  focus: { key: string; line: number } | null;
+  focus: { key: string; line: number; from?: number; to?: number } | null;
+  /** 印を付ける範囲 */
+  marks?: { from: number; to: number }[];
   label: string;
   /** Ctrl+S（Mac は ⌘S）。ブラウザの「ページを保存」は出さない */
   onSave: () => void;
@@ -124,6 +143,7 @@ export function XmlEditor({
             },
           ]),
           syntaxHighlighting(highlight),
+          marksField,
           lintGutter(),
           theme,
           EditorView.contentAttributes.of({ 'aria-label': label }),
@@ -151,11 +171,24 @@ export function XmlEditor({
   const focused = useRef<string | null>(null);
   useEffect(() => {
     const v = view.current;
-    if (!v || !focus || focus.key === focused.current || focus.line > v.state.doc.lines) return;
+    if (!v || !focus || focus.key === focused.current) return;
+    if (focus.from !== undefined && focus.to !== undefined && focus.to <= v.state.doc.length) {
+      // 範囲（結合の場所）を選んで、画面の中ほどに出す
+      focused.current = focus.key;
+      v.dispatch({ selection: { anchor: focus.from, head: focus.to }, effects: EditorView.scrollIntoView(focus.from, { y: 'center' }) });
+      return;
+    }
+    if (focus.line < 1 || focus.line > v.state.doc.lines) return;
     focused.current = focus.key;
     const line = v.state.doc.line(focus.line);
     v.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 40 }) });
-  }, [focus?.key, focus?.line]);
+  }, [focus?.key, focus?.line, focus?.from]);
+
+  // 印
+  const marksKey = marks.map((m) => `${m.from}-${m.to}`).join(',');
+  useEffect(() => {
+    view.current?.dispatch({ effects: setMarks.of(marks) });
+  }, [marksKey]);
 
   useEffect(() => {
     const v = view.current;

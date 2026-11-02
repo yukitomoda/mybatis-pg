@@ -16,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
@@ -50,7 +51,8 @@ import com.google.gson.JsonParser;
  * <p>解析の結果は、プロジェクトと接続先の組ごとに 1 つの JSON に保存する（解析し直すときは、SQL が変わった statement だけを解析する）。
  * <pre>
  * {"version": 1, "analyzer": 解析の仕方の版, "project": "/path/to/project", "connectionId": "...", "updatedAt": ミリ秒,
- *  "statements": {"statement の id": {"hash": SQL の SHA-256, "joins": [{"a": "schema.table.column", "b": "...", "on": "Hash Cond"}],
+ *  "statements": {"statement の id": {"hash": SQL の SHA-256,
+ *                                    "joins": [{"a": "schema.table.column", "b": "...", "on": "Hash Cond", "expr": "c.user_id = u.id"}],
  *                                    "error": 解析できなかった理由（なければなし）}},
  *  "keys": {"schema.table.column": 一意の順位（1 列の主キー 2、1 列の UNIQUE 3、複数列なら列の数 × 2 + …。一意でなければなし）}}
  * </pre>
@@ -63,7 +65,7 @@ final class Relations {
    * 残した計画からの取り出し方（結合の組・パラメータと比べている列・出てくる表）の版。変えたら、ファイルを開いたときに、
    * 残した計画から取り出し直す（DB にはつながない）。親子の決め方など、保存したものから読むたびに組み立てるものは、版を変えなくてよい
    */
-  static final int EXTRACTOR = 2;
+  static final int EXTRACTOR = 3;
   /** 結合の条件を探す計画の項目 */
   private static final String[] JOIN_KEYS = {"Hash Cond", "Merge Cond", "Join Filter", "Index Cond", "Recheck Cond", "Filter"};
   private static final String IDENT = "(?:\"(?:[^\"]|\"\")+\"|[A-Za-z_][A-Za-z0-9_$]*)";
@@ -97,7 +99,10 @@ final class Relations {
 
   // ---- 計画から結合の条件を取り出す ----
 
-  /** 計画の中の、別の表（または同じ表の別の列）の列どうしを = で比べている組。[a, b, 計画の項目] */
+  /**
+   * 計画の中の、別の表（または同じ表の別の列）の列どうしを = で比べている組。[a, b, 計画の項目, 条件の式]。
+   * 条件の式は、計画に書かれた別名のまま（c.user_id = u.id。SQL の中で結合している場所を探すのに使う）。同じ組が何か所にもあれば改行で区切る
+   */
   static List<String[]> joins(String planJson) {
     JsonElement root = JsonParser.parseString(planJson);
     JsonObject top = root.isJsonArray() ? root.getAsJsonArray().get(0).getAsJsonObject() : root.getAsJsonObject();
@@ -106,7 +111,7 @@ final class Relations {
     walk(top.getAsJsonObject("Plan"), aliases, conditions);
     Map<String, String> derived = derived(top.getAsJsonObject("Plan"));
     List<String[]> out = new ArrayList<>();
-    Set<String> seen = new HashSet<>();
+    Map<String, String[]> seen = new HashMap<>();
     for (String[] kc : conditions) {
       Set<String> temporal = new HashSet<>();
       Matcher tm = TEMPORAL_CAST.matcher(kc[1]);
@@ -136,8 +141,14 @@ final class Relations {
           continue;
         }
         String pair = a.compareTo(b) < 0 ? a + "\u0000" + b : b + "\u0000" + a;
-        if (seen.add(pair)) {
-          out.add(new String[] {a, b, kc[0]});
+        String expr = m.group(0).replaceAll("\\s+", " ");
+        String[] found = seen.get(pair);
+        if (found == null) {
+          found = new String[] {a, b, kc[0], expr};
+          seen.put(pair, found);
+          out.add(found);
+        } else if (!Arrays.asList(found[3].split("\n")).contains(expr)) {
+          found[3] = found[3] + "\n" + expr;
         }
       }
     }
@@ -526,7 +537,8 @@ final class Relations {
         List<String[]> joins = new ArrayList<>();
         for (JsonElement j : st.getAsJsonArray("joins")) {
           JsonObject jo = j.getAsJsonObject();
-          joins.add(new String[] {jo.get("a").getAsString(), jo.get("b").getAsString(), jo.get("on").getAsString()});
+          joins.add(new String[] {jo.get("a").getAsString(), jo.get("b").getAsString(), jo.get("on").getAsString(),
+              jo.has("expr") ? jo.get("expr").getAsString() : ""});
         }
         Map<String, List<String>> params = null;
         if (st.has("params")) {
@@ -593,6 +605,9 @@ final class Relations {
           jo.addProperty("a", j[0]);
           jo.addProperty("b", j[1]);
           jo.addProperty("on", j[2]);
+          if (j.length > 3 && !j[3].isEmpty()) {
+            jo.addProperty("expr", j[3]);
+          }
           joins.add(jo);
         }
         st.add("joins", joins);
