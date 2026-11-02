@@ -244,6 +244,17 @@ export function RelationsScreen({
       else next.add(schema);
       return next;
     });
+  // 表を選んだら（ほかの画面から移ってきたときも）、そのスキーマを開く。開いた後は閉じられる
+  useEffect(() => {
+    if (!table) return;
+    const schema = table.slice(0, table.indexOf('.'));
+    setClosedSchemas((old) => {
+      if (!old.has(schema)) return old;
+      const next = new Set(old);
+      next.delete(schema);
+      return next;
+    });
+  }, [table]);
   const allDetails = result?.statementDetails ?? [];
   const details = filterBySource ? allDetails.filter((d) => d.source === sourceFilter) : allDetails;
   const keys = result?.keys ?? {};
@@ -428,7 +439,7 @@ export function RelationsScreen({
                   {view === 'tables' &&
                     schemaTree.map(([schema, ts]) => {
                       // 絞り込んでいる間と、選んでいる表のスキーマは開く
-                      const open = q !== '' || !closedSchemas.has(schema) || (table !== null && table.startsWith(`${schema}.`));
+                      const open = q !== '' || !closedSchemas.has(schema);
                       const related = ts.filter(([, n]) => n > 0).length;
                       return (
                         <li key={schema} className="schema-node">
