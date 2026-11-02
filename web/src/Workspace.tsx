@@ -3,14 +3,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Api, WorkspaceSnapshot, WorkspaceSource } from './api';
 import type { Connections } from './Execution';
-import { ConnectionsScreen, message } from './Execution';
+import { ConnectionPicker, ConnectionsScreen, message } from './Execution';
+import { clearDbComments } from './comments';
 
 /** ワークスペースの画面で見るもの（左のサブメニュー） */
-export type WorkspaceSection = 'sources' | 'connections' | 'list';
+export type WorkspaceSection = 'sources' | 'connections' | 'schemas' | 'list';
 
 const SECTIONS: [WorkspaceSection, string][] = [
   ['sources', '全般'],
   ['connections', '接続先'],
+  ['schemas', 'スキーマ'],
   ['list', 'ワークスペースの一覧'],
 ];
 
@@ -74,6 +76,7 @@ export function WorkspaceScreen({
       name: cur.name,
       sources: cur.sources.map(({ name, type, path, enabled }) => ({ name, type, path, enabled })),
       relationConnection: cur.relationConnection,
+      schemas: cur.schemas,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(def, null, 2)], { type: 'application/json' }));
     const a = document.createElement('a');
@@ -312,6 +315,20 @@ export function WorkspaceScreen({
           </div>
         )}
         {section === 'connections' && <ConnectionsScreen conn={conn} />}
+        {section === 'schemas' && (
+          <SchemasSection
+            api={api}
+            conn={conn}
+            selected={snap.current.schemas}
+            onSave={(schemas) =>
+              run(() => api.saveWorkspaceSchemas(schemas), '保存しました').then(() => {
+                clearDbComments();
+              })
+            }
+            busy={busy}
+            messages={messages}
+          />
+        )}
         {section === 'list' && (
           <div className="page">
             <header className="panel-header">
@@ -377,6 +394,145 @@ export function WorkspaceScreen({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+type SchemaRow = { name: string; tables: number; searchPath: boolean; used: boolean };
+
+/** 画面に出す DB のスキーマ（表の一覧・コメント）。自動なら、解析で使ったもの（なければ search_path のもの） */
+function SchemasSection({
+  api,
+  conn,
+  selected,
+  onSave,
+  busy,
+  messages,
+}: {
+  api: Api;
+  conn: Connections;
+  selected: string[] | null;
+  onSave: (schemas: string[] | null) => Promise<void>;
+  busy: boolean;
+  messages: React.ReactNode;
+}) {
+  const connectionId = conn.current?.id ?? null;
+  const [rows, setRows] = useState<SchemaRow[] | null>(null);
+  const [shown, setShown] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [auto, setAuto] = useState(selected === null);
+  const [picked, setPicked] = useState<Set<string>>(new Set(selected ?? []));
+  const [filter, setFilter] = useState('');
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    setAuto(selected === null);
+    setPicked(new Set(selected ?? []));
+    setDirty(false);
+  }, [selected]);
+  useEffect(() => {
+    setRows(null);
+    setError(null);
+    if (!connectionId) return;
+    api.dbSchemas(connectionId).then(
+      (r) => {
+        setRows(r.schemas);
+        setShown(r.shown);
+      },
+      (e) => setError(message(e)),
+    );
+  }, [api, connectionId, selected]);
+  // 自動のときに出すもの（解析で使ったもの。なければ search_path のもの）
+  const autoSet = new Set(shown ?? (rows ?? []).filter((r) => r.searchPath).map((r) => r.name));
+  const isOn = (name: string) => (auto ? autoSet.has(name) : picked.has(name));
+  const q = filter.trim().toLowerCase();
+  const list = (rows ?? [])
+    .filter((r) => r.name.toLowerCase().includes(q))
+    // 出すもの、解析で使ったもの、search_path のものを先に
+    .sort((a, b) => +isOn(b.name) - +isOn(a.name) || +b.used - +a.used || +b.searchPath - +a.searchPath || a.name.localeCompare(b.name));
+  const toggle = (name: string, on: boolean) => {
+    setPicked((old) => {
+      const next = new Set(auto ? autoSet : old);
+      if (on) next.add(name);
+      else next.delete(name);
+      return next;
+    });
+    setAuto(false);
+    setDirty(true);
+  };
+  return (
+    <div className="page">
+      <header className="panel-header">
+        <h2>スキーマ</h2>
+        <ConnectionPicker conn={conn} />
+      </header>
+      {messages}
+      {error && <pre className="render-error">{error}</pre>}
+      <div className="workspace-schemas-mode">
+        <label>
+          <input
+            type="radio"
+            checked={auto}
+            onChange={() => {
+              setAuto(true);
+              setDirty(true);
+            }}
+          />
+          自動（解析で使ったもの）
+        </label>
+        <label>
+          <input
+            type="radio"
+            checked={!auto}
+            onChange={() => {
+              setPicked(new Set(autoSet));
+              setAuto(false);
+              setDirty(true);
+            }}
+          />
+          選ぶ
+        </label>
+        <span className="spacer" />
+        <button type="button" disabled={busy || !dirty} onClick={() => onSave(auto ? null : [...picked].sort())}>
+          保存
+        </button>
+      </div>
+      {!connectionId ? null : rows === null ? (
+        !error && <p className="hint">読み込んでいます…</p>
+      ) : (
+        <>
+          <input
+            type="search"
+            className="workspace-schemas-filter"
+            placeholder="スキーマを絞り込む"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <table className="workspace-schemas">
+            <thead>
+              <tr>
+                <th aria-label="出す" />
+                <th>スキーマ</th>
+                <th>表</th>
+                <th>解析で使用</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((r) => (
+                <tr key={r.name}>
+                  <td>
+                    <input type="checkbox" checked={isOn(r.name)} aria-label={r.name} onChange={(e) => toggle(r.name, e.target.checked)} />
+                  </td>
+                  <td>
+                    <code>{r.name}</code>
+                  </td>
+                  <td className="num">{r.tables}</td>
+                  <td>{r.used ? '✓' : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

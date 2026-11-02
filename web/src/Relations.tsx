@@ -1,11 +1,11 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, RelationLink, RelationStatement, RelationsResult, RelationSuspicion, RelationsTiming } from './api';
 import { ApiError } from './api';
 import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
-import { CommentsContext, useDbComments } from './comments';
+import { clearDbComments, CommentsContext, useDbComments } from './comments';
 import { InfoButton } from './Popover';
 import { RelationDiagram, type TableEdge } from './RelationDiagram';
 import { SideSplitter, useSideWidth } from './Splitter';
@@ -121,6 +121,12 @@ export function RelationsScreen({
   }, [active, connectionId]);
   // 解析中は、進み具合を読み直す
   const running = !!result?.progress;
+  // 解析を終えたら、コメントと表の一覧を読み直す（出すスキーマが変わることがある）
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) clearDbComments();
+    wasRunning.current = running;
+  }, [running]);
   useEffect(() => {
     if (!running) return;
     const t = window.setInterval(load, 1000);
@@ -171,7 +177,7 @@ export function RelationsScreen({
       (r) => setAllTables(r.tables),
       () => setAllTables([]),
     );
-  }, [active, connectionId]);
+  }, [active, connectionId, running]);
   const tables = useMemo(() => {
     const count = new Map<string, number>();
     for (const l of links) {

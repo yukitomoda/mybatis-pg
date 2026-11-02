@@ -117,7 +117,8 @@ function parseHash(): {
   if (screen === 'globals') return { screen: 'globals', ...none, global: arg || null };
   // 接続先は、ワークスペースの中（前の #/connections も読む）
   if (screen === 'connections') return { screen: 'workspace', ...none, workspace: 'connections' };
-  if (screen === 'workspace') return { screen: 'workspace', ...none, workspace: arg === 'connections' || arg === 'list' ? arg : 'sources' };
+  if (screen === 'workspace')
+    return { screen: 'workspace', ...none, workspace: arg === 'connections' || arg === 'schemas' || arg === 'list' ? arg : 'sources' };
   if (screen === 'relations') {
     const [kind, ...more] = rest;
     const value = more.join('/') || null;

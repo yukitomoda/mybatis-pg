@@ -186,6 +186,7 @@ public final class ToolServer {
     }
     cur.put("sources", sources);
     cur.put("relationConnection", def.relationConnection);
+    cur.put("schemas", def.schemas);
     body.put("current", cur);
     List<Map<String, Object>> list = new ArrayList<>();
     for (Workspaces.Def d : workspaces.list()) {
@@ -202,7 +203,7 @@ public final class ToolServer {
 
   /**
    * ワークスペースの操作。save: {"name", "sources": [{"id"?, "name", "type", "path", "enabled"}]}（開いているものを変える）、
-   * open: {"id"}、create: {"name"}（作って開く）、delete: {"id"}（開いていないもの）。応答は workspaceSnapshot
+   * schemas: {"schemas": [...] | null}（画面に出すスキーマ）、open: {"id"}、create: {"name"}（作って開く）、delete: {"id"}（開いていないもの）。応答は workspaceSnapshot
    */
   private void workspaceAction(HttpExchange ex, String action) throws IOException {
     JsonObject req = readJson(ex);
@@ -213,7 +214,7 @@ public final class ToolServer {
       sendJson(ex, 400, error("ワークスペースを使っていません"));
       return;
     }
-    if (!"save".equals(action) && !"delete".equals(action) && !relationRuns.isEmpty()) {
+    if (!"save".equals(action) && !"delete".equals(action) && !"schemas".equals(action) && !relationRuns.isEmpty()) {
       sendJson(ex, 409, error("リレーションを解析しているので、ワークスペースを切り替えられません。一時停止してから切り替えてください"));
       return;
     }
@@ -255,10 +256,20 @@ public final class ToolServer {
           def.sources = sources;
           String rc = req.has("relationConnection") && !req.get("relationConnection").isJsonNull() ? req.get("relationConnection").getAsString() : null;
           def.relationConnection = rc == null || rc.isEmpty() ? null : rc;
+          if (req.has("schemas")) {
+            def.schemas = stringList(req.get("schemas"));
+          }
           relationGraphs.clear();
           workspaces.save(def);
           workspace.configure(def);
           connections.useProjects(workspace.projectDirs());
+          break;
+        }
+        case "schemas": {
+          // 画面に出すスキーマ（null なら自動）。ソースは読み直さない
+          Workspaces.Def def = currentWorkspace;
+          def.schemas = stringList(req.get("schemas"));
+          workspaces.save(def);
           break;
         }
         case "open": {
@@ -307,8 +318,9 @@ public final class ToolServer {
           String rc = string(d, "relationConnection");
           if (rc != null && !rc.isEmpty()) {
             created.relationConnection = rc;
-            workspaces.save(created);
           }
+          created.schemas = d.has("schemas") ? stringList(d.get("schemas")) : null;
+          workspaces.save(created);
           break;
         }
         case "delete": {
@@ -387,6 +399,75 @@ public final class ToolServer {
   private String relationKey(String connectionId) {
     Workspaces.Def def = currentWorkspace;
     return def != null && def.relationConnection != null && !def.relationConnection.isEmpty() ? def.relationConnection : connectionId;
+  }
+
+  /** 文字列の配列（null・配列でないものは null） */
+  private static List<String> stringList(JsonElement e) {
+    if (e == null || !e.isJsonArray()) {
+      return null;
+    }
+    List<String> out = new ArrayList<>();
+    for (JsonElement x : e.getAsJsonArray()) {
+      if (x.isJsonPrimitive() && !out.contains(x.getAsString())) {
+        out.add(x.getAsString());
+      }
+    }
+    return out;
+  }
+
+  /** DB のカタログ（コメントを覚えておく） */
+  private DbCatalog catalog;
+
+  private synchronized DbCatalog catalog() {
+    if (catalog == null) {
+      catalog = new DbCatalog(configDir == null ? null : configDir.resolve("comments"));
+    }
+    return catalog;
+  }
+
+  /**
+   * 画面に出す DB のスキーマ。ワークスペースで選んでいればそれ、なければ解析で使ったスキーマ。
+   * それもなければ null（search_path のスキーマ）
+   */
+  private List<String> shownSchemas(String connectionId) {
+    Workspaces.Def def = currentWorkspace;
+    if (def != null && def.schemas != null) {
+      return def.schemas;
+    }
+    List<String> used = usedSchemas(connectionId);
+    return used.isEmpty() ? null : used;
+  }
+
+  /** リレーションの解析で使ったスキーマ（計画に出てきた表・結合した列と、手で設定したリレーション） */
+  private List<String> usedSchemas(String connectionId) {
+    java.util.Set<String> tables = new java.util.TreeSet<>();
+    try {
+      Relations.Store store = relationStore(connectionId);
+      // 解析中でも読めるよう、写してから読む（食い違ったら、次に読むときに直る）
+      for (Relations.Entry e : new ArrayList<>(store.statements.values())) {
+        tables.addAll(e.tables);
+        for (String[] j : e.joins) {
+          tables.add(j[0]);
+          tables.add(j[1]);
+        }
+      }
+      for (Relations.Link l : Relations.links(store, manualRelations())) {
+        if (l.manual) {
+          tables.add(l.a);
+          tables.add(l.b);
+        }
+      }
+    } catch (IOException | RuntimeException e) {
+      // 読めなければ、使ったスキーマはないものとする
+    }
+    java.util.Set<String> out = new java.util.TreeSet<>();
+    for (String t : tables) {
+      int dot = t.indexOf('.');
+      if (dot > 0) {
+        out.add(t.substring(0, dot));
+      }
+    }
+    return new ArrayList<>(out);
   }
 
   private Relations.Store relationStore(String connectionId) throws IOException {
@@ -480,6 +561,7 @@ public final class ToolServer {
       case "/api/workspace/create":
       case "/api/workspace/delete":
       case "/api/workspace/import":
+      case "/api/workspace/schemas":
         if (requireMethod(ex, method, "POST")) {
           workspaceAction(ex, path.substring("/api/workspace/".length()));
         }
@@ -643,6 +725,11 @@ public final class ToolServer {
       case "/api/db-columns":
         if (requireMethod(ex, method, "POST")) {
           dbColumns(ex);
+        }
+        break;
+      case "/api/db-schemas":
+        if (requireMethod(ex, method, "POST")) {
+          dbSchemas(ex);
         }
         break;
       case "/api/db-comments":
@@ -2336,6 +2423,15 @@ public final class ToolServer {
         synchronized (store) {
           Relations.analyze(renderer, ids, parameters, c, store, progress);
         }
+        // コメントもここで読み直しておく（ほとんど変わらないので、ほかのときは覚えておいたものを使う）
+        try {
+          if (!c.getAutoCommit()) {
+            c.rollback();
+          }
+          catalog().put(connectionId, DbCatalog.readComments(c, shownSchemas(connectionId)));
+        } catch (java.sql.SQLException | RuntimeException e) {
+          // 読めなければ、次に画面が読むときに読む
+        }
       } catch (Exception e) {
         progress.current = "エラー: " + Errors.describe(e);
       } finally {
@@ -2414,31 +2510,55 @@ public final class ToolServer {
       sendJson(ex, 404, error("接続先がありません"));
       return;
     }
-    Map<String, String> tables = new java.util.TreeMap<>();
-    Map<String, String> columns = new java.util.TreeMap<>();
-    try (java.sql.Connection c = connections.open(connectionId);
-        java.sql.Statement s = c.createStatement();
-        java.sql.ResultSet rs = s.executeQuery("SELECT n.nspname, c.relname, a.attname, d.description FROM pg_description d"
-            + " JOIN pg_class c ON c.oid = d.objoid AND d.classoid = 'pg_class'::regclass"
-            + " JOIN pg_namespace n ON n.oid = c.relnamespace"
-            + " LEFT JOIN pg_attribute a ON d.objsubid > 0 AND a.attrelid = c.oid AND a.attnum = d.objsubid AND NOT a.attisdropped"
-            + " WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
-            + " AND n.nspname NOT LIKE 'pg\\_%' AND (d.objsubid = 0 OR a.attname IS NOT NULL)")) {
-      while (rs.next()) {
-        String table = rs.getString(1) + "." + rs.getString(2);
-        if (rs.getString(3) == null) {
-          tables.put(table, rs.getString(4));
-        } else {
-          columns.put(table + "." + rs.getString(3), rs.getString(4));
-        }
+    List<String> schemas = shownSchemas(connectionId);
+    boolean refresh = req.has("refresh") && req.get("refresh").getAsBoolean();
+    DbCatalog.Comments cm = refresh ? null : catalog().cached(connectionId, schemas);
+    if (cm == null) {
+      try (java.sql.Connection c = connections.open(connectionId)) {
+        cm = DbCatalog.readComments(c, schemas);
+      } catch (java.sql.SQLException | RuntimeException e) {
+        sendJson(ex, 422, error(Errors.describe(e)));
+        return;
       }
+      catalog().put(connectionId, cm);
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("tables", cm.tables);
+    body.put("columns", cm.columns);
+    body.put("fetchedAt", cm.fetchedAt);
+    sendJson(ex, 200, body);
+  }
+
+  /**
+   * DB のスキーマ: {"connectionId"} → {"schemas": [{"name", "tables": 表の数, "searchPath", "used": 解析で使った}],
+   * "selected": ワークスペースで選んだスキーマ（自動なら null）, "shown": 今出しているスキーマ（search_path なら null）}
+   */
+  private void dbSchemas(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    List<Map<String, Object>> list;
+    try (java.sql.Connection c = connections.open(connectionId)) {
+      list = DbCatalog.schemas(c);
     } catch (java.sql.SQLException | RuntimeException e) {
       sendJson(ex, 422, error(Errors.describe(e)));
       return;
     }
+    List<String> used = usedSchemas(connectionId);
+    for (Map<String, Object> m : list) {
+      m.put("used", used.contains(m.get("name")));
+    }
+    Workspaces.Def def = currentWorkspace;
     Map<String, Object> body = new LinkedHashMap<>();
-    body.put("tables", tables);
-    body.put("columns", columns);
+    body.put("schemas", list);
+    body.put("selected", def == null ? null : def.schemas);
+    body.put("shown", shownSchemas(connectionId));
     sendJson(ex, 200, body);
   }
 
@@ -2460,14 +2580,7 @@ public final class ToolServer {
     List<String> out = new ArrayList<>();
     try (java.sql.Connection c = connections.open(connectionId)) {
       if (table == null) {
-        try (java.sql.Statement s = c.createStatement(); java.sql.ResultSet rs = s.executeQuery(
-            "SELECT n.nspname || '.' || c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-                + " WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
-                + " AND n.nspname NOT LIKE 'pg\\_%' ORDER BY 1")) {
-          while (rs.next()) {
-            out.add(rs.getString(1));
-          }
-        }
+        out.addAll(DbCatalog.tables(c, shownSchemas(connectionId)));
       } else {
         int dot = table.indexOf('.');
         try (java.sql.PreparedStatement ps = c.prepareStatement("SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid"

@@ -81,6 +81,8 @@ export interface WorkspaceSnapshot {
     sources: WorkspaceSource[];
     /** リレーションの解析の結果を、すべての接続先でこの接続先のものを使う（null なら接続先ごと） */
     relationConnection: string | null;
+    /** 画面に出す DB のスキーマ（null なら自動） */
+    schemas: string[] | null;
   } | null;
   workspaces: { id: string; name: string; sources: number; current: boolean }[];
 }
@@ -375,6 +377,15 @@ export function createApi(token: string) {
           }),
         ),
       ),
+    /** 画面に出す DB のスキーマを保存する（null なら自動） */
+    saveWorkspaceSchemas: (schemas: string[] | null) => call<WorkspaceSnapshot>('api/workspace/schemas', post(JSON.stringify({ schemas }))),
+    /** DB のスキーマと表の数（used: リレーションの解析で使った） */
+    dbSchemas: (connectionId: string) =>
+      call<{
+        schemas: { name: string; tables: number; searchPath: boolean; used: boolean }[];
+        selected: string[] | null;
+        shown: string[] | null;
+      }>('api/db-schemas', post(JSON.stringify({ connectionId }))),
     /** ワークスペースを開く */
     openWorkspace: (id: string) => call<WorkspaceSnapshot>('api/workspace/open', post(JSON.stringify({ id }))),
     /** ワークスペースを作って開く */

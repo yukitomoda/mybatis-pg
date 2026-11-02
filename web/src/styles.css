@@ -3477,3 +3477,39 @@ div.relations-comment {
   gap: 0.8rem;
   margin-top: 0.8rem;
 }
+
+/* ワークスペース: スキーマ */
+.workspace-schemas-mode {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.workspace-schemas-mode label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.workspace-schemas-filter {
+  width: 20rem;
+  max-width: 100%;
+  margin-bottom: 0.4rem;
+}
+
+.workspace-schemas {
+  border-collapse: collapse;
+}
+
+.workspace-schemas th,
+.workspace-schemas td {
+  padding: 0.2rem 0.8rem 0.2rem 0;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-schemas td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

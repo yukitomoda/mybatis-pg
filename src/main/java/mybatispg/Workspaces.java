@@ -27,7 +27,8 @@ import com.google.gson.JsonParseException;
  * <pre>
  * {"id", "name", "key": データを分ける鍵, "lastOpenedAt": ミリ秒,
  *  "sources": [{"id", "name", "type": "project" | "jar" | "files", "path", "enabled"}],
- *  "relationConnection": リレーションの解析の結果をすべての接続先で使う接続先（なければ接続先ごと）}
+ *  "relationConnection": リレーションの解析の結果をすべての接続先で使う接続先（なければ接続先ごと）,
+ *  "schemas": 画面に出す DB のスキーマ（なければ自動: 解析で使ったスキーマ。解析していなければ search_path のスキーマ）}
  * </pre>
  * key は、共通パラメータ・下書き・プレイグラウンド・実行の履歴・リレーションを分けるのに使う。
  * --project などから作ったワークスペースは、前の版と同じ鍵（プロジェクトの場所など）にして、そのデータを引き継ぐ。
@@ -74,6 +75,8 @@ final class Workspaces {
      * null なら接続先ごとに分ける
      */
     String relationConnection;
+    /** 画面に出す DB のスキーマ（表の一覧・コメント）。null なら自動（解析で使ったスキーマ。なければ search_path のスキーマ） */
+    List<String> schemas;
   }
 
   private static final SecureRandom RANDOM = new SecureRandom();
