@@ -67,4 +67,30 @@ class SqlStructureTest {
     // 末尾の , は <set> が取り除く
     assertEquals(Arrays.asList("if[a = 1,]", "if[b = 2]"), spans(r, "m.up", u));
   }
+
+  @Test
+  void 空白を除くと範囲が同じでも_入れ子の深さで内と外を決める(@TempDir Path dir) throws Exception {
+    Path mapper = dir.resolve("N.xml");
+    Files.write(mapper, ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        + "<!DOCTYPE mapper PUBLIC \"-//mybatis.org//DTD Mapper 3.0//EN\" \"http://mybatis.org/dtd/mybatis-3-mapper.dtd\">\n"
+        + "<mapper namespace=\"n\">\n"
+        + "  <select id=\"even\" resultType=\"map\">SELECT 1 WHERE 0 IN (0\n"
+        + "    <foreach item=\"i\" collection=\"list\">\n"
+        + "      <if test=\"i % 2 == 0\">\n"
+        + "        , ${i}\n"
+        + "      </if>\n"
+        + "    </foreach>)\n"
+        + "  </select>\n"
+        + "</mapper>\n").getBytes(StandardCharsets.UTF_8));
+    SqlRenderer r = SqlRenderer.load(Collections.singletonList(mapper));
+    Map<String, Object> p = new LinkedHashMap<>();
+    p.put("list", Arrays.asList(1, 2, 3, 4));
+    SqlRenderer.Result res = r.render("n.even", p);
+    List<String> got = new ArrayList<>();
+    for (SqlStructure.Span s : r.structure("n.even", p, res)) {
+      got.add(s.kind + s.depth + "[" + res.literalSql.substring(s.start, s.end).replaceAll("\\s+", " ").trim() + "]");
+    }
+    // foreach の 1 回分（item）が外、if が内（同じ範囲でも、深さの小さいものを先＝外側に）
+    assertEquals(Arrays.asList("foreach0[, 2 , 4]", "item1[, 2]", "if2[, 2]", "item1[, 4]", "if2[, 4]"), got);
+  }
 }

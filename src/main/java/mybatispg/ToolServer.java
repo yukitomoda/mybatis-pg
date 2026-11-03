@@ -1085,6 +1085,7 @@ public final class ToolServer {
       m.put("end", sp.end);
       m.put("kind", sp.kind);
       m.put("label", sp.label);
+      m.put("depth", sp.depth);
       structure.add(m);
     }
     body.put("structure", structure);

@@ -4,7 +4,11 @@ import type { SqlSpan } from './api';
 import { analyze, partLabel, type Part } from './subquery';
 
 export type StructureKind = 'subquery' | 'if' | 'foreach' | 'item';
-type Range = { start: number; end: number; kind: StructureKind; label: string };
+/** depth: 入れ子の深さ（範囲が同じとき、小さいほうを外側にする） */
+type Range = { start: number; end: number; kind: StructureKind; label: string; depth: number };
+
+/** サブクエリは SQL から割り出していて深さがないので、範囲が同じときは内側にする（if の中のサブクエリ） */
+const SUBQUERY_DEPTH = 1_000_000;
 
 /** 空白でない文字の位置（空白だけが違う 2 つの文字列で、位置を対応させる） */
 function solid(s: string): number[] {
@@ -33,7 +37,7 @@ export function mapSpans(raw: string, shown: string, spans: SqlSpan[]): Range[] 
   for (const s of spans) {
     const first = lowerBound(a, s.start);
     const last = lowerBound(a, s.end) - 1;
-    if (first <= last) out.push({ start: b[first], end: b[last] + 1, kind: s.kind, label: s.label });
+    if (first <= last) out.push({ start: b[first], end: b[last] + 1, kind: s.kind, label: s.label, depth: s.depth ?? 0 });
   }
   return out;
 }
@@ -42,7 +46,7 @@ export function mapSpans(raw: string, shown: string, spans: SqlSpan[]): Range[] 
 export function subqueryRanges(sql: string): Range[] {
   const out: Range[] = [];
   const walk = (p: Part, top: boolean) => {
-    if (!top) out.push({ start: p.start, end: p.end, kind: 'subquery', label: partLabel(p) });
+    if (!top) out.push({ start: p.start, end: p.end, kind: 'subquery', label: partLabel(p), depth: SUBQUERY_DEPTH });
     p.children.forEach((c) => walk(c, false));
   };
   try {
@@ -53,11 +57,11 @@ export function subqueryRanges(sql: string): Range[] {
   return out;
 }
 
-type Tree = { range: Range | null; children: Tree[] };
+export type Tree = { range: Range | null; children: Tree[] };
 
-/** 範囲を入れ子に組む（前から、長いものを外側に。交差するものは除く） */
-function nest(ranges: Range[]): Tree {
-  const sorted = [...ranges].sort((x, y) => x.start - y.start || y.end - x.end);
+/** 範囲を入れ子に組む（前から、長いものを外側に。同じ範囲なら入れ子の浅いものを外側に。交差するものは除く） */
+export function nest(ranges: Range[]): Tree {
+  const sorted = [...ranges].sort((x, y) => x.start - y.start || y.end - x.end || x.depth - y.depth);
   const root: Tree = { range: null, children: [] };
   const stack: Tree[] = [root];
   for (const r of sorted) {

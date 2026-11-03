@@ -171,6 +171,8 @@ export interface SqlSpan {
   /** if、foreach（全体）、item（foreach の 1 回分） */
   kind: 'if' | 'foreach' | 'item';
   label: string;
+  /** 入れ子の深さ（外側ほど小さい。範囲が同じとき、内と外を決める） */
+  depth?: number;
 }
 
 export interface RenderResponse {

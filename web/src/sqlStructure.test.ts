@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapSpans, subqueryRanges } from './sqlStructure';
+import { mapSpans, nest, subqueryRanges } from './sqlStructure';
 
 describe('mapSpans', () => {
   it('空白だけが違う SQL の中の位置に直す', () => {
@@ -18,5 +18,16 @@ describe('subqueryRanges', () => {
   it('括弧の中のサブクエリの範囲（メインのクエリは除く）', () => {
     const sql = 'SELECT * FROM (SELECT id FROM t) s WHERE x IN (SELECT y FROM u)';
     expect(subqueryRanges(sql).map((r) => sql.slice(r.start, r.end))).toEqual(['SELECT id FROM t', 'SELECT y FROM u']);
+  });
+});
+
+describe('nest', () => {
+  it('範囲が同じなら、入れ子の浅いもの（foreach の 1 回分）を外側に、深いもの（その中の if）を内側にする', () => {
+    const t = nest([
+      { start: 0, end: 1, kind: 'if', label: 'if', depth: 2 },
+      { start: 0, end: 1, kind: 'item', label: 'item', depth: 1 },
+    ]);
+    expect(t.children[0].range!.kind).toBe('item');
+    expect(t.children[0].children[0].range!.kind).toBe('if');
   });
 });

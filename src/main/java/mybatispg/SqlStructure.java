@@ -44,12 +44,15 @@ final class SqlStructure {
     final int end;
     final String kind;
     final String label;
+    /** 入れ子の深さ（外側ほど小さい。空白を除くと範囲が同じになるとき、内と外を決める） */
+    final int depth;
 
-    Span(int start, int end, String kind, String label) {
+    Span(int start, int end, String kind, String label, int depth) {
       this.start = start;
       this.end = end;
       this.kind = kind;
       this.label = label;
+      this.depth = depth;
     }
   }
 
@@ -324,13 +327,13 @@ final class SqlStructure {
         }
         int id = Integer.parseInt(marked.substring(i + 1, j));
         if (ch == OPEN) {
-          stack.push(new int[] {id, plain.length()});
+          stack.push(new int[] {id, plain.length(), stack.size()});
         } else {
           if (stack.isEmpty() || stack.peek()[0] != id) {
             return new ArrayList<>();
           }
           int[] o = stack.pop();
-          raw.add(new int[] {id, o[1], plain.length()});
+          raw.add(new int[] {id, o[1], plain.length(), o[2]});
         }
         i = j;
       } else {
@@ -366,9 +369,9 @@ final class SqlStructure {
         continue;
       }
       String[] m = marks.get(r[0]);
-      out.add(new Span(a.get(first), a.get(last) + 1, m[0], m[1]));
+      out.add(new Span(a.get(first), a.get(last) + 1, m[0], m[1], r[3]));
     }
-    out.sort((x, y) -> x.start != y.start ? x.start - y.start : y.end - x.end);
+    out.sort((x, y) -> x.start != y.start ? x.start - y.start : x.end != y.end ? y.end - x.end : x.depth - y.depth);
     return out;
   }
 
