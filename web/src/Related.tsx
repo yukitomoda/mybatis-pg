@@ -1,5 +1,6 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
 // 起点の親（その行が参照する行）は自動で集め、ほかは 1 段ずつ押してたどる。たどった 1 歩ごとに箱を作り、起点を中心にした図で見る
+import { useDragScroll } from './dragScroll';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
@@ -376,6 +377,7 @@ function RelatedGraph({
   const { placed, width, height, minCol } = placeNodes(nodes);
   const at = new Map(placed.map((p) => [p.node.id, p]));
   const box = useRef<HTMLDivElement>(null);
+  useDragScroll(box);
 
   // 左に列が増えると図全体が右へずれるので、そのぶんスクロールして、見えている箱をその場に留める
   const lastMinCol = useRef(minCol);

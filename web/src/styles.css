@@ -3575,3 +3575,17 @@ div.relations-comment {
   overflow: auto;
   font-size: 11px;
 }
+
+/* 図: 背景をドラッグして動かす */
+.drag-scroll {
+  cursor: grab;
+}
+
+.drag-scroll.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.drag-scroll .node {
+  cursor: pointer;
+}

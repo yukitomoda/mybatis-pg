@@ -1,7 +1,8 @@
 // リレーションの関係図（試作）: 選んだ表のまわりの表を、ELK（段ごとに並べる配置）で、親を上、子を下に描く。
 // 線は箱を避けた縦横の折れ線にし、表にマウスを乗せるとその表の線だけを強調する。
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useDragScroll } from './dragScroll';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { RelationLink } from './api';
@@ -223,15 +224,51 @@ export function RelationDiagram({
     };
   }, [shown, shownEdges, oneSchema, pkOf, comments]);
 
-  // 中心の表が見えるようにスクロールする（配置し直したときと、拡大・縮小したとき）
+  // 中心の表が見えるようにスクロールする（配置し直したとき）
   const scroller = useRef<HTMLDivElement>(null);
+  useDragScroll(scroller);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   useEffect(() => {
     const el = scroller.current;
     const c = laid?.nodes.find((n) => n.table === center);
     if (!el || !c) return;
-    el.scrollLeft = (c.x + c.w / 2) * zoom - el.clientWidth / 2;
-    el.scrollTop = (c.y + NODE_H / 2) * zoom - el.clientHeight / 2;
-  }, [laid, zoom]);
+    el.scrollLeft = (c.x + c.w / 2) * zoomRef.current - el.clientWidth / 2;
+    el.scrollTop = (c.y + NODE_H / 2) * zoomRef.current - el.clientHeight / 2;
+  }, [laid]);
+  /** 拡大・縮小しても、この点（画面の中の位置）の下の図の位置を動かさない */
+  const zoomAt = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const changeZoom = (next: number, px?: number, py?: number) => {
+    const el = scroller.current;
+    const z = Math.min(2, Math.max(0.3, Math.round(next * 100) / 100));
+    if (el) {
+      const x = px ?? el.clientWidth / 2;
+      const y = py ?? el.clientHeight / 2;
+      zoomAt.current = { px: x, py: y, x: (el.scrollLeft + x) / zoomRef.current, y: (el.scrollTop + y) / zoomRef.current };
+    }
+    setZoom(z);
+  };
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const a = zoomAt.current;
+    if (!el || !a) return;
+    zoomAt.current = null;
+    el.scrollLeft = a.x * zoom - a.px;
+    el.scrollTop = a.y * zoom - a.py;
+  }, [zoom]);
+  // Ctrl（Mac は ⌘）＋ホイールで、マウスの位置を中心に拡大・縮小する
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      changeZoom(zoomRef.current * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - r.left, e.clientY - r.top);
+    };
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
+  }, []);
 
   // マウスを乗せた表と、つながる表
   const near = useMemo(() => {
@@ -258,13 +295,13 @@ export function RelationDiagram({
           <input type="checkbox" checked={siblings} onChange={(e) => setSiblings(e.target.checked)} /> 兄弟・1 対 1
         </label>
         <span className="relation-diagram-zoom">
-          <button type="button" className="icon" title="縮小" onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}>
+          <button type="button" className="icon" title="縮小" onClick={() => changeZoom(zoom - 0.1)}>
             −
           </button>
-          <button type="button" className="link" title="元の大きさ" onClick={() => setZoom(1)}>
+          <button type="button" className="link" title="元の大きさ" onClick={() => changeZoom(1)}>
             {Math.round(zoom * 100)}%
           </button>
-          <button type="button" className="icon" title="拡大" onClick={() => setZoom((z) => Math.min(2, z + 0.1))}>
+          <button type="button" className="icon" title="拡大" onClick={() => changeZoom(zoom + 0.1)}>
             ＋
           </button>
         </span>
