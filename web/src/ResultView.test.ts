@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampGeometry, tablesOfRow } from './ResultView';
+import { clampGeometry, keepReachable, tablesOfRow } from './ResultView';
 
 describe('clampGeometry', () => {
   it('広い画面で大きくした位置と大きさを、小さい画面の中に収める（右下のつまみが画面の中に来る）', () => {
@@ -24,5 +24,20 @@ describe('tablesOfRow', () => {
       { table: 'erp.employees', row: { id: '43', name: '社員43' } },
       { table: 'erp.positions', row: { name: '課長' } },
     ]);
+  });
+});
+
+describe('keepReachable', () => {
+  it('はみ出させてもよいが、題名の帯は上下にはみ出さず、左右は 120px 残す。大きさは変えない', () => {
+    // 右へはみ出す
+    expect(keepReachable({ x: 1000, y: 100, w: 600, h: 400 }, 1280, 720)).toEqual({ x: 1000, y: 100, w: 600, h: 400 });
+    // 右へ出すぎ・左へ出すぎ
+    expect(keepReachable({ x: 1250, y: 100, w: 600, h: 400 }, 1280, 720).x).toBe(1160);
+    expect(keepReachable({ x: -700, y: 100, w: 600, h: 400 }, 1280, 720).x).toBe(-480);
+    // 上・下
+    expect(keepReachable({ x: 0, y: -50, w: 600, h: 400 }, 1280, 720).y).toBe(0);
+    expect(keepReachable({ x: 0, y: 700, w: 600, h: 400 }, 1280, 720).y).toBe(680);
+    // 画面より大きくてもよい
+    expect(keepReachable({ x: 0, y: 0, w: 2000, h: 1500 }, 1280, 720)).toEqual({ x: 0, y: 0, w: 2000, h: 1500 });
   });
 });

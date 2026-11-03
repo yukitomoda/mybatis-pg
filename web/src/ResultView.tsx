@@ -45,7 +45,7 @@ function loadGeometry(): Geometry {
 const EDGE = 8;
 
 /**
- * 位置と大きさを、画面の中に収める（広い画面で大きくした後、小さい画面で開いても、はみ出して右下のつまみに触れなくならないように）
+ * 位置と大きさを、画面の中に収める（起動して読み込んだときだけ。広い画面で大きくした後、小さい画面で開いても、右下のつまみに触れなくならないように）
  */
 export function clampGeometry(g: Geometry, vw: number, vh: number): Geometry {
   const w = Math.max(Math.min(360, vw - EDGE * 2), Math.min(g.w, vw - EDGE * 2));
@@ -53,6 +53,19 @@ export function clampGeometry(g: Geometry, vw: number, vh: number): Geometry {
   const x = Math.max(0, Math.min(g.x, vw - w - EDGE));
   const y = Math.max(0, Math.min(g.y, vh - h - EDGE));
   return { x, y, w, h };
+}
+
+/** 画面からはみ出させても、つかんで戻せるよう残す題名の帯の幅と高さ */
+const KEEP_W = 120;
+const KEEP_H = 40;
+
+/**
+ * はみ出させてもよいが、見失わないよう、題名の帯を画面に残す（上下にははみ出さず、左右は KEEP_W だけ残す）。大きさは変えない
+ */
+export function keepReachable(g: Geometry, vw: number, vh: number): Geometry {
+  const x = Math.min(Math.max(g.x, KEEP_W - g.w), vw - KEEP_W);
+  const y = Math.min(Math.max(g.y, 0), vh - KEEP_H);
+  return x === g.x && y === g.y ? g : { ...g, x, y };
 }
 
 function saveGeometry(g: Geometry) {
@@ -68,7 +81,8 @@ export function useResultView(api: Api | null) {
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
-  const [geometry, setGeometry] = useState<Geometry>(loadGeometry);
+  // 画面の中に収めるのは、起動して読み込んだときだけ（その後ははみ出させてもよい）
+  const [geometry, setGeometry] = useState<Geometry>(() => clampGeometry(loadGeometry(), window.innerWidth, window.innerHeight));
   const [history, setHistory] = useState<HistorySummary[]>([]);
   const [candidates, setCandidates] = useState<CandidateEntry[]>([]);
   /** 関連データ（起点の行ごと。履歴には残さない） */
@@ -192,7 +206,7 @@ export function ResultView({
 }) {
   const drag = useRef<{ x: number; y: number; gx: number; gy: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
-  // 画面の大きさが変わったら、位置と大きさを詰め直す
+  // 画面の大きさが変わったら、題名の帯が見える所に戻す（はみ出しはそのまま）
   const [, setViewport] = useState(0);
   useEffect(() => {
     const onResize = () => setViewport((n) => n + 1);
@@ -234,7 +248,7 @@ export function ResultView({
       </button>
     );
   }
-  const g = clampGeometry(rv.geometry, window.innerWidth, window.innerHeight);
+  const g = keepReachable(rv.geometry, window.innerWidth, window.innerHeight);
   const style = rv.maximized ? undefined : { left: g.x, top: g.y, width: g.w, height: g.h };
   const end = (e: PointerEvent<HTMLDivElement>) => {
     drag.current = null;
@@ -259,9 +273,14 @@ export function ResultView({
         }}
         onPointerMove={(e) => {
           if (!drag.current) return;
-          const x = Math.max(0, Math.min(window.innerWidth - 120, drag.current.gx + e.clientX - drag.current.x));
-          const y = Math.max(0, Math.min(window.innerHeight - 40, drag.current.gy + e.clientY - drag.current.y));
-          rv.moveTo({ ...g, x, y });
+          // 画面の外へはみ出させてもよい（題名の帯は残す）
+          rv.moveTo(
+            keepReachable(
+              { ...g, x: drag.current.gx + e.clientX - drag.current.x, y: drag.current.gy + e.clientY - drag.current.y },
+              window.innerWidth,
+              window.innerHeight,
+            ),
+          );
         }}
         onPointerUp={end}
         onPointerCancel={end}
