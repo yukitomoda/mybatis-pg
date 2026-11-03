@@ -3662,27 +3662,73 @@ div.relations-comment {
   }
 }
 
-/* SQL の構造: サブクエリ・if・foreach の範囲 */
+/* SQL の構造: サブクエリ・if・foreach の範囲。重なっても分かるよう、両端に種類ごとの色の縦線を付け、
+   始まりに小さな札を付ける。背景は薄くし、マウスの下のいちばん内側の範囲だけを濃くする */
+.sql-structured {
+  --c-subquery: 70, 130, 220;
+  --c-if: 205, 150, 20;
+  --c-foreach: 40, 150, 75;
+  line-height: 1.75;
+}
+
+.sql-mark {
+  --c: 128, 128, 128;
+  border-left: 2px solid rgb(var(--c));
+  border-right: 2px solid rgb(var(--c));
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 1px;
+  background: rgba(var(--c), 0.07);
+  /* 行をまたぐ範囲は、始まりの行の左と終わりの行の右にだけ線を付ける（行ごとに別の範囲に見えないように） */
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
+}
+
 .sql-mark.sql-subquery {
-  background: rgba(70, 130, 220, 0.1);
-  box-shadow: inset 0 -1px 0 rgba(70, 130, 220, 0.5);
+  --c: var(--c-subquery);
 }
 
 .sql-mark.sql-if {
-  background: rgba(230, 180, 40, 0.16);
+  --c: var(--c-if);
 }
 
 .sql-mark.sql-foreach {
-  background: rgba(60, 170, 90, 0.12);
+  --c: var(--c-foreach);
 }
 
-/* foreach の 1 回ごと（交互に下線の色を変えて、区切りを見せる） */
+/* 始まりの札（コピーには入らない） */
+.sql-mark[data-tag]::before {
+  content: attr(data-tag);
+  margin-right: 3px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  vertical-align: 1px;
+  color: #fff;
+  background: rgb(var(--c));
+}
+
+/* foreach の 1 回ごと: 縦線は付けず、下線で区切る（交互に濃さを変える） */
 .sql-mark.sql-item {
-  box-shadow: inset 0 -2px 0 rgba(60, 170, 90, 0.55);
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: none;
+  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.7);
 }
 
 .sql-mark.sql-item.odd {
-  box-shadow: inset 0 -2px 0 rgba(60, 170, 90, 0.25);
+  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.3);
+}
+
+/* マウスの下のいちばん内側の範囲 */
+.sql-mark.hot {
+  background: rgba(var(--c), 0.22);
+  outline: 1px solid rgb(var(--c));
+}
+
+.sql-mark.sql-item.hot {
+  background: rgba(var(--c-foreach), 0.22);
 }
 
 .sql-legend {
@@ -3702,13 +3748,13 @@ div.relations-comment {
 }
 
 .sql-legend-subquery {
-  background: rgba(70, 130, 220, 0.15);
+  border-left: 3px solid rgb(70, 130, 220);
 }
 
 .sql-legend-if {
-  background: rgba(230, 180, 40, 0.22);
+  border-left: 3px solid rgb(205, 150, 20);
 }
 
 .sql-legend-foreachAll {
-  background: rgba(60, 170, 90, 0.18);
+  border-left: 3px solid rgb(40, 150, 75);
 }

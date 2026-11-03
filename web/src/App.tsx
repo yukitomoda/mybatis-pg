@@ -1543,7 +1543,9 @@ function RenderResult({ result }: { result: RenderResponse }) {
           {structured.legend}
           <CopyButton text={literal} />
         </div>
-        <pre className="sql">{structured.body}</pre>
+        <pre className="sql sql-structured" onMouseOver={structured.onMouseOver} onMouseLeave={structured.onMouseLeave}>
+          {structured.body}
+        </pre>
       </div>
 
       <div className="sql-block">
