@@ -41,3 +41,24 @@ describe('keepReachable', () => {
     expect(keepReachable({ x: 0, y: 0, w: 2000, h: 1500 }, 1280, 720)).toEqual({ x: 0, y: 0, w: 2000, h: 1500 });
   });
 });
+
+describe('tablesOfRow（列がすべて NULL の表）', () => {
+  it('外部結合で相手の行がなかった表は、行を引けないので除く', () => {
+    expect(tablesOfRow(['erp.employees.id', 'erp.positions.id', 'erp.positions.name'], ['43', null, null])).toEqual([
+      { table: 'erp.employees', row: { id: '43' } },
+    ]);
+  });
+});
+
+describe('tablesOfRow（同じ表を 2 回結合した行）', () => {
+  it('NULL は値として使わず、食い違う値の列は使わない', () => {
+    // d.dept_code, d.name, p.name AS parent_name（親のない部署）
+    expect(tablesOfRow(['erp.departments.dept_code', 'erp.departments.name', 'erp.departments.name'], ['D01', '営業部', null])).toEqual([
+      { table: 'erp.departments', row: { dept_code: 'D01', name: '営業部' } },
+    ]);
+    // 親のある部署: name が食い違うので使わない
+    expect(
+      tablesOfRow(['erp.departments.dept_code', 'erp.departments.name', 'erp.departments.name'], ['D02', '営業一課', '営業部']),
+    ).toEqual([{ table: 'erp.departments', row: { dept_code: 'D02' } }]);
+  });
+});

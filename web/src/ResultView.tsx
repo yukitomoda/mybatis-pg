@@ -596,10 +596,16 @@ function HistoryDetail({
                       ? (i, anchor) => {
                           // 出どころの分かる列を、表ごとに分ける（1 つの表なら、すぐに始める）
                           const tables = tablesOfRow(t.columnSources!, t.rows[i]);
+                          if (tables.length === 0) return;
                           if (tables.length === 1) startFrom(tables[0]);
                           else setPick({ tables, anchor });
                         }
                       : undefined
+                }
+                rowEnabled={
+                  entry.kind !== 'table' && t.columnSources?.some(Boolean)
+                    ? (i) => tablesOfRow(t.columnSources!, t.rows[i]).length > 0
+                    : undefined
                 }
                 actions={
                   <>
@@ -674,15 +680,24 @@ export function rowLabel(table: string, columns: string[], row: (string | null)[
   return `${table} ${columns[0]}=${row[0] ?? 'NULL'}`;
 }
 
-/** 行の、出どころの分かる列を表ごとに分ける（表 → 元の列の名前 → 値。表は結果の列の順） */
+/**
+ * 行の、出どころの分かる列を表ごとに分ける（表 → 元の列の名前 → 値。表は結果の列の順）。
+ * その表の列がすべて NULL の表（外部結合で相手の行がなかったなど）は、行を引けないので除く
+ */
 export function tablesOfRow(sources: (string | null)[], row: (string | null)[]): { table: string; row: Record<string, string | null> }[] {
   const out = new Map<string, Record<string, string | null>>();
+  // 同じ表を 2 回結合している（自己結合など）と、同じ列が 2 つ出る。NULL は値として使わず、値が食い違えば、
+  // どちらの行のものか分からないので、その列は使わない
+  const conflicts = new Set<string>();
   sources.forEach((src, i) => {
     if (!src) return;
     const table = src.slice(0, src.lastIndexOf('.'));
     const column = src.slice(src.lastIndexOf('.') + 1);
     if (!out.has(table)) out.set(table, {});
-    out.get(table)![column] = row[i];
+    const r = out.get(table)!;
+    if (!(column in r) || r[column] === null) r[column] = row[i];
+    else if (row[i] !== null && row[i] !== r[column]) conflicts.add(src);
   });
-  return [...out].map(([table, r]) => ({ table, row: r }));
+  for (const src of conflicts) delete out.get(src.slice(0, src.lastIndexOf('.')))![src.slice(src.lastIndexOf('.') + 1)];
+  return [...out].filter(([, r]) => Object.values(r).some((v) => v !== null)).map(([table, r]) => ({ table, row: r }));
 }

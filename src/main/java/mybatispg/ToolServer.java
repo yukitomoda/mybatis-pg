@@ -1791,7 +1791,7 @@ public final class ToolServer {
       columns = use;
       values = java.util.Collections.singletonList(v);
       if (columns.isEmpty()) {
-        sendJson(ex, 400, error("行を見分ける列がありません"));
+        sendJson(ex, 400, error("この行には、" + table + " の値がありません（列がすべて NULL か、比べられない型の列だけです。外部結合で相手の行がなかったなど）"));
         return;
       }
     }

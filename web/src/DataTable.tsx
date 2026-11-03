@@ -35,6 +35,7 @@ export function DataTable({
   truncated,
   titles,
   onRow,
+  rowEnabled,
   checked,
   onCheck,
 }: {
@@ -58,6 +59,8 @@ export function DataTable({
   titles?: (string | undefined)[];
   /** 行の左端の「⤷」を押したとき（その行から関連データを集める）。なければ出さない */
   onRow?: (index: number, anchor: DOMRect) => void;
+  /** 行の左端のボタンを押せるか（なければ、どの行も押せる） */
+  rowEnabled?: (index: number) => boolean;
   /** 選んだ行（元の行の番号）。onCheck があれば、行の左端にチェックボックスを出す */
   checked?: Set<number>;
   onCheck?: (rows: Set<number>) => void;
@@ -221,7 +224,8 @@ export function DataTable({
                     <button
                       type="button"
                       className="icon"
-                      title="この行から関連データを集める"
+                      title={rowEnabled && !rowEnabled(r) ? 'この行には、出どころの表の値がありません' : 'この行から関連データを集める'}
+                      disabled={!!rowEnabled && !rowEnabled(r)}
                       aria-label="関連データ"
                       onClick={(e) => onRow(r, e.currentTarget.getBoundingClientRect())}
                     >
