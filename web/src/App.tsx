@@ -9,6 +9,7 @@ import type { WorkspaceSection } from './Workspace';
 import type { JoinFocus } from './joinMarks';
 import { PopoverButton } from './Popover';
 import { useBusy } from './busy';
+import { useStructuredSql } from './sqlStructure';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
@@ -1532,14 +1533,17 @@ function JsonPanel({ value, onApply }: { value: PValue | undefined; onApply: (v:
 
 function RenderResult({ result }: { result: RenderResponse }) {
   const literal = tidySql(result.literalSql);
+  // サブクエリ・<if>・<foreach> の範囲に色を付ける
+  const structured = useStructuredSql(result.literalSql, literal, result.structure);
   return (
     <>
       <div className="sql-block">
         <div className="sql-title">
           <h3>値を埋め込んだ SQL</h3>
+          {structured.legend}
           <CopyButton text={literal} />
         </div>
-        <pre className="sql">{literal}</pre>
+        <pre className="sql">{structured.body}</pre>
       </div>
 
       <div className="sql-block">

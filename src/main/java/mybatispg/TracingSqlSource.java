@@ -16,12 +16,34 @@ public class TracingSqlSource implements SqlSource {
   private final SqlSource original;
   private final SqlNode rootSqlNode;
   private final Node script;
+  private final org.apache.ibatis.parsing.XNode scriptNode;
+  private final Class<?> parameterType;
+  /** 構造を見せるため、印を入れた写し（要るときに 1 回だけ作る） */
+  private volatile SqlStructure.Prepared marked;
 
-  public TracingSqlSource(Configuration configuration, SqlSource original, SqlNode rootSqlNode, Node script) {
+  public TracingSqlSource(Configuration configuration, SqlSource original, SqlNode rootSqlNode, org.apache.ibatis.parsing.XNode script,
+      Class<?> parameterType) {
     this.configuration = configuration;
     this.original = original;
     this.rootSqlNode = rootSqlNode;
-    this.script = script;
+    this.script = script.getNode();
+    this.scriptNode = script;
+    this.parameterType = parameterType;
+  }
+
+  /** 印を入れた写しで組み立てた、#{} が残った SQL と、印の番号ごとの種類・説明 */
+  SqlStructure.Prepared markedSource() {
+    if (marked == null) {
+      marked = SqlStructure.prepare(configuration, scriptNode, parameterType,
+          (x, t) -> TracingLanguageDriver.parseRootSqlNode(configuration, x, t));
+    }
+    return marked;
+  }
+
+  String getMarkedSqlBeforeParameterMapping(Object parameterObject) {
+    DynamicContext context = new DynamicContext(configuration, parameterObject);
+    markedSource().root.apply(context);
+    return context.getSql();
   }
 
   /** statement の XML 要素（include 解決後、selectKey 除去後） */

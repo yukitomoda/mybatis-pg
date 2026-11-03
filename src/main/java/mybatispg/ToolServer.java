@@ -1077,6 +1077,17 @@ public final class ToolServer {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("placeholderSql", r.placeholderSql);
     body.put("literalSql", r.literalSql);
+    // どこが <if>・<foreach> から出たか（SQL タブで色を付ける）
+    List<Map<String, Object>> structure = new ArrayList<>();
+    for (SqlStructure.Span sp : renderer.structure(statementId, parameters, r)) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("start", sp.start);
+      m.put("end", sp.end);
+      m.put("kind", sp.kind);
+      m.put("label", sp.label);
+      structure.add(m);
+    }
+    body.put("structure", structure);
     body.put("numberedSql", r.numberedSql);
     body.put("bindings", bindings);
     sendJson(ex, 200, body);

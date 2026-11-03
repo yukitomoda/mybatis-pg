@@ -164,9 +164,20 @@ export interface Binding {
   literal: string;
 }
 
+/** 組み立てた SQL の、<if>・<foreach> から出た範囲（literalSql の中の位置） */
+export interface SqlSpan {
+  start: number;
+  end: number;
+  /** if、foreach（全体）、item（foreach の 1 回分） */
+  kind: 'if' | 'foreach' | 'item';
+  label: string;
+}
+
 export interface RenderResponse {
   placeholderSql: string;
   literalSql: string;
+  /** <if>・<foreach> から出た範囲（前の版のサーバーにはない） */
+  structure?: SqlSpan[];
   /** バインド変数を $1, $2, ... にした SQL */
   numberedSql: string;
   bindings: Binding[];

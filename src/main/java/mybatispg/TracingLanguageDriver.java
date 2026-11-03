@@ -23,7 +23,7 @@ public class TracingLanguageDriver extends XMLLanguageDriver {
     SqlSource original = super.createSqlSource(configuration, script, parameterType);
     // RawSqlSource は元の SqlNode を保持しないため、同じ XNode をもう一度解析して取っておく
     SqlNode rootSqlNode = parseRootSqlNode(configuration, script, parameterType);
-    return new TracingSqlSource(configuration, original, rootSqlNode, script.getNode());
+    return new TracingSqlSource(configuration, original, rootSqlNode, script, parameterType);
   }
 
   /**
@@ -31,7 +31,7 @@ public class TracingLanguageDriver extends XMLLanguageDriver {
    * （3.4.x: パッケージプライベートで List&lt;SqlNode&gt;、3.5.x: protected で MixedSqlNode）ため、リフレクションで呼ぶ。
    */
   @SuppressWarnings("unchecked")
-  private static SqlNode parseRootSqlNode(Configuration configuration, XNode script, Class<?> parameterType) {
+  static SqlNode parseRootSqlNode(Configuration configuration, XNode script, Class<?> parameterType) {
     XMLScriptBuilder builder = new XMLScriptBuilder(configuration, script, parameterType);
     try {
       Method m = XMLScriptBuilder.class.getDeclaredMethod("parseDynamicTags", XNode.class);

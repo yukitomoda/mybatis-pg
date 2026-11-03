@@ -3661,3 +3661,54 @@ div.relations-comment {
     animation-duration: 3s;
   }
 }
+
+/* SQL の構造: サブクエリ・if・foreach の範囲 */
+.sql-mark.sql-subquery {
+  background: rgba(70, 130, 220, 0.1);
+  box-shadow: inset 0 -1px 0 rgba(70, 130, 220, 0.5);
+}
+
+.sql-mark.sql-if {
+  background: rgba(230, 180, 40, 0.16);
+}
+
+.sql-mark.sql-foreach {
+  background: rgba(60, 170, 90, 0.12);
+}
+
+/* foreach の 1 回ごと（交互に下線の色を変えて、区切りを見せる） */
+.sql-mark.sql-item {
+  box-shadow: inset 0 -2px 0 rgba(60, 170, 90, 0.55);
+}
+
+.sql-mark.sql-item.odd {
+  box-shadow: inset 0 -2px 0 rgba(60, 170, 90, 0.25);
+}
+
+.sql-legend {
+  display: inline-flex;
+  gap: 0.6rem;
+  margin-left: 0.8rem;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.sql-legend label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+
+.sql-legend-subquery {
+  background: rgba(70, 130, 220, 0.15);
+}
+
+.sql-legend-if {
+  background: rgba(230, 180, 40, 0.22);
+}
+
+.sql-legend-foreachAll {
+  background: rgba(60, 170, 90, 0.18);
+}

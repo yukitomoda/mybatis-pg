@@ -286,6 +286,31 @@ public class SqlRenderer {
   }
 
   /**
+   * 組み立てた SQL の構造（&lt;if&gt;・&lt;foreach&gt; から出た範囲）。値を埋め込んだ SQL（r.literalSql）の中の位置で返す。
+   * 印を入れた写しで組み立て直して求める（実行に使う組み立てには手を入れない）。割り出せなければ空
+   */
+  public List<SqlStructure.Span> structure(String statementId, Object parameterObject, Result r) {
+    try {
+      TracingSqlSource src = tracingSqlSource(statementId);
+      String marked = src.getMarkedSqlBeforeParameterMapping(parameterObject);
+      final int[] n = {0};
+      String markedLiteral = new GenericTokenParser("#{", "}", new TokenHandler() {
+        @Override
+        public String handleToken(String content) {
+          int i = n[0]++;
+          return i < r.bindings.size() ? SqlLiteral.of(r.bindings.get(i).value) : "?";
+        }
+      }).parse(marked);
+      if (n[0] != r.bindings.size()) {
+        return new ArrayList<>();
+      }
+      return SqlStructure.spans(markedLiteral, r.literalSql, src.markedSource().marks);
+    } catch (RuntimeException e) {
+      return new ArrayList<>();
+    }
+  }
+
+  /**
    * 実行用に、本番と同じ ? 付き SQL を作る。値は {@link Bound#setParameters} で MyBatis の TypeHandler を通して設定する。
    */
   public Bound bind(String statementId, Object parameterObject) {
