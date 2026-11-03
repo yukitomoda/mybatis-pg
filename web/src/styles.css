@@ -3596,3 +3596,68 @@ div.relations-comment {
   font-size: 12px;
   font-weight: normal;
 }
+
+/* 上の帯: 裏で動いているもの */
+.topbar {
+  position: relative;
+}
+
+.busy-indicator {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  margin-right: 0.6rem;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.busy-indicator + .result-view-toggle {
+  margin-left: 0;
+}
+
+.busy-indicator .spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: busy-spin 0.8s linear infinite;
+}
+
+/* 帯の下の縁の、動く細い線 */
+.busy-indicator.on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 50%, transparent 100%);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: busy-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes busy-slide {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-indicator .spinner,
+  .busy-indicator.on::after {
+    animation-duration: 3s;
+  }
+}

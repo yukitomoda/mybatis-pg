@@ -2,6 +2,7 @@
 // 線は箱を避けた縦横の折れ線にし、表にマウスを乗せるとその表の線だけを強調する。
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
 import { useDragScroll } from './dragScroll';
+import { track } from './busy';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
@@ -215,7 +216,7 @@ export function RelationDiagram({
   useEffect(() => {
     let active = true;
     setError(null);
-    layoutWithElk([...shown], shownEdges, label, sub).then(
+    track(layoutWithElk([...shown], shownEdges, label, sub)).then(
       (l) => active && setLaid(l),
       (e) => active && setError(e instanceof Error ? e.message : String(e)),
     );

@@ -8,6 +8,7 @@ import { CandidatePane } from './Suggest';
 import type { WorkspaceSection } from './Workspace';
 import type { JoinFocus } from './joinMarks';
 import { PopoverButton } from './Popover';
+import { useBusy } from './busy';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
@@ -684,6 +685,7 @@ function Workspace({ api }: { api: Api }) {
             {label}
           </button>
         ))}
+        <BusyIndicator />
         <button
           type="button"
           className={rv.open && !rv.minimized ? 'nav result-view-toggle selected' : 'nav result-view-toggle'}
@@ -1678,5 +1680,17 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? 'コピーしました' : 'コピー'}
     </button>
+  );
+}
+
+/** 上の帯の、裏で動いているものの表示（長く続く作業の文と、読み込み中の印） */
+function BusyIndicator() {
+  const { tasks, loading } = useBusy();
+  const busy = loading || tasks.length > 0;
+  return (
+    <span className={busy ? 'busy-indicator on' : 'busy-indicator'} role="status" aria-live="polite">
+      {busy && <span className="spinner" aria-hidden="true" />}
+      {tasks.length > 0 ? tasks.join('　') : loading ? '読み込み中' : ''}
+    </span>
   );
 }

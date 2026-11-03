@@ -9,6 +9,7 @@ import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import { clearDbComments, CommentsContext, useDbComments } from './comments';
 import { InfoButton, PopoverButton } from './Popover';
+import { setTask } from './busy';
 import { RelationDiagram, type TableEdge } from './RelationDiagram';
 import { SideSplitter, useSideWidth } from './Splitter';
 import type { GlobalSet } from './globalModel';
@@ -152,6 +153,24 @@ export function RelationsScreen({
   }, [active, connectionId]);
   // 解析中は、進み具合を読み直す
   const running = !!result?.progress;
+  // どの画面にいても分かるよう、上の帯に解析中と出す
+  const progress = result?.progress;
+  useEffect(() => {
+    if (!progress) {
+      setTask('relations', null);
+      return;
+    }
+    const phase = progress.phase ?? 'plan';
+    setTask(
+      'relations',
+      phase === 'prepare'
+        ? `リレーションを解析中（準備 ${progress.prepared ?? 0} / ${progress.total}）`
+        : phase === 'plan'
+          ? `リレーションを解析中（計画 ${progress.analyzed} / ${progress.toAnalyze ?? 0}）`
+          : 'リレーションを解析中（仕上げ）',
+    );
+  }, [progress?.phase, progress?.prepared, progress?.analyzed, progress?.toAnalyze, progress?.total, !!progress]);
+  useEffect(() => () => setTask('relations', null), []);
   // 解析を終えたら、コメントと表の一覧を読み直す（出すスキーマが変わることがある）
   const wasRunning = useRef(false);
   useEffect(() => {

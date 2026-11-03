@@ -1,5 +1,6 @@
 // Java サーバの API クライアント
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
+import { track } from './busy';
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
 import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
@@ -334,6 +335,11 @@ export function createApi(token: string) {
 
   /** 応答の本文をそのまま返す。エラーなら ApiError */
   async function callText(path: string, init?: RequestInit): Promise<string> {
+    // 変更の通知を待つ問い合わせは、ずっと開いたままなので「読み込み中」に数えない
+    return path.startsWith('api/changes') ? send(path, init) : track(send(path, init));
+  }
+
+  async function send(path: string, init?: RequestInit): Promise<string> {
     const res = await fetch(path, {
       ...init,
       headers: { ...(init?.headers ?? {}), 'X-Auth-Token': token },
