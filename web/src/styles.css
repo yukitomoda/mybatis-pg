@@ -3747,3 +3747,34 @@ div.relations-comment {
 .sql-legend-foreachAll {
   border-left: 3px solid rgb(40, 150, 75);
 }
+
+/* 下線を重ねる形: 範囲ごとに種類の色の下線を引き、入れ子の外側ほど下に引く（--u は内側に入れ子になっている段の数） */
+.sql-style-underline .sql-mark {
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  padding: 0 0 calc(var(--u, 0) * 3px);
+  margin: 0;
+  background: none;
+  border-bottom: 2px solid rgba(var(--c), 0.45);
+}
+
+.sql-style-underline .sql-mark.sql-item {
+  box-shadow: none;
+  border-bottom: 2px solid rgba(var(--c-foreach), 0.3);
+}
+
+.sql-style-underline .sql-mark.sql-item.odd {
+  border-bottom-color: rgba(var(--c-foreach), 0.15);
+}
+
+.sql-style-underline .sql-mark.hot {
+  outline: none;
+  background: rgba(var(--c), 0.1);
+  border-bottom-color: rgb(var(--c));
+}
+
+.sql-legend select {
+  font-size: 12px;
+  padding: 0 0.2rem;
+}
