@@ -274,8 +274,12 @@ public class SqlRenderer {
       String marker = MARKER + String.valueOf(i) + MARKER;
       int at = markedSql.indexOf(marker, pos);
       Object value = resolveValue(pm, boundSql, parameterObject);
-      bindings.add(new Binding(i + 1, pm.getProperty(), value));
-      literal.append(markedSql, pos, at).append(SqlLiteral.of(value));
+      Binding b = new Binding(i + 1, pm.getProperty(), value);
+      bindings.add(b);
+      literal.append(markedSql, pos, at);
+      b.literalStart = literal.length();
+      literal.append(SqlLiteral.of(value));
+      b.literalEnd = literal.length();
       numbered.append(markedSql, pos, at).append('$').append(i + 1);
       pos = at + marker.length();
     }
@@ -286,7 +290,7 @@ public class SqlRenderer {
   }
 
   /**
-   * 組み立てた SQL の構造（&lt;if&gt;・&lt;foreach&gt; から出た範囲）。値を埋め込んだ SQL（r.literalSql）の中の位置で返す。
+   * 組み立てた SQL の構造（&lt;if&gt;・&lt;foreach&gt; から出た範囲と、パラメータ（#{}）の値の範囲）。値を埋め込んだ SQL（r.literalSql）の中の位置で返す。
    * 印を入れた写しで組み立て直して求める（実行に使う組み立てには手を入れない）。割り出せなければ空
    */
   public List<SqlStructure.Span> structure(String statementId, Object parameterObject, Result r) {
@@ -304,10 +308,22 @@ public class SqlRenderer {
       if (n[0] != r.bindings.size()) {
         return new ArrayList<>();
       }
-      return SqlStructure.spans(markedLiteral, r.literalSql, src.markedSource().marks);
+      return withParams(SqlStructure.spans(markedLiteral, r.literalSql, src.markedSource().marks), r);
     } catch (RuntimeException e) {
-      return new ArrayList<>();
+      return withParams(new ArrayList<SqlStructure.Span>(), r);
     }
+  }
+
+  /** パラメータ（#{}）の値の範囲を足す（いちばん内側） */
+  private static List<SqlStructure.Span> withParams(List<SqlStructure.Span> spans, Result r) {
+    List<SqlStructure.Span> out = new ArrayList<>(spans);
+    for (Binding b : r.bindings) {
+      if (b.literalEnd > b.literalStart) {
+        out.add(new SqlStructure.Span(b.literalStart, b.literalEnd, "param", "#{" + b.property + "}", Integer.MAX_VALUE / 2));
+      }
+    }
+    out.sort((x, y) -> x.start != y.start ? x.start - y.start : x.end != y.end ? y.end - x.end : x.depth - y.depth);
+    return out;
   }
 
   /**
@@ -347,6 +363,9 @@ public class SqlRenderer {
     public final int index;
     public final String property;
     public final Object value;
+    /** 値を埋め込んだ SQL（literalSql）の中の、この値の範囲 */
+    int literalStart;
+    int literalEnd;
 
     Binding(int index, String property, Object value) {
       this.index = index;

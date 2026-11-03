@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import type { SqlSpan } from './api';
 import { analyze, partLabel, type Part } from './subquery';
 
-export type StructureKind = 'subquery' | 'if' | 'foreach' | 'item';
+export type StructureKind = 'subquery' | 'if' | 'foreach' | 'item' | 'param';
 /** depth: 入れ子の深さ（範囲が同じとき、小さいほうを外側にする） */
 type Range = { start: number; end: number; kind: StructureKind; label: string; depth: number };
 
@@ -77,7 +77,8 @@ export function nest(ranges: Range[]): Tree {
 
 /** 範囲の下に入れ子になっている段の数（自分を含む）。下線を重ねるとき、外側ほど下に引く */
 function height(t: Tree): number {
-  return 1 + Math.max(0, ...t.children.map(height));
+  // パラメータは下線を引かないので、段に数えない
+  return (t.range?.kind === 'param' ? 0 : 1) + Math.max(0, ...t.children.map(height));
 }
 
 function render(sql: string, t: Tree, from: number, to: number, seq: { item: number }): ReactNode[] {
@@ -119,6 +120,7 @@ const KINDS: [string, string][] = [
   ['subquery', 'サブクエリ'],
   ['if', 'if'],
   ['foreachAll', 'foreach'],
+  ['param', 'パラメータ'],
 ];
 const STORE = 'mybatis-pg.sql-structure';
 function loadShown(): Set<string> {
@@ -128,7 +130,7 @@ function loadShown(): Set<string> {
   } catch {
     // 既定にする
   }
-  return new Set(['subquery', 'if', 'foreachAll']);
+  return new Set(['subquery', 'if', 'foreachAll', 'param']);
 }
 
 /** 色を付けた SQL と、色の出し入れ（見出しの横に置く） */

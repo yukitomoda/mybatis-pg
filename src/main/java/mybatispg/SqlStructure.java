@@ -38,7 +38,7 @@ final class SqlStructure {
   private SqlStructure() {
   }
 
-  /** 範囲（実際の SQL の中の位置）。kind: if・foreach・item（foreach の 1 回分） */
+  /** 範囲（実際の SQL の中の位置）。kind: if・foreach・item（foreach の 1 回分）・param（#{} の値） */
   static final class Span {
     final int start;
     final int end;

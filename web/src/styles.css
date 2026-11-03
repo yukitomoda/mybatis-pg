@@ -3668,6 +3668,7 @@ div.relations-comment {
   --c-subquery: 70, 130, 220;
   --c-if: 205, 150, 20;
   --c-foreach: 40, 150, 75;
+  --c-param: 140, 90, 200;
   line-height: 1.75;
 }
 
@@ -3696,6 +3697,15 @@ div.relations-comment {
 
 .sql-mark.sql-item.odd {
   border-bottom-color: rgba(var(--c-foreach), 0.15);
+}
+
+/* パラメータ（#{} の値）: 下線ではなく薄い背景（ほかの範囲の下線と重ならないように） */
+.sql-mark.sql-param {
+  --c: var(--c-param);
+  padding-bottom: 0;
+  border-bottom: none;
+  border-radius: 2px;
+  background: rgba(var(--c-param), 0.1);
 }
 
 .sql-mark.hot {
@@ -3733,4 +3743,12 @@ div.relations-comment {
 
 .sql-legend-foreachAll {
   border-left: 3px solid rgb(40, 150, 75);
+}
+
+.sql-mark.sql-param.hot {
+  background: rgba(var(--c-param), 0.22);
+}
+
+.sql-legend-param {
+  border-left: 3px solid rgb(140, 90, 200);
 }

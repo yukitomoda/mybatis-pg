@@ -168,8 +168,8 @@ export interface Binding {
 export interface SqlSpan {
   start: number;
   end: number;
-  /** if、foreach（全体）、item（foreach の 1 回分） */
-  kind: 'if' | 'foreach' | 'item';
+  /** if、foreach（全体）、item（foreach の 1 回分）、param（#{} の値） */
+  kind: 'if' | 'foreach' | 'item' | 'param';
   label: string;
   /** 入れ子の深さ（外側ほど小さい。範囲が同じとき、内と外を決める） */
   depth?: number;

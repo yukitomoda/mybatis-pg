@@ -54,8 +54,8 @@ class SqlStructureTest {
     p.put("c", 3);
     p.put("ids", Arrays.asList(10, 20));
     // 先頭の AND は <where> が取り除く（範囲は if の中身の残り）。入れ子の if、foreach の全体と 1 回ごと
-    assertEquals(Arrays.asList("if[a = 1]", "if[AND b = 2 AND c = 3]", "if[AND c = 3]", "if[AND id IN (10,20)]", "foreach[(10,20)]",
-        "item[10]", "item[20]"), spans(r, "m.find", p));
+    assertEquals(Arrays.asList("if[a = 1]", "param[1]", "if[AND b = 2 AND c = 3]", "param[2]", "if[AND c = 3]", "param[3]",
+        "if[AND id IN (10,20)]", "foreach[(10,20)]", "item[10]", "param[10]", "item[20]", "param[20]"), spans(r, "m.find", p));
     // 最初の if が false でも、2 つ目の先頭の AND を取り除く
     p.put("a", null);
     assertEquals("if[b = 2 AND c = 3]", spans(r, "m.find", p).get(0));
@@ -65,7 +65,7 @@ class SqlStructureTest {
     u.put("b", 2);
     u.put("id", 9);
     // 末尾の , は <set> が取り除く
-    assertEquals(Arrays.asList("if[a = 1,]", "if[b = 2]"), spans(r, "m.up", u));
+    assertEquals(Arrays.asList("if[a = 1,]", "param[1]", "if[b = 2]", "param[2]", "param[9]"), spans(r, "m.up", u));
   }
 
   @Test
