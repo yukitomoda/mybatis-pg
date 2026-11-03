@@ -62,6 +62,8 @@ final class SuspiciousJoins {
   static List<Suspicion> find(Predicate<String> isUnique, List<Relations.Link> links, ManualRelations manual) {
     Function<String, List<String>> manualParents = Relations.manualParents(isUnique, manual);
     List<Suspicion> out = new ArrayList<>();
+    // 列ごとのつながり（判定の間、組を 1 つずつ無効にするが、無効かどうかは引くときに見る）
+    Relations.LinkIndex index = new Relations.LinkIndex(links);
     for (Relations.Link l : links) {
       if (l.disabled || l.manual) {
         continue;
@@ -71,8 +73,8 @@ final class SuspiciousJoins {
       List<Relations.Origin> oa;
       List<Relations.Origin> ob;
       try {
-        oa = Relations.origins(isUnique, links, l.a, manualParents);
-        ob = Relations.origins(isUnique, links, l.b, manualParents);
+        oa = Relations.origins(isUnique, index, l.a, manualParents);
+        ob = Relations.origins(isUnique, index, l.b, manualParents);
       } finally {
         l.disabled = false;
       }

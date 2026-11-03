@@ -1088,6 +1088,41 @@ final class Relations {
         keyTables.add(j[1].substring(0, j[1].lastIndexOf('.')));
       }
     }
+    Map<String, List<TableKey>> tableKeys = readTableKeys(c, keyTables);
+    if (tableKeys == null) {
+      return;
+    }
+    store.tableKeys.clear();
+    store.tableKeys.putAll(tableKeys);
+    deriveKeys(store);
+  }
+
+  /**
+   * 表の主キー・UNIQUE を読み、覚えている表の鍵に足す（手で追加したリレーションの表だけを読むとき。ほかの表は読み直さない）。
+   *
+   * @return 鍵が変わったか（読めなければ false）
+   */
+  static boolean addTableKeys(Store store, Connection c, Set<String> tables) {
+    Set<String> fresh = new LinkedHashSet<>();
+    for (String t : tables) {
+      if (!store.tableKeys.containsKey(t)) {
+        fresh.add(t);
+      }
+    }
+    if (fresh.isEmpty()) {
+      return false;
+    }
+    Map<String, List<TableKey>> read = readTableKeys(c, fresh);
+    if (read == null || read.isEmpty()) {
+      return false;
+    }
+    store.tableKeys.putAll(read);
+    deriveKeys(store);
+    return true;
+  }
+
+  /** 表（schema.table）の主キー・UNIQUE（条件付き・式のものは除く）。読めなければ null */
+  private static Map<String, List<TableKey>> readTableKeys(Connection c, Set<String> keyTables) {
     List<String> ts = new ArrayList<>();
     List<String> tn = new ArrayList<>();
     for (String t : keyTables) {
@@ -1114,17 +1149,17 @@ final class Relations {
         }
       }
     } catch (SQLException e) {
-      return;
+      return null;
     } finally {
       try {
-        c.rollback();
+        if (!c.getAutoCommit()) {
+          c.rollback();
+        }
       } catch (SQLException ignored) {
         // 読むだけ
       }
     }
-    store.tableKeys.clear();
-    store.tableKeys.putAll(tableKeys);
-    deriveKeys(store);
+    return tableKeys;
   }
 
   /**
@@ -1449,8 +1484,18 @@ final class Relations {
       }
     }
 
+    /** 列ごとのつながり（源流を探すたびに作り直さない） */
+    private LinkIndex index;
+    private java.util.function.Function<String, List<String>> parents;
+    /** 列ごとの源流（同じ列を何度も探さない） */
+    private final Map<String, List<Origin>> originCache = new java.util.concurrent.ConcurrentHashMap<>();
+
     List<Origin> origins(String column) {
-      return Relations.origins(unique::contains, links, column, manualParents(unique::contains, manual));
+      if (index == null) {
+        index = new LinkIndex(links);
+        parents = manualParents(unique::contains, manual);
+      }
+      return originCache.computeIfAbsent(column, c -> Relations.origins(unique::contains, index, c, parents));
     }
 
     /** 比べている列から、源流と判断する列（たどった源流、なければ一意の列。どちらもなければ null） */
@@ -1588,10 +1633,40 @@ final class Relations {
   }
 
   /**
+   * 列ごとのつながり（両端の列から引く。根拠の多いものから）。源流を何度も探すときに、つながりを毎回なめないよう 1 回だけ作る。
+   * つながりの disabled は、引くときに見る（作った後に変えてもよい）
+   */
+  static final class LinkIndex {
+    final Map<String, List<Link>> byColumn = new HashMap<>();
+
+    LinkIndex(List<Link> links) {
+      for (Link l : links) {
+        byColumn.computeIfAbsent(l.a, k -> new ArrayList<>()).add(l);
+        if (!l.b.equals(l.a)) {
+          byColumn.computeIfAbsent(l.b, k -> new ArrayList<>()).add(l);
+        }
+      }
+      for (List<Link> ls : byColumn.values()) {
+        ls.sort((x, y) -> y.statements.size() - x.statements.size());
+      }
+    }
+
+    List<Link> of(String column) {
+      List<Link> ls = byColumn.get(column);
+      return ls == null ? Collections.<Link>emptyList() : ls;
+    }
+  }
+
+  /**
    * @param manualParents 列に手で追加したつながりで決まった親。あれば、その列の源流は手で設定したものだけにする（解析で推し量ったものより優先する）。
    *     兄弟をたどった先の列に、手で追加したつながりで決まった親があれば、それも源流にする
    */
   static List<Origin> origins(java.util.function.Predicate<String> isUnique, List<Link> links, String column,
+      java.util.function.Function<String, List<String>> manualParents) {
+    return origins(isUnique, new LinkIndex(links), column, manualParents);
+  }
+
+  static List<Origin> origins(java.util.function.Predicate<String> isUnique, LinkIndex index, String column,
       java.util.function.Function<String, List<String>> manualParents) {
     List<Origin> out = new ArrayList<>();
     List<String> mine = manualParents.apply(column);
@@ -1604,11 +1679,6 @@ final class Relations {
     if (isUnique.test(column)) {
       return out;
     }
-    Map<String, List<Link>> byColumn = new HashMap<>();
-    for (Link l : links) {
-      byColumn.computeIfAbsent(l.a, k -> new ArrayList<>()).add(l);
-      byColumn.computeIfAbsent(l.b, k -> new ArrayList<>()).add(l);
-    }
     Set<String> visited = new HashSet<>();
     visited.add(column);
     Set<String> found = new HashSet<>();
@@ -1620,10 +1690,8 @@ final class Relations {
       @SuppressWarnings("unchecked")
       List<String> path = (List<String>) cur[1];
       int count = (Integer) cur[2];
-      List<Link> ls = byColumn.getOrDefault(col, new ArrayList<>());
-      // 同じ段では、根拠の多いつながりから
-      ls.sort((x, y) -> y.statements.size() - x.statements.size());
-      for (Link l : ls) {
+      // 同じ段では、根拠の多いつながりから（index で並べてある）
+      for (Link l : index.of(col)) {
         // 無効にしたつながりは使わない。手で追加した親子は manualParents で扱う
         if (l.disabled || l.manual && l.kind.equals("parent")) {
           continue;
@@ -1646,7 +1714,7 @@ final class Relations {
         }
         if (l.kind.equals("parent") && l.a.equals(col)) {
           // 親が 1 列で一意でなければ（複数の列でできた鍵の親）、さらに親をたどる（祖先まで）
-          for (Origin o : climb(isUnique, links, other, next, c, manualParents, 0)) {
+          for (Origin o : climb(isUnique, index, other, next, c, manualParents, 0)) {
             if (found.add(o.column)) {
               out.add(o);
             }
@@ -1668,7 +1736,7 @@ final class Relations {
    *
    * @param path column の手前までにたどった列
    */
-  private static List<Origin> climb(java.util.function.Predicate<String> isUnique, List<Link> links, String column, List<String> path,
+  private static List<Origin> climb(java.util.function.Predicate<String> isUnique, LinkIndex index, String column, List<String> path,
       int count, java.util.function.Function<String, List<String>> manualParents, int depth) {
     List<Origin> out = new ArrayList<>();
     List<String> via = new ArrayList<>(path);
@@ -1684,10 +1752,10 @@ final class Relations {
       out.add(new Origin(column, path, count));
       return out;
     }
-    for (Link l : links) {
+    for (Link l : index.of(column)) {
       // 手で追加した親子は manualParents で扱う
       if (!l.disabled && !l.manual && l.kind.equals("parent") && l.a.equals(column) && !path.contains(l.b)) {
-        out.addAll(climb(isUnique, links, l.b, via, Math.min(count, l.statements.size()), manualParents, depth + 1));
+        out.addAll(climb(isUnique, index, l.b, via, Math.min(count, l.statements.size()), manualParents, depth + 1));
       }
     }
     if (out.isEmpty()) {

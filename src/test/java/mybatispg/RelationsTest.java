@@ -485,4 +485,26 @@ class RelationsTest {
     // 計画を残していない前の版の結果（planned が null）は、そのまま
     assertEquals("h1", e.hash);
   }
+
+  @Test
+  void 手で追加した組の表の鍵だけを読み_ほかの表の鍵は残す() throws Exception {
+    assumeTrue(URL != null, "MYBATIS_PG_TEST_URL がないため省略");
+    try (Connection c = DriverManager.getConnection(URL); Statement s = c.createStatement()) {
+      s.execute("DROP SCHEMA IF EXISTS reltest_keys CASCADE");
+      s.execute("CREATE SCHEMA reltest_keys");
+      s.execute("CREATE TABLE reltest_keys.users (id int PRIMARY KEY)");
+      try {
+        Relations.Store store = Relations.Store.open(null, "proj", "conn");
+        store.tableKeys.put("app.posts", new ArrayList<>(Collections.singletonList(new Relations.TableKey(true, Collections.singletonList("id")))));
+        Relations.deriveKeys(store);
+        assertTrue(Relations.addTableKeys(store, c, new java.util.LinkedHashSet<>(Arrays.asList("reltest_keys.users", "app.posts"))));
+        assertTrue(Relations.unique(store, "reltest_keys.users.id"));
+        assertTrue(Relations.unique(store, "app.posts.id"));
+        // 読んである表だけなら、読まない
+        assertEquals(false, Relations.addTableKeys(store, c, new java.util.LinkedHashSet<>(Collections.singletonList("app.posts"))));
+      } finally {
+        s.execute("DROP SCHEMA reltest_keys CASCADE");
+      }
+    }
+  }
 }

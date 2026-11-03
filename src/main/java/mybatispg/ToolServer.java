@@ -2590,8 +2590,13 @@ public final class ToolServer {
           try (java.sql.Connection c = connections.open(connectionId)) {
             synchronized (store) {
               store.extraTables = manual.relationTables();
-              Relations.updateKeys(store, c);
-              store.save();
+              // 追加した組の表のうち、まだ鍵を読んでいない表だけを読む（ほかの表は読み直さない）
+              java.util.Set<String> added = new java.util.LinkedHashSet<>();
+              added.add(a.substring(0, a.lastIndexOf('.')));
+              added.add(b.substring(0, b.lastIndexOf('.')));
+              if (Relations.addTableKeys(store, c, added)) {
+                store.save();
+              }
             }
           } catch (java.sql.SQLException | RuntimeException e) {
             // 読めなければ、次の解析で読む
