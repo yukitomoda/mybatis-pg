@@ -3699,14 +3699,13 @@ div.relations-comment {
   border-bottom-color: rgba(var(--c-foreach), 0.15);
 }
 
-/* パラメータ（#{} の値）: 下線ではなく赤みの背景と文字の色（ほかの範囲の下線と重ならないように） */
+/* パラメータ（#{} の値）: 下線ではなく赤みの背景（ほかの範囲の下線と重ならないように） */
 .sql-mark.sql-param {
   --c: var(--c-param);
   padding-bottom: 0;
   border-bottom: none;
   border-radius: 2px;
   background: rgba(var(--c-param), 0.16);
-  color: var(--hl-raw);
 }
 
 .sql-mark.hot {
