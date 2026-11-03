@@ -3663,7 +3663,7 @@ div.relations-comment {
 }
 
 /* SQL の構造: サブクエリ・if・foreach の範囲。重なっても分かるよう、両端に種類ごとの色の縦線を付け、
-   始まりに小さな札を付ける。背景は薄くし、マウスの下のいちばん内側の範囲だけを濃くする */
+   背景はごく薄くし、マウスの下のいちばん内側の範囲だけを少し濃くする */
 .sql-structured {
   --c-subquery: 70, 130, 220;
   --c-if: 205, 150, 20;
@@ -3673,12 +3673,13 @@ div.relations-comment {
 
 .sql-mark {
   --c: 128, 128, 128;
-  border-left: 2px solid rgb(var(--c));
-  border-right: 2px solid rgb(var(--c));
+  /* SQL を読む補助なので、線も背景もごく薄く */
+  border-left: 2px solid rgba(var(--c), 0.35);
+  border-right: 2px solid rgba(var(--c), 0.35);
   border-radius: 3px;
   padding: 0 2px;
   margin: 0 1px;
-  background: rgba(var(--c), 0.07);
+  background: rgba(var(--c), 0.035);
   /* 行をまたぐ範囲は、始まりの行の左と終わりの行の右にだけ線を付ける（行ごとに別の範囲に見えないように） */
   -webkit-box-decoration-break: slice;
   box-decoration-break: slice;
@@ -3696,39 +3697,27 @@ div.relations-comment {
   --c: var(--c-foreach);
 }
 
-/* 始まりの札（コピーには入らない） */
-.sql-mark[data-tag]::before {
-  content: attr(data-tag);
-  margin-right: 3px;
-  padding: 0 3px;
-  border-radius: 2px;
-  font-size: 9px;
-  vertical-align: 1px;
-  color: #fff;
-  background: rgb(var(--c));
-}
-
 /* foreach の 1 回ごと: 縦線は付けず、下線で区切る（交互に濃さを変える） */
 .sql-mark.sql-item {
   border: none;
   padding: 0;
   margin: 0;
   background: none;
-  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.7);
+  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.35);
 }
 
 .sql-mark.sql-item.odd {
-  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.3);
+  box-shadow: inset 0 -2px 0 rgba(var(--c-foreach), 0.15);
 }
 
 /* マウスの下のいちばん内側の範囲 */
 .sql-mark.hot {
-  background: rgba(var(--c), 0.22);
-  outline: 1px solid rgb(var(--c));
+  background: rgba(var(--c), 0.12);
+  outline: 1px solid rgba(var(--c), 0.5);
 }
 
 .sql-mark.sql-item.hot {
-  background: rgba(var(--c-foreach), 0.22);
+  background: rgba(var(--c-foreach), 0.12);
 }
 
 .sql-legend {

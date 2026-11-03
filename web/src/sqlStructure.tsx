@@ -79,12 +79,7 @@ function render(sql: string, t: Tree, from: number, to: number, seq: { item: num
     if (r.start > pos) out.push(sql.slice(pos, r.start));
     const odd = r.kind === 'item' ? seq.item++ % 2 === 1 : false;
     out.push(
-      <span
-        key={`${r.start}-${r.end}-${i}`}
-        className={`sql-mark sql-${r.kind}${odd ? ' odd' : ''}`}
-        data-tag={TAGS[r.kind]}
-        title={r.label}
-      >
+      <span key={`${r.start}-${r.end}-${i}`} className={`sql-mark sql-${r.kind}${odd ? ' odd' : ''}`} title={r.label}>
         {render(sql, c, r.start, r.end, seq)}
       </span>,
     );
@@ -93,9 +88,6 @@ function render(sql: string, t: Tree, from: number, to: number, seq: { item: num
   if (pos < to) out.push(sql.slice(pos, to));
   return out;
 }
-
-/** 範囲の始まりに付ける札（foreach の 1 回ごとには付けない） */
-const TAGS: Record<StructureKind, string | undefined> = { subquery: 'sub', if: 'if', foreach: 'foreach', item: undefined };
 
 /** マウスの下のいちばん内側の範囲だけを強調する（入れ子のどれを指しているか分かるように） */
 function hover(e: React.MouseEvent<HTMLElement>) {
