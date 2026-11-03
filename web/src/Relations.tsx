@@ -8,7 +8,7 @@ import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
 import { ConnectionPicker, message } from './Execution';
 import { clearDbComments, CommentsContext, useDbComments } from './comments';
-import { InfoButton } from './Popover';
+import { InfoButton, PopoverButton } from './Popover';
 import { RelationDiagram, type TableEdge } from './RelationDiagram';
 import { SideSplitter, useSideWidth } from './Splitter';
 import type { GlobalSet } from './globalModel';
@@ -263,6 +263,8 @@ export function RelationsScreen({
   const q = filter.trim().toLowerCase();
   const shownStatements = details.filter((d) => d.id.toLowerCase().includes(q));
   const shownNames = Object.keys(names).filter((n) => n.toLowerCase().includes(q));
+  // 選んだ表を使う statement（計画に出てきたもの）
+  const usingTable = table ? details.filter((d) => d.tables?.includes(table)).map((d) => d.id) : [];
   // 疑わしい結合（隠したものは、選んだときだけ出す）
   const suspicions = result?.suspicious ?? [];
   const activeSuspicions = suspicions.filter((x) => !x.ignored);
@@ -539,6 +541,11 @@ export function RelationsScreen({
                         >
                           {reading === table ? '読んでいます…' : '中身を見る'}
                         </button>
+                        {usingTable.length > 0 && (
+                          <PopoverButton label={`SQL ${usingTable.length} 件`} title="この表を使う statement">
+                            <SqlList title="この表を使う statement" items={usingTable.map((id) => ({ id, note: null }))} onOpen={onOpen} />
+                          </PopoverButton>
+                        )}
                       </h2>
                       <div className="tabs" role="tablist" aria-label="表示の仕方">
                         <button

@@ -618,6 +618,9 @@ export function createApi(token: string) {
       call<{ columns: string[] }>('api/db-columns', post(JSON.stringify({ connectionId, table }))),
     /** リレーション（試作）の解析の結果。解析中なら進み具合だけ */
     relations: (connectionId: string) => call<RelationsResult>('api/relations', post(JSON.stringify({ connectionId }))),
+    /** statement が使う表（リレーションの解析で、計画に出てきた表。解析していなければ null） */
+    statementTables: (connectionId: string, statement: string) =>
+      call<{ tables: string[] | null }>('api/relations/statement-tables', post(JSON.stringify({ connectionId, statement }))),
     /** 推定の根拠: その statement で列の組を拾った計画の場所と、別名を表の列に読み替えた経路 */
     relationTrace: (connectionId: string, statement: string, a: string, b: string) =>
       call<{ traces: JoinTrace[] }>('api/relations/trace', post(JSON.stringify({ connectionId, statement, a, b }))),
@@ -806,6 +809,8 @@ export interface JoinTrace {
 
 export interface RelationStatement {
   id: string;
+  /** 計画に出てきた表（schema.table。前の版の解析の結果にはない） */
+  tables?: string[];
   /** 結合の組 [列, 列, 拾った計画の項目（Hash Cond など）] */
   joins: string[][];
   /** パラメータ（項目のパス）→ 比べている列 */

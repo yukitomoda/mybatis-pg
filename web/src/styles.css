@@ -3589,3 +3589,10 @@ div.relations-comment {
 .drag-scroll .node {
   cursor: pointer;
 }
+
+/* 文字のボタンで開く小窓 */
+.popover-button {
+  margin-left: 0.6rem;
+  font-size: 12px;
+  font-weight: normal;
+}

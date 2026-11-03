@@ -7,6 +7,7 @@ import { ExplainPanel } from './Explain';
 import { CandidatePane } from './Suggest';
 import type { WorkspaceSection } from './Workspace';
 import type { JoinFocus } from './joinMarks';
+import { PopoverButton } from './Popover';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
 import { ResultView, useResultView } from './ResultView';
@@ -295,6 +296,21 @@ function Workspace({ api }: { api: Api }) {
 
   const opener = useOpener(api, handleError);
   const conn = useConnections(api, handleError, () => navigateWorkspace('connections'));
+  /** 選んだ statement が使う表（リレーションの解析の結果から。解析していなければ null） */
+  const [stmtTables, setStmtTables] = useState<string[] | null>(null);
+  useEffect(() => {
+    setStmtTables(null);
+    const id = conn.current?.id;
+    if (!selected || !id) return;
+    let active = true;
+    api.statementTables(id, selected).then(
+      (r) => active && setStmtTables(r.tables),
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, selected, conn.current?.id]);
 
   // mapper の読み込み直しを待ち続ける（ロングポーリング）
   useEffect(() => {
@@ -717,6 +733,20 @@ function Workspace({ api }: { api: Api }) {
             <header className="panel-header">
               <h2>パラメータ</h2>
               {selected && <code className="statement-id">{selected}</code>}
+              {selected && stmtTables && stmtTables.length > 0 && (
+                <PopoverButton label={`表 ${stmtTables.length}`} title="この statement が使う表">
+                  <h5>この statement が使う表</h5>
+                  <ul className="popover-sql">
+                    {stmtTables.map((t) => (
+                      <li key={t}>
+                        <button type="button" className="link" onClick={() => navigateRelation({ ...NO_RELATION, table: t })}>
+                          {t}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </PopoverButton>
+              )}
             </header>
             {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
             {schemaError && <p className="error-text">{describe(schemaError)}</p>}

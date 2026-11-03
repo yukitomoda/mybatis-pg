@@ -719,6 +719,11 @@ public final class ToolServer {
           relations(ex);
         }
         break;
+      case "/api/relations/statement-tables":
+        if (requireMethod(ex, method, "POST")) {
+          statementTables(ex);
+        }
+        break;
       case "/api/relations/trace":
         if (requireMethod(ex, method, "POST")) {
           relationTrace(ex);
@@ -1598,6 +1603,32 @@ public final class ToolServer {
    * 関連データ: 表の隣の表（親・子）。{"connectionId", "table"} →
    * {"neighbors": [{"direction": "parent" | "child", "table", "columns", "otherColumns", "manual", "indexed"}]}
    */
+  /**
+   * statement が使う表（リレーションの解析で、計画に出てきた表）: {"connectionId", "statement"} → {"tables": [schema.table] | null（解析していない）}
+   */
+  private void statementTables(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    String connectionId = string(req, "connectionId");
+    if (connectionId == null || connections.get(connectionId) == null) {
+      sendJson(ex, 404, error("接続先がありません"));
+      return;
+    }
+    Relations.Store store = relationStore(connectionId);
+    List<String> tables = null;
+    synchronized (store) {
+      Relations.Entry e = store.statements.get(string(req, "statement"));
+      if (e != null && e.planned != null) {
+        tables = new ArrayList<>(e.tables);
+      }
+    }
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("tables", tables);
+    sendJson(ex, 200, body);
+  }
+
   /**
    * 推定の根拠: {"connectionId", "statement", "a", "b"} → {"traces": [{path, node, key, condition, expr, left, right}]}。
    * 解析で残した計画から、その statement で列の組を拾った場所と、別名を表の列に読み替えた経路を組み立てる
@@ -2874,6 +2905,8 @@ public final class ToolServer {
           joins.add(java.util.Arrays.asList(j));
         }
         m.put("joins", joins);
+        // 計画に出てきた表
+        m.put("tables", en.tables);
         m.put("params", en.params == null ? new LinkedHashMap<>() : en.params);
         m.put("error", en.error);
         m.put("source", sourceOf(sourceNames, current, e.getKey()));

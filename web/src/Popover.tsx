@@ -32,6 +32,31 @@ export function InfoButton({ title, children }: { title: string; children: React
   );
 }
 
+/** 文字のボタンと、押すとその近くに出る小窓（一覧など、見たいときだけ見るもの） */
+export function PopoverButton({ label, title, children }: { label: ReactNode; title?: string; children: ReactNode }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="link popover-button"
+        title={title}
+        aria-expanded={anchor !== null}
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget.getBoundingClientRect())}
+      >
+        {label}
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} ignore={button} onClose={() => setAnchor(null)}>
+          {children}
+        </Popover>
+      )}
+    </>
+  );
+}
+
 export function Popover({
   anchor,
   ignore,
