@@ -3,6 +3,7 @@
 // 表を押すとその表を中心にし、線を押すと理由と根拠の SQL を小窓で見る
 import { useDragScroll } from './dragScroll';
 import { track } from './busy';
+import { NAME_FONT, SUB_FONT, fitText, measure } from './textFit';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
@@ -75,8 +76,13 @@ export function neighborhood(center: string, edges: TableEdge[], depth: number, 
 
 export const NODE_H = 46;
 /** 文字の幅（px）。全角の文字は、半角の倍近くで数える */
-const textWidth = (text: string, half: number) => [...text].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? half * 1.75 : half), 0);
-const nodeWidth = (label: string, sub: string) => Math.min(300, Math.max(120, Math.max(textWidth(label, 7.4), textWidth(sub, 6.4)) + 24));
+/** 箱の幅の上限・下限と、左右の余白 */
+const NODE_MAX_W = 320;
+const NODE_MIN_W = 120;
+const NODE_PAD = 24;
+/** 箱の幅（実際の字体で測る。長すぎる名前は上限で切り、箱の中では「…」にする） */
+const nodeWidth = (label: string, sub: string) =>
+  Math.min(NODE_MAX_W, Math.max(NODE_MIN_W, Math.ceil(Math.max(measure(label, NAME_FONT), measure(sub, SUB_FONT))) + NODE_PAD));
 
 type Placed = { table: string; x: number; y: number; w: number; label: string; sub: string };
 type Routed = { edge: TableEdge; points: { x: number; y: number }[] };
@@ -397,11 +403,11 @@ export function RelationDiagram({
               >
                 <rect width={n.w} height={NODE_H} rx="6" />
                 <text x={n.w / 2} y={n.sub ? 19 : 28} className="node-name">
-                  {n.label}
+                  {fitText(n.label, n.w - NODE_PAD + 8, NAME_FONT)}
                 </text>
                 {n.sub && (
                   <text x={n.w / 2} y={36} className="node-sub">
-                    {n.sub}
+                    {fitText(n.sub, n.w - NODE_PAD + 8, SUB_FONT)}
                   </text>
                 )}
               </g>

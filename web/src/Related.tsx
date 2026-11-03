@@ -1,6 +1,7 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
 // 起点の親（その行が参照する行）は自動で集め、ほかは 1 段ずつ押してたどる。たどった 1 歩ごとに箱を作り、起点を中心にした図で見る
 import { useDragScroll } from './dragScroll';
+import { NAME_FONT, fitText } from './textFit';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Api, RelatedNeighbor, RelatedRows } from './api';
 import { useDbComments } from './comments';
@@ -213,16 +214,8 @@ export function placeNodes(nodes: RelatedNode[]): { placed: Placed[]; width: num
 }
 
 /** 箱の名前を、幅に収まるように省く */
-function fit(text: string, max = BOX_W - 16, half = 7.4): string {
-  let w = 0;
-  let out = '';
-  for (const ch of text) {
-    w += ch.charCodeAt(0) > 0xff ? half * 1.75 : half;
-    if (w > max) return `${out}…`;
-    out += ch;
-  }
-  return out;
-}
+/** 箱に収まるよう、収まらなければ末尾を「…」にして切る（実際の字体で測る） */
+const fit = (text: string, max = BOX_W - 16, font = NAME_FONT) => fitText(text, max, font);
 
 export function RelatedPane({
   api,
@@ -436,7 +429,7 @@ function RelatedGraph({
                   <title>{node.step.matchAll}</title>
                   {node.step.match.map((line, i) => (
                     <tspan key={i} x={right ? x2 - 6 : x2 + 6} dy={i === 0 ? 0 : 13}>
-                      {fit(line, COL_GAP - 8, 6.6)}
+                      {fit(line, COL_GAP - 8, '11px')}
                     </tspan>
                   ))}
                 </text>
