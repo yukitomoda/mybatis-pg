@@ -121,19 +121,6 @@ const KINDS: [string, string][] = [
   ['foreachAll', 'foreach'],
 ];
 const STORE = 'mybatis-pg.sql-structure';
-const STYLE_STORE = 'mybatis-pg.sql-structure-style';
-
-/** 線の引き方: bracket は範囲の両端の縦線、underline は外側ほど下に重ねる下線 */
-export type StructureStyle = 'bracket' | 'underline';
-
-function loadStyle(): StructureStyle {
-  try {
-    return localStorage.getItem(STYLE_STORE) === 'bracket' ? 'bracket' : 'underline';
-  } catch {
-    return 'underline';
-  }
-}
-
 function loadShown(): Set<string> {
   try {
     const v = JSON.parse(localStorage.getItem(STORE) ?? 'null');
@@ -147,15 +134,6 @@ function loadShown(): Set<string> {
 /** 色を付けた SQL と、色の出し入れ（見出しの横に置く） */
 export function useStructuredSql(raw: string, shown: string, spans: SqlSpan[] | undefined) {
   const [on, setOn] = useState(loadShown);
-  const [style, setStyle] = useState<StructureStyle>(loadStyle);
-  const changeStyle = (v: StructureStyle) => {
-    setStyle(v);
-    try {
-      localStorage.setItem(STYLE_STORE, v);
-    } catch {
-      // この表示中だけ覚える
-    }
-  };
   const all = useMemo(() => [...mapSpans(raw, shown, spans ?? []), ...subqueryRanges(shown)], [raw, shown, spans]);
   const present = new Set<string>(all.map((r) => (r.kind === 'item' ? 'foreachAll' : r.kind === 'foreach' ? 'foreachAll' : r.kind)));
   const visible = all.filter((r) => on.has(r.kind === 'item' || r.kind === 'foreach' ? 'foreachAll' : r.kind));
@@ -180,11 +158,7 @@ export function useStructuredSql(raw: string, shown: string, spans: SqlSpan[] | 
             {label}
           </label>
         ))}
-        <select aria-label="線の引き方" value={style} onChange={(e) => changeStyle(e.target.value as StructureStyle)}>
-          <option value="underline">下線</option>
-          <option value="bracket">縦線</option>
-        </select>
       </span>
     );
-  return { body, legend, className: `sql-structured sql-style-${style}`, onMouseOver: hover, onMouseLeave: leave };
+  return { body, legend, className: 'sql-structured', onMouseOver: hover, onMouseLeave: leave };
 }
