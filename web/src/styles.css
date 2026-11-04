@@ -3722,3 +3722,18 @@ div.relations-comment {
   gap: 0.6rem;
   margin: 0.4rem 0;
 }
+
+/* 根拠の SQL の一覧: Mapper ごとの見出し */
+.sql-group + .sql-group {
+  margin-top: 0.3rem;
+}
+
+.sql-group-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sql-group .popover-sql {
+  margin-top: 0.1rem;
+}

@@ -280,6 +280,28 @@ export function RelationsScreen({
   const names = result?.names ?? {};
   const q = filter.trim().toLowerCase();
   const shownStatements = details.filter((d) => d.id.toLowerCase().includes(q));
+  // statement を Mapper ごとにまとめる（Mapper の名前は、見分けられる範囲で短くしたもの。中には statement の名前だけを出す）
+  const statementGroups = groupByMapper(shownStatements, (d) => d.id, statementName);
+  /** 閉じた Mapper（初めはすべて開く） */
+  const [closedMappers, setClosedMappers] = useState<Set<string>>(new Set());
+  const toggleMapper = (m: string) =>
+    setClosedMappers((old) => {
+      const next = new Set(old);
+      if (next.has(m)) next.delete(m);
+      else next.add(m);
+      return next;
+    });
+  // statement を選んだら（ほかの画面から移ってきたときも）、その Mapper を開く
+  useEffect(() => {
+    if (!statement) return;
+    const m = mapperPart(statementName(statement));
+    setClosedMappers((old) => {
+      if (!old.has(m)) return old;
+      const next = new Set(old);
+      next.delete(m);
+      return next;
+    });
+  }, [statement]);
   const shownNames = Object.keys(names).filter((n) => n.toLowerCase().includes(q));
   // 選んだ表を使う statement（計画に出てきたもの）
   const usingTable = table ? details.filter((d) => d.tables?.includes(table)).map((d) => d.id) : [];
@@ -477,19 +499,36 @@ export function RelationsScreen({
                         );
                       })}
                     {view === 'statements' &&
-                      shownStatements.map((d) => (
-                        <li key={d.id}>
-                          <button
-                            type="button"
-                            className={d.id === statement ? 'selected' : undefined}
-                            onClick={() => setStatement(d.id)}
-                            title={d.id}
-                          >
-                            <span>{statementName(d.id)}</span>
-                            <span className="count">{d.error ? '⚠' : `${d.joins.length}・${Object.keys(d.params).length}`}</span>
-                          </button>
-                        </li>
-                      ))}
+                      statementGroups.map(([mapper, ds]) => {
+                        const open = q !== '' || !closedMappers.has(mapper);
+                        return (
+                          <li key={mapper} className="schema-node">
+                            <button type="button" className="schema-toggle" aria-expanded={open} onClick={() => toggleMapper(mapper)}>
+                              <span>
+                                <span className="caret">{open ? '▾' : '▸'}</span> {mapper}
+                              </span>
+                              <span className="count">{ds.length}</span>
+                            </button>
+                            {open && (
+                              <ul>
+                                {ds.map((d) => (
+                                  <li key={d.id}>
+                                    <button
+                                      type="button"
+                                      className={d.id === statement ? 'selected' : undefined}
+                                      onClick={() => setStatement(d.id)}
+                                      title={d.id}
+                                    >
+                                      <span>{namePart(d.id)}</span>
+                                      <span className="count">{d.error ? '⚠' : `${d.joins.length}・${Object.keys(d.params).length}`}</span>
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </li>
+                        );
+                      })}
                     {view === 'names' &&
                       shownNames.map((n) => (
                         <li key={n}>
@@ -1388,34 +1427,56 @@ function SqlList({
   return (
     <>
       {title && <h5>{title}</h5>}
-      <ul className="popover-sql">
-        {items.map((it) => (
-          <li key={`${it.id} ${it.note}`}>
-            {sourceOf.get(it.id) && <span className="badge muted">{sourceOf.get(it.id)}</span>}
-            <button type="button" className="link" onClick={() => onOpen(it.id, it.join)} title={it.id}>
-              {statementName(it.id)}
-            </button>
-            {it.note &&
-              (it.join && canTrace ? (
-                <button
-                  type="button"
-                  className="link hint join-trace-toggle"
-                  title="推定の根拠"
-                  onClick={(e) => {
-                    // 小窓の中でも、開いても小窓は閉じない
-                    e.stopPropagation();
-                    setTraced(traced === it.id ? null : it.id);
-                  }}
-                >
-                  {it.note}
+      {/* Mapper ごとにまとめ、Mapper の名前を見出しにして、中には statement の名前だけを出す */}
+      {groupByMapper(items, (it) => it.id, statementName).map(([mapper, group]) => (
+        <div key={mapper} className="sql-group">
+          <div className="sql-group-name">{mapper}</div>
+          <ul className="popover-sql">
+            {group.map((it) => (
+              <li key={`${it.id} ${it.note}`}>
+                {sourceOf.get(it.id) && <span className="badge muted">{sourceOf.get(it.id)}</span>}
+                <button type="button" className="link" onClick={() => onOpen(it.id, it.join)} title={it.id}>
+                  {namePart(it.id)}
                 </button>
-              ) : (
-                <span className="hint"> {it.note}</span>
-              ))}
-            {traced === it.id && it.join && <TraceView statement={it.id} a={it.join.a} b={it.join.b} />}
-          </li>
-        ))}
-      </ul>
+                {it.note &&
+                  (it.join && canTrace ? (
+                    <button
+                      type="button"
+                      className="link hint join-trace-toggle"
+                      title="推定の根拠"
+                      onClick={(e) => {
+                        // 小窓の中でも、開いても小窓は閉じない
+                        e.stopPropagation();
+                        setTraced(traced === it.id ? null : it.id);
+                      }}
+                    >
+                      {it.note}
+                    </button>
+                  ) : (
+                    <span className="hint"> {it.note}</span>
+                  ))}
+                {traced === it.id && it.join && <TraceView statement={it.id} a={it.join.a} b={it.join.b} />}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </>
   );
+}
+
+/** 短くした名前の Mapper の部分（UserMapper.find なら UserMapper） */
+const mapperPart = (short: string) => (short.includes('.') ? short.slice(0, short.lastIndexOf('.')) : '');
+/** statement の名前の部分 */
+const namePart = (id: string) => id.slice(id.lastIndexOf('.') + 1);
+
+/** Mapper ごとにまとめる（Mapper の名前の順。中は元の順） */
+function groupByMapper<T>(xs: T[], idOf: (x: T) => string, short: (id: string) => string): [string, T[]][] {
+  const out = new Map<string, T[]>();
+  for (const x of xs) {
+    const m = mapperPart(short(idOf(x)));
+    if (!out.has(m)) out.set(m, []);
+    out.get(m)!.push(x);
+  }
+  return [...out].sort((a, b) => a[0].localeCompare(b[0]));
 }
