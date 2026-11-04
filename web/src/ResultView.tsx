@@ -4,6 +4,7 @@ import { useDbComments } from './comments';
 import type { PointerEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, HistoryEntry, HistorySummary, SourceColumn } from './api';
+import { ApiError } from './api';
 import { DataTable } from './DataTable';
 import { Popover } from './Popover';
 import type { RelatedEntry } from './Related';
@@ -421,6 +422,7 @@ export function ResultView({
               onRestoreParams={onRestoreParams}
               onUpdated={rv.refresh}
               onRelated={rv.showRelated}
+              onShowHistory={rv.showHistory}
             />
           ) : (
             <p className="hint">左の一覧から選んでください</p>
@@ -443,9 +445,12 @@ function HistoryDetail({
   onRestoreParams,
   onUpdated,
   onRelated,
+  onShowHistory,
 }: {
   api: Api;
   id: string;
+  /** やり直した実行の履歴を開く */
+  onShowHistory: (id: string) => void;
   onCell?: (text: string | null, type: string) => void;
   onOpenStatement: (id: string) => void;
   onRestoreParams: (statementId: string, parameters: unknown) => void;
@@ -455,6 +460,26 @@ function HistoryDetail({
   onRelated: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
+  /** 同じ条件でやり直している */
+  const [rerunning, setRerunning] = useState(false);
+  const [rerunError, setRerunError] = useState<string | null>(null);
+  const rerun = async () => {
+    if (!entry) return;
+    if (entry.commit && !window.confirm(`「${entry.connectionName}」でコミットします。変更は取り消せません。実行しますか？`)) return;
+    setRerunning(true);
+    setRerunError(null);
+    try {
+      const r = await api.rerunResult(entry.id);
+      if (r.historyId) onShowHistory(r.historyId);
+    } catch (e) {
+      // 失敗した実行も履歴に残るので、それを開く（残せなければここに出す）
+      const hid = e instanceof ApiError ? e.historyId : null;
+      if (hid) onShowHistory(hid);
+      else setRerunError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRerunning(false);
+    }
+  };
   // 列の見出しに DB のコメントを出す（表の中身と、出どころの分かる列）
   const comments = useDbComments(api, entry?.connectionId);
   /** 複数の表の列がある行から関連データを集めるときに、どの表から始めるかを選ぶ */
@@ -559,6 +584,14 @@ function HistoryDetail({
       {typeof tab === 'number' && (
         <>
           {entry.error && <pre className="render-error">{entry.error}</pre>}
+          {entry.error && entry.kind === 'execute' && (
+            <div className="rerun">
+              <button type="button" disabled={rerunning} onClick={rerun}>
+                {rerunning ? '実行しています…' : '再実行'}
+              </button>
+              {rerunError && <span className="error-text">{rerunError}</span>}
+            </div>
+          )}
           {entry.warnings.length > 0 && (
             <ul className="notes warn">
               {entry.warnings.map((w, i) => (

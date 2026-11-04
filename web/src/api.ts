@@ -705,6 +705,8 @@ export function createApi(token: string) {
     results: () => call<{ entries: HistorySummary[] }>('api/results', post('{}')),
     /** 実行の履歴の 1 件 */
     result: (id: string) => call<HistoryEntry>('api/results', post(JSON.stringify({ id }))),
+    /** 履歴の実行を、同じ条件（statement・接続先・値・下書き・コミットするか）でやり直す。新しい履歴に残る */
+    rerunResult: (id: string) => call<ExecuteResponse>('api/results/rerun', post(JSON.stringify({ id }))),
     /** 実行の履歴をすべて消す */
     clearResults: () => call<{ ok: boolean }>('api/results', post(JSON.stringify({ clear: true }))),
     /** 履歴の結果の続きを取る（refetch なら最初から取り直す）。書き換えた履歴の 1 件を返す */
@@ -879,6 +881,8 @@ export interface HistoryEntry {
   statementId: string | null;
   /** 編集中の下書きで実行した */
   draft: boolean;
+  /** コミットする実行だった（前の版の履歴にはない） */
+  commit?: boolean;
   connectionId: string;
   connectionName: string;
   executedAt: number;

@@ -759,6 +759,11 @@ public final class ToolServer {
           analyzeRelations(ex);
         }
         break;
+      case "/api/results/rerun":
+        if (requireMethod(ex, method, "POST")) {
+          rerun(ex);
+        }
+        break;
       case "/api/results":
         if (requireMethod(ex, method, "POST")) {
           history(ex);
@@ -1420,6 +1425,41 @@ public final class ToolServer {
     if (req == null) {
       return;
     }
+    execute(ex, req);
+  }
+
+  /**
+   * 結果ビューから、履歴の実行をそのままやり直す: {"id"} → 実行と同じ応答（新しい履歴の historyId を含む）。
+   * 履歴に残した依頼（statement・接続先・値・下書き・コミットするか・取る行数）で実行する
+   * （マスターパスワードを開く前に実行して失敗したときなど）
+   */
+  private void rerun(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    JsonObject h = results().get(string(req, "id"));
+    if (h == null || !"execute".equals(string(h, "kind"))) {
+      sendJson(ex, 404, error("やり直せる実行の履歴がありません"));
+      return;
+    }
+    JsonObject again = new JsonObject();
+    again.addProperty("statementId", string(h, "statementId"));
+    again.addProperty("connectionId", string(h, "connectionId"));
+    if (h.has("parameters") && !h.get("parameters").isJsonNull()) {
+      again.add("parameters", h.get("parameters"));
+    }
+    if (h.has("draftSource") && !h.get("draftSource").isJsonNull()) {
+      again.add("draft", h.get("draftSource"));
+    }
+    again.addProperty("commit", h.has("commit") && h.get("commit").getAsBoolean());
+    if (h.has("pageSize") && h.get("pageSize").getAsInt() > 0) {
+      again.addProperty("maxRows", h.get("pageSize").getAsInt());
+    }
+    execute(ex, again);
+  }
+
+  private void execute(HttpExchange ex, JsonObject req) throws IOException {
     String statementId = string(req, "statementId");
     String connectionId = string(req, "connectionId");
     if (statementId == null || connectionId == null) {
@@ -1501,6 +1541,8 @@ public final class ToolServer {
     o.addProperty("label", label);
     o.addProperty("statementId", statementId);
     o.addProperty("draft", req.has("draft") && !req.get("draft").isJsonNull());
+    // コミットする実行だったか（結果ビューからやり直すときに、確かめるため）
+    o.addProperty("commit", req.has("commit") && req.get("commit").isJsonPrimitive() && req.get("commit").getAsBoolean());
     o.addProperty("connectionId", connectionId);
     ConnectionStore.Profile p = connections.get(connectionId);
     o.addProperty("connectionName", p == null ? connectionId : p.name);

@@ -3752,3 +3752,11 @@ div.relations-comment {
 .sql-legend-param {
   border-left: 3px solid rgb(215, 60, 60);
 }
+
+/* 結果ビュー: 失敗した実行のやり直し */
+.rerun {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0;
+}
