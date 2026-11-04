@@ -14,6 +14,11 @@ import { Popover } from './Popover';
 const tableOf = (col: string) => col.slice(0, col.lastIndexOf('.'));
 
 /** 表どうしのつながり（列のつながりを、表の組ごとにまとめたもの） */
+/** 図に出すつながりの種類（親子はいつも出す） */
+export type EdgeKinds = { sibling: boolean; oneToOne: boolean };
+
+const visibleKind = (e: TableEdge, show: EdgeKinds) => e.kind === 'parent' || (e.kind === 'sibling' ? show.sibling : show.oneToOne);
+
 export type TableEdge = {
   /** 親子なら子の表、兄弟・1 対 1 なら名前の小さいほう */
   from: string;
@@ -56,15 +61,15 @@ const MAX_PER_LEVEL = 24;
 
 /**
  * 図に出す表を選ぶ: 中心から、つながりを depth 回までたどって届く表（親等のように、親・子の向きを問わず 1 回で 1 段と数える）。
- * 兄弟・1 対 1 のつながりは、siblings のときだけたどる。段ごとに多すぎる表は省いて、省いた数を返す
+ * 兄弟のつながりは show.sibling、1 対 1 のつながりは show.oneToOne のときだけたどる。段ごとに多すぎる表は省いて、省いた数を返す
  */
-export function neighborhood(center: string, edges: TableEdge[], depth: number, siblings: boolean) {
+export function neighborhood(center: string, edges: TableEdge[], depth: number, show: EdgeKinds) {
   const shown = new Set<string>([center]);
   let hidden = 0;
   let frontier = [center];
   for (let d = 1; d <= depth && frontier.length > 0; d++) {
     const next = edges
-      .filter((e) => e.from !== e.to && (siblings || e.kind === 'parent') && (frontier.includes(e.from) || frontier.includes(e.to)))
+      .filter((e) => e.from !== e.to && visibleKind(e, show) && (frontier.includes(e.from) || frontier.includes(e.to)))
       .flatMap((e) => [e.from, e.to]);
     const fresh = [...new Set(next)].filter((t) => !shown.has(t));
     fresh.slice(0, MAX_PER_LEVEL).forEach((t) => shown.add(t));
@@ -181,7 +186,10 @@ export function RelationDiagram({
   edgeInfo: (edge: TableEdge) => ReactNode;
 }) {
   const [depth, setDepth] = useState(1);
-  const [siblings, setSiblings] = useState(true);
+  // 兄弟は多くて見づらいので既定では出さず、1 対 1 は出す
+  const [siblings, setSiblings] = useState(false);
+  const [oneToOne, setOneToOne] = useState(true);
+  const show = useMemo(() => ({ sibling: siblings, oneToOne }), [siblings, oneToOne]);
   const [zoom, setZoom] = useState(1);
   const [open, setOpen] = useState<{ edge: TableEdge; at: DOMRect } | null>(null);
   /** マウスを乗せている表（その表の線だけを強調する） */
@@ -212,11 +220,8 @@ export function RelationDiagram({
     return pk ? `PK: ${pk.cols.join(', ')}` : '';
   };
 
-  const { shown, hidden } = useMemo(() => neighborhood(center, edges, depth, siblings), [center, edges, depth, siblings]);
-  const shownEdges = useMemo(
-    () => edges.filter((e) => shown.has(e.from) && shown.has(e.to) && (siblings || e.kind === 'parent')),
-    [edges, shown, siblings],
-  );
+  const { shown, hidden } = useMemo(() => neighborhood(center, edges, depth, show), [center, edges, depth, show]);
+  const shownEdges = useMemo(() => edges.filter((e) => shown.has(e.from) && shown.has(e.to) && visibleKind(e, show)), [edges, shown, show]);
   const [laid, setLaid] = useState<Laid | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -299,7 +304,10 @@ export function RelationDiagram({
           </select>
         </label>
         <label>
-          <input type="checkbox" checked={siblings} onChange={(e) => setSiblings(e.target.checked)} /> 兄弟・1 対 1
+          <input type="checkbox" checked={siblings} onChange={(e) => setSiblings(e.target.checked)} /> 兄弟
+        </label>
+        <label>
+          <input type="checkbox" checked={oneToOne} onChange={(e) => setOneToOne(e.target.checked)} /> 1 対 1
         </label>
         <span className="relation-diagram-zoom">
           <button type="button" className="icon" title="縮小" onClick={() => changeZoom(zoom - 0.1)}>

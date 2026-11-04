@@ -46,9 +46,14 @@ describe('neighborhood', () => {
       link('s.orders.manager_id', 's.orders.id', 'parent', ['m']),
     ]);
     // 1 段: 親・子と、兄弟
-    expect([...neighborhood('s.orders', edges, 1, true).shown].sort()).toEqual(['s.customers', 's.order_items', 's.orders', 's.points']);
+    expect([...neighborhood('s.orders', edges, 1, { sibling: true, oneToOne: true }).shown].sort()).toEqual([
+      's.customers',
+      's.order_items',
+      's.orders',
+      's.points',
+    ]);
     // 2 段: 親の親（tenants）、子のほかの親（products）、親のほかの子（invoices）。兄弟はたどらない
-    expect([...neighborhood('s.orders', edges, 2, false).shown].sort()).toEqual([
+    expect([...neighborhood('s.orders', edges, 2, { sibling: false, oneToOne: false }).shown].sort()).toEqual([
       's.customers',
       's.invoices',
       's.order_items',
@@ -56,5 +61,13 @@ describe('neighborhood', () => {
       's.products',
       's.tenants',
     ]);
+  });
+  it('兄弟と 1 対 1 を、別々に出し入れする', () => {
+    const edges = tableEdges([
+      link('s.orders.customer_id', 's.points.customer_id', 'sibling', ['m']),
+      link('s.orders.id', 's.order_notes.order_id', 'one-to-one', ['m']),
+    ]);
+    expect([...neighborhood('s.orders', edges, 1, { sibling: false, oneToOne: true }).shown].sort()).toEqual(['s.order_notes', 's.orders']);
+    expect([...neighborhood('s.orders', edges, 1, { sibling: true, oneToOne: false }).shown].sort()).toEqual(['s.orders', 's.points']);
   });
 });
