@@ -1,5 +1,6 @@
 // 値の候補（結果ビューの中に出す）: パラメータと比べられている列の、よく出てくる値ごとの行を、表のすべての列付きで出す。
 // セルを押すと、入れる先のパラメータにその値を入れる（比べている列を強調し、「この列の値を使うのが普通」と分かるようにする）
+import { ErrorMark } from './ErrorMark';
 import { useEffect, useState } from 'react';
 import type { SourceColumn } from './api';
 import { useDbComments } from './comments';
@@ -291,7 +292,7 @@ export function CandidatePane({
       </div>
       {!relations && <p className="hint">リレーションを解析すると、源流の表（この列が指している表）の値も出せます。</p>}
       {!column.direct && <p className="hint">列を式で包んで比べているので、列の値がそのまま合わないことがあります。</p>}
-      {error && <p className="error-text">{error}</p>}
+      {error && <ErrorMark error={error} />}
       {!values && !error && <p className="hint">読み込んでいます…</p>}
       {values && (
         <>

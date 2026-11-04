@@ -1,4 +1,5 @@
 import { RelationsScreen } from './Relations';
+import { ErrorMark } from './ErrorMark';
 import { makeShortener, StatementNames } from './statementNames';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, LoadError, OpenTarget, PlaygroundEntry, RenderResponse, SourceColumn, TemplateResponse } from './api';
@@ -10,6 +11,9 @@ import type { WorkspaceSection } from './Workspace';
 import type { JoinFocus } from './joinMarks';
 import { PopoverButton } from './Popover';
 import { useBusy } from './busy';
+import { LogScreen } from './Log';
+import { Notices } from './NoticeList';
+import { ShowLogContext } from './notices';
 import { useStructuredSql } from './sqlStructure';
 import { WorkspaceScreen } from './Workspace';
 import { cellToParam } from './DataTable';
@@ -73,13 +77,14 @@ function saveTab(tab: Tab) {
 
 // ---- 画面の切り替えと URL ----
 
-type Screen = 'query' | 'globals' | 'relations' | 'workspace';
+type Screen = 'query' | 'globals' | 'relations' | 'workspace' | 'log';
 
 const SCREENS: [Screen, string][] = [
   ['query', 'クエリ'],
   ['globals', '共通パラメータ'],
   ['relations', 'リレーション'],
   ['workspace', 'ワークスペース'],
+  ['log', 'ログ'],
 ];
 
 /** リレーションの画面で見ているもの */
@@ -108,9 +113,11 @@ function parseHash(): {
   global: string | null;
   relation: RelationLoc;
   workspace: WorkspaceSection;
+  /** ログで目立たせる行 */
+  log: string | null;
 } {
   const hash = decodeURIComponent(window.location.hash.slice(1));
-  const none = { statement: null, global: null, relation: NO_RELATION, workspace: 'sources' as WorkspaceSection };
+  const none = { statement: null, global: null, relation: NO_RELATION, workspace: 'sources' as WorkspaceSection, log: null };
   if (!hash) return { screen: 'query', ...none };
   if (!hash.startsWith('/')) return { screen: 'query', ...none, statement: hash };
   const [, screen, ...rest] = hash.split('/');
@@ -118,6 +125,7 @@ function parseHash(): {
   const arg = rest.join('/');
   if (screen === 'query') return { screen: 'query', ...none, statement: arg || null };
   if (screen === 'globals') return { screen: 'globals', ...none, global: arg || null };
+  if (screen === 'log') return { screen: 'log', ...none, log: arg || null };
   // 接続先は、ワークスペースの中（前の #/connections も読む）
   if (screen === 'connections') return { screen: 'workspace', ...none, workspace: 'connections' };
   if (screen === 'workspace')
@@ -155,6 +163,7 @@ function hashOf(
   workspace: WorkspaceSection = 'sources',
 ): string {
   if (screen === 'workspace') return workspace === 'sources' ? '#/workspace' : `#/workspace/${workspace}`;
+  if (screen === 'log') return '#/log';
   if (screen === 'query') return `#/query/${statement ? enc(statement) : ''}`;
   if (screen === 'globals') return global ? `#/globals/${enc(global)}` : '#/globals';
   if (screen === 'relations') {
@@ -566,6 +575,20 @@ function Workspace({ api }: { api: Api }) {
     if (history === 'push') pushHash(hashOf('query', id));
   };
 
+  /** ログで目立たせるもの（知らせやエラーの印から移ってきたとき） */
+  const [logTarget, setLogTarget] = useState<{ id?: string | null; q?: string } | null>(() => {
+    const h = parseHash();
+    return h.screen === 'log' && h.log ? { id: h.log } : null;
+  });
+  /** ログを開く（行の id が分かればその行を、分からなければ文で探す） */
+  const showLog = (target: { id?: string | null; q?: string }) => {
+    // 浮いている結果ビューがログにかぶらないよう、しまう
+    if (rv.open && !rv.minimized) rv.minimize();
+    setLogTarget({ ...target });
+    setScreen('log');
+    pushHash(target.id ? `#/log/${enc(target.id)}` : '#/log');
+  };
+
   /** 画面を切り替える（ブラウザの履歴に残す。画面の中で選んでいるものも残す） */
   const go = (next: Screen) => {
     setScreen(next);
@@ -580,6 +603,7 @@ function Workspace({ api }: { api: Api }) {
       if (h.screen === 'relations') setRelationLoc(h.relation);
       if (h.screen === 'globals') setGlobalFocus(h.global);
       if (h.screen === 'workspace') setWorkspaceSection(h.workspace);
+      if (h.screen === 'log') setLogTarget(h.log ? { id: h.log } : null);
       if (h.statement && h.statement !== selectedRef.current) select(h.statement, 'none');
     };
     window.addEventListener('popstate', onPop);
@@ -669,426 +693,439 @@ function Workspace({ api }: { api: Api }) {
 
   return (
     <StatementNames.Provider value={statementName}>
-      <div className="app">
-        <nav className="topbar">
-          <span className="brand">mybatis-pg</span>
-          {workspaceName && (
-            <button type="button" className="workspace-badge" title="ワークスペース" onClick={() => go('workspace')}>
-              {workspaceName}
-            </button>
-          )}
-          {SCREENS.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={screen === key ? 'nav selected' : 'nav'}
-              aria-current={screen === key ? 'page' : undefined}
-              onClick={() => go(key)}
-            >
-              {label}
-            </button>
-          ))}
-          <BusyIndicator />
-          <button
-            type="button"
-            className={rv.open && !rv.minimized ? 'nav result-view-toggle selected' : 'nav result-view-toggle'}
-            onClick={rv.toggle}
-            title="実行の結果と値の候補をまとめて見る"
-          >
-            結果ビュー{rv.fresh && <span className="badge warn">新しい結果</span>}
-          </button>
-        </nav>
-
-        {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
-        <div className="screen" hidden={screen !== 'query'}>
-          <div className={sidebarOpen ? 'layout' : 'layout sidebar-closed'} ref={panes.layout} style={panes.style}>
-            {!sidebarOpen ? (
-              <aside className="sidebar closed">
-                <button
-                  type="button"
-                  className="icon sidebar-toggle"
-                  title="一覧を開く"
-                  aria-label="statement の一覧を開く"
-                  onClick={() => toggleSidebar(true)}
-                >
-                  »
-                </button>
-              </aside>
-            ) : (
-              <aside className="sidebar">
-                <DraftList drafts={drafts} onOpen={editFile} hasStatements={(file) => statements.some((x) => x.file === file)} />
-                <StatementTree
-                  sources={sourceNames}
-                  onOpenWorkspace={() => go('workspace')}
-                  statements={statements}
-                  playgrounds={playgrounds}
-                  onCreatePlayground={createPlayground}
-                  selected={selected}
-                  onSelect={select}
-                  onEdit={editFile}
-                  drafted={drafts.files}
-                  onCollapse={() => toggleSidebar(false)}
-                />
-                <LoadErrors errors={loadErrors} opener={opener} />
-              </aside>
+      <ShowLogContext.Provider value={showLog}>
+        <div className="app">
+          <nav className="topbar">
+            <span className="brand">mybatis-pg</span>
+            {workspaceName && (
+              <button type="button" className="workspace-badge" title="ワークスペース" onClick={() => go('workspace')}>
+                {workspaceName}
+              </button>
             )}
-            {sidebarOpen && <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />}
+            {SCREENS.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={screen === key ? 'nav selected' : 'nav'}
+                aria-current={screen === key ? 'page' : undefined}
+                onClick={() => go(key)}
+              >
+                {label}
+              </button>
+            ))}
+            <BusyIndicator />
+            <button
+              type="button"
+              className={rv.open && !rv.minimized ? 'nav result-view-toggle selected' : 'nav result-view-toggle'}
+              onClick={rv.toggle}
+              title="実行の結果と値の候補をまとめて見る"
+            >
+              結果ビュー{rv.fresh && <span className="badge warn">新しい結果</span>}
+            </button>
+          </nav>
 
-            <main className="params">
-              <header className="panel-header">
-                <h2>パラメータ</h2>
-                {selected && (
-                  <code className="statement-id" title={selected}>
-                    {statementName(selected)}
-                  </code>
-                )}
-                {selected && stmtTables && stmtTables.length > 0 && (
-                  <PopoverButton label={`表 ${stmtTables.length}`} title="この statement が使う表">
-                    <h5>この statement が使う表</h5>
-                    <ul className="popover-sql">
-                      {stmtTables.map((t) => (
-                        <li key={t}>
-                          <button type="button" className="link" onClick={() => navigateRelation({ ...NO_RELATION, table: t })}>
-                            {t}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </PopoverButton>
-                )}
-              </header>
-              {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
-              {schemaError && <p className="error-text">{describe(schemaError)}</p>}
-              {selected && schema && (
-                <>
-                  <div className="tabs mode" role="tablist">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={paramTab === 'local'}
-                      className={paramTab === 'local' ? 'tab selected' : 'tab'}
-                      onClick={() => setParamTab('local')}
-                    >
-                      個別
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={paramTab === 'global'}
-                      className={paramTab === 'global' ? 'tab selected' : 'tab'}
-                      onClick={() => setParamTab('global')}
-                    >
-                      共通<span className="hint">（{applied.length}）</span>
-                    </button>
-                  </div>
-                  {paramTab === 'global' && target ? (
-                    <StatementGlobals globals={globals} statementId={target.id} onSettings={(id) => selectGlobal(id)} />
-                  ) : (
-                    <>
-                      {value && value.t === 'object' && value.fields.length > 0 && applied.length > 0 && !copying && (
-                        <div className="param-actions">
-                          <button
-                            type="button"
-                            className="link"
-                            onClick={() => setCopying(true)}
-                            title="個別の値を、この statement に適用されている共通パラメータにコピーする"
-                          >
-                            共通にコピー
-                          </button>
-                        </div>
-                      )}
-                      {copying && value && applied.length > 0 && (
-                        <CopyToGlobal key={selected} globals={globals} applied={applied} local={value} onClose={() => setCopying(false)} />
-                      )}
-                      {sourceNeeds.length > 0 && (
-                        <p className="hint source-needs">
-                          値の候補を出すには、
-                          {sourceNeeds.map((n) => `\${${n}}`).join('・')} に値を入れてください
-                        </p>
-                      )}
-                      <ParamTree
-                        schema={schema}
-                        value={value}
-                        onChange={changeValue}
-                        global={base}
-                        originOf={(path) => originAt(applied, path)}
-                        gen={gen}
-                        suggest={suggest}
-                        onFocusPath={(path) => selected && setInsertTarget({ statementId: selected, path })}
-                        flash={flash}
-                      />
-                      {warnings.length > 0 && (
-                        <ul className="notes warn">
-                          {warnings.map((w) => (
-                            <li key={w}>{w}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <JsonPanel value={value} onApply={changeValue} />
-                    </>
-                  )}
-                  <details className="json-panel">
-                    <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
-                    <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
-                  </details>
-                </>
+          {/* 切り替えても入力中の内容が消えないよう、画面は残しておいて隠す */}
+          <div className="screen" hidden={screen !== 'query'}>
+            <div className={sidebarOpen ? 'layout' : 'layout sidebar-closed'} ref={panes.layout} style={panes.style}>
+              {!sidebarOpen ? (
+                <aside className="sidebar closed">
+                  <button
+                    type="button"
+                    className="icon sidebar-toggle"
+                    title="一覧を開く"
+                    aria-label="statement の一覧を開く"
+                    onClick={() => toggleSidebar(true)}
+                  >
+                    »
+                  </button>
+                </aside>
+              ) : (
+                <aside className="sidebar">
+                  <DraftList drafts={drafts} onOpen={editFile} hasStatements={(file) => statements.some((x) => x.file === file)} />
+                  <StatementTree
+                    sources={sourceNames}
+                    onOpenWorkspace={() => go('workspace')}
+                    statements={statements}
+                    playgrounds={playgrounds}
+                    onCreatePlayground={createPlayground}
+                    selected={selected}
+                    onSelect={select}
+                    onEdit={editFile}
+                    drafted={drafts.files}
+                    onCollapse={() => toggleSidebar(false)}
+                  />
+                  <LoadErrors errors={loadErrors} opener={opener} />
+                </aside>
               )}
-            </main>
-            <Splitter pane="params" label="パラメータ欄の幅" panes={panes} />
+              {sidebarOpen && <Splitter pane="sidebar" label="statement 一覧の幅" panes={panes} />}
 
-            <section className="result">
-              <div className="tabs" role="tablist">
-                {(
-                  [
-                    ['template', 'テンプレート'],
-                    ['sql', 'SQL'],
-                    ['execute', '実行'],
-                    ['explain', 'EXPLAIN'],
-                    ['subquery', 'サブクエリ'],
-                  ] as const
-                )
-                  .filter(([key]) => key !== 'subquery' || hasParts)
-                  .map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      aria-selected={shown === key}
-                      className={shown === key ? 'tab selected' : 'tab'}
-                      onClick={() => {
-                        setTab(key);
-                        saveTab(key);
-                      }}
-                    >
-                      {label}
-                      {key === 'template' && draftP && (
-                        <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
-                          ●
-                        </span>
-                      )}
-                    </button>
-                  ))}
-              </div>
-
-              {shown === 'sql' && (
-                <>
-                  {numberIssues.length > 0 && (
-                    <ul className="notes error">
-                      {numberIssues.map((i) => (
-                        <li key={i.path}>
-                          <code>{i.path}</code>: {i.message}
-                        </li>
-                      ))}
-                    </ul>
+              <main className="params">
+                <header className="panel-header">
+                  <h2>パラメータ</h2>
+                  {selected && (
+                    <code className="statement-id" title={selected}>
+                      {statementName(selected)}
+                    </code>
                   )}
-                  {missing.length > 0 && (
-                    <div className="notes info">
-                      未設定の項目（NULL として扱われます）:{' '}
-                      {missing.map((m) => (
-                        <code key={m}>{m}</code>
-                      ))}
-                    </div>
-                  )}
-                  {renderError && <pre className="render-error">{describe(renderError)}</pre>}
-                  {resolved.generated.length > 0 && (
-                    <div className="notes info generated">
-                      式で作った値:
-                      <ul>
-                        {resolved.generated.map((g) => (
-                          <li key={g.path}>
-                            <code>{g.path}</code> <code className="source">{g.source}</code> → <code>{g.result}</code>
+                  {selected && stmtTables && stmtTables.length > 0 && (
+                    <PopoverButton label={`表 ${stmtTables.length}`} title="この statement が使う表">
+                      <h5>この statement が使う表</h5>
+                      <ul className="popover-sql">
+                        {stmtTables.map((t) => (
+                          <li key={t}>
+                            <button type="button" className="link" onClick={() => navigateRelation({ ...NO_RELATION, table: t })}>
+                              {t}
+                            </button>
                           </li>
                         ))}
                       </ul>
-                    </div>
+                    </PopoverButton>
                   )}
-                  {result && !renderError && <RenderResult result={result} />}
-                  {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
-                </>
-              )}
-
-              {/* 実行結果が消えないよう、切り替えても実行のタブは残しておく */}
-              <div hidden={shown !== 'execute'}>
-                {selected && schema ? (
-                  <ExecutePanel
-                    key={selected}
-                    conn={conn}
-                    statementId={selected}
-                    value={sent}
-                    draft={draftP}
-                    ready={numberIssues.length === 0 && !renderError}
-                    onApiError={handleError}
-                    onResult={(id) => id && rv.showHistory(id)}
-                  />
-                ) : (
-                  <p className="hint">左の一覧から statement を選んでください。</p>
+                </header>
+                {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+                {schemaError && <ErrorMark error={describe(schemaError) ?? ''} />}
+                {selected && schema && (
+                  <>
+                    <div className="tabs mode" role="tablist">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={paramTab === 'local'}
+                        className={paramTab === 'local' ? 'tab selected' : 'tab'}
+                        onClick={() => setParamTab('local')}
+                      >
+                        個別
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={paramTab === 'global'}
+                        className={paramTab === 'global' ? 'tab selected' : 'tab'}
+                        onClick={() => setParamTab('global')}
+                      >
+                        共通<span className="hint">（{applied.length}）</span>
+                      </button>
+                    </div>
+                    {paramTab === 'global' && target ? (
+                      <StatementGlobals globals={globals} statementId={target.id} onSettings={(id) => selectGlobal(id)} />
+                    ) : (
+                      <>
+                        {value && value.t === 'object' && value.fields.length > 0 && applied.length > 0 && !copying && (
+                          <div className="param-actions">
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => setCopying(true)}
+                              title="個別の値を、この statement に適用されている共通パラメータにコピーする"
+                            >
+                              共通にコピー
+                            </button>
+                          </div>
+                        )}
+                        {copying && value && applied.length > 0 && (
+                          <CopyToGlobal
+                            key={selected}
+                            globals={globals}
+                            applied={applied}
+                            local={value}
+                            onClose={() => setCopying(false)}
+                          />
+                        )}
+                        {sourceNeeds.length > 0 && (
+                          <p className="hint source-needs">
+                            値の候補を出すには、
+                            {sourceNeeds.map((n) => `\${${n}}`).join('・')} に値を入れてください
+                          </p>
+                        )}
+                        <ParamTree
+                          schema={schema}
+                          value={value}
+                          onChange={changeValue}
+                          global={base}
+                          originOf={(path) => originAt(applied, path)}
+                          gen={gen}
+                          suggest={suggest}
+                          onFocusPath={(path) => selected && setInsertTarget({ statementId: selected, path })}
+                          flash={flash}
+                        />
+                        {warnings.length > 0 && (
+                          <ul className="notes warn">
+                            {warnings.map((w) => (
+                              <li key={w}>{w}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <JsonPanel value={value} onApply={changeValue} />
+                      </>
+                    )}
+                    <details className="json-panel">
+                      <summary>実際に渡す値（共通パラメータを重ねたもの）</summary>
+                      <pre className="sql">{toJson(sent ?? { t: 'object', fields: [] })}</pre>
+                    </details>
+                  </>
                 )}
-              </div>
+              </main>
+              <Splitter pane="params" label="パラメータ欄の幅" panes={panes} />
 
-              {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
-              <div hidden={shown !== 'subquery'}>
-                {hasParts && selected && result && (
-                  <PartsPanel
-                    key={selected}
-                    conn={conn}
-                    statementId={selected}
-                    value={sent}
-                    draft={draftP}
-                    rendered={result}
-                    gen={gen}
-                    missing={missing}
-                    onApiError={handleError}
-                    onResult={(id) => rv.showHistory(id)}
-                  />
+              <section className="result">
+                <div className="tabs" role="tablist">
+                  {(
+                    [
+                      ['template', 'テンプレート'],
+                      ['sql', 'SQL'],
+                      ['execute', '実行'],
+                      ['explain', 'EXPLAIN'],
+                      ['subquery', 'サブクエリ'],
+                    ] as const
+                  )
+                    .filter(([key]) => key !== 'subquery' || hasParts)
+                    .map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={shown === key}
+                        className={shown === key ? 'tab selected' : 'tab'}
+                        onClick={() => {
+                          setTab(key);
+                          saveTab(key);
+                        }}
+                      >
+                        {label}
+                        {key === 'template' && draftP && (
+                          <span className="draft-mark" title="編集中（ファイルには保存していません）" aria-label="編集中">
+                            ●
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                </div>
+
+                {shown === 'sql' && (
+                  <>
+                    {numberIssues.length > 0 && (
+                      <ul className="notes error">
+                        {numberIssues.map((i) => (
+                          <li key={i.path}>
+                            <code>{i.path}</code>: {i.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {missing.length > 0 && (
+                      <div className="notes info">
+                        未設定の項目（NULL として扱われます）:{' '}
+                        {missing.map((m) => (
+                          <code key={m}>{m}</code>
+                        ))}
+                      </div>
+                    )}
+                    {renderError && <ErrorMark error={describe(renderError) ?? ''} label="SQL を組み立てられません" />}
+                    {resolved.generated.length > 0 && (
+                      <div className="notes info generated">
+                        式で作った値:
+                        <ul>
+                          {resolved.generated.map((g) => (
+                            <li key={g.path}>
+                              <code>{g.path}</code> <code className="source">{g.source}</code> → <code>{g.result}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {result && !renderError && <RenderResult result={result} />}
+                    {!selected && <p className="hint">左の一覧から statement を選んでください。</p>}
+                  </>
                 )}
-              </div>
 
-              {/* 取得した計画が消えないよう、切り替えても EXPLAIN のタブは残しておく */}
-              <div hidden={shown !== 'explain'}>
-                {selected && schema ? (
-                  <ExplainPanel
-                    key={selected}
-                    conn={conn}
-                    statementId={selected}
-                    value={sent}
-                    draft={draftP}
-                    ready={numberIssues.length === 0 && !renderError}
-                    onApiError={handleError}
-                  />
-                ) : (
-                  <p className="hint">左の一覧から statement を選んでください。</p>
-                )}
-              </div>
-
-              {/* 編集中の位置や取り消しの履歴が消えないよう、切り替えてもテンプレートのタブは残しておく */}
-              <div hidden={tab !== 'template'}>
-                {templateSeen && looseFile ? (
-                  <FileEditor
-                    key={looseFile}
-                    api={api}
-                    statementId=""
-                    file={looseFile}
-                    drafts={drafts}
-                    generation={generation}
-                    onApiError={handleError}
-                    opener={opener}
-                    visible={tab === 'template'}
-                    playground={playgroundOf(looseFile)}
-                    readOnly={readOnlyFile(looseFile)}
-                  />
-                ) : selected ? (
-                  !templateSeen ? null : editorFile ? (
-                    <FileEditor
-                      api={api}
+                {/* 実行結果が消えないよう、切り替えても実行のタブは残しておく */}
+                <div hidden={shown !== 'execute'}>
+                  {selected && schema ? (
+                    <ExecutePanel
+                      key={selected}
+                      conn={conn}
                       statementId={selected}
-                      file={editorFile}
+                      value={sent}
+                      draft={draftP}
+                      ready={numberIssues.length === 0 && !renderError}
+                      onApiError={handleError}
+                      onResult={(id) => id && rv.showHistory(id)}
+                    />
+                  ) : (
+                    <p className="hint">左の一覧から statement を選んでください。</p>
+                  )}
+                </div>
+
+                {/* 実行した結果が消えないよう、切り替えてもサブクエリのタブは残しておく */}
+                <div hidden={shown !== 'subquery'}>
+                  {hasParts && selected && result && (
+                    <PartsPanel
+                      key={selected}
+                      conn={conn}
+                      statementId={selected}
+                      value={sent}
+                      draft={draftP}
+                      rendered={result}
+                      gen={gen}
+                      missing={missing}
+                      onApiError={handleError}
+                      onResult={(id) => rv.showHistory(id)}
+                    />
+                  )}
+                </div>
+
+                {/* 取得した計画が消えないよう、切り替えても EXPLAIN のタブは残しておく */}
+                <div hidden={shown !== 'explain'}>
+                  {selected && schema ? (
+                    <ExplainPanel
+                      key={selected}
+                      conn={conn}
+                      statementId={selected}
+                      value={sent}
+                      draft={draftP}
+                      ready={numberIssues.length === 0 && !renderError}
+                      onApiError={handleError}
+                    />
+                  ) : (
+                    <p className="hint">左の一覧から statement を選んでください。</p>
+                  )}
+                </div>
+
+                {/* 編集中の位置や取り消しの履歴が消えないよう、切り替えてもテンプレートのタブは残しておく */}
+                <div hidden={tab !== 'template'}>
+                  {templateSeen && looseFile ? (
+                    <FileEditor
+                      key={looseFile}
+                      api={api}
+                      statementId=""
+                      file={looseFile}
                       drafts={drafts}
                       generation={generation}
                       onApiError={handleError}
                       opener={opener}
                       visible={tab === 'template'}
-                      playground={playgroundOf(editorFile)}
-                      readOnly={readOnlyFile(editorFile)}
-                      join={joinFocus}
+                      playground={playgroundOf(looseFile)}
+                      readOnly={readOnlyFile(looseFile)}
                     />
+                  ) : selected ? (
+                    !templateSeen ? null : editorFile ? (
+                      <FileEditor
+                        api={api}
+                        statementId={selected}
+                        file={editorFile}
+                        drafts={drafts}
+                        generation={generation}
+                        onApiError={handleError}
+                        opener={opener}
+                        visible={tab === 'template'}
+                        playground={playgroundOf(editorFile)}
+                        readOnly={readOnlyFile(editorFile)}
+                        join={joinFocus}
+                      />
+                    ) : (
+                      <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
+                    )
                   ) : (
-                    <TemplateView api={api} statementId={selected} generation={generation} onApiError={handleError} opener={opener} />
-                  )
-                ) : (
-                  <p className="hint">左の一覧から statement を選んでください。</p>
-                )}
-              </div>
-            </section>
+                    <p className="hint">左の一覧から statement を選んでください。</p>
+                  )}
+                </div>
+              </section>
+            </div>
           </div>
-        </div>
 
-        <div className="screen" hidden={screen !== 'globals'}>
-          <GlobalsScreen
-            api={api}
-            globals={globals}
-            generation={generation}
-            gen={gen}
-            renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
-            selectedId={globalFocus}
-            onSelect={selectGlobal}
-          />
-        </div>
+          <div className="screen" hidden={screen !== 'globals'}>
+            <GlobalsScreen
+              api={api}
+              globals={globals}
+              generation={generation}
+              gen={gen}
+              renderJson={(v, apply) => <JsonPanel value={v} onApply={apply} />}
+              selectedId={globalFocus}
+              onSelect={selectGlobal}
+            />
+          </div>
 
-        <div className="screen scroll" hidden={screen !== 'relations'}>
-          <RelationsScreen
+          <div className="screen scroll" hidden={screen !== 'relations'}>
+            <RelationsScreen
+              api={api}
+              conn={conn}
+              globalSets={globals.sets}
+              loc={relationLoc}
+              onNavigate={navigateRelation}
+              active={screen === 'relations'}
+              onOpen={(id, join) => {
+                setScreen('query');
+                select(id);
+                // 結合の根拠から開いたら、テンプレートでその場所を示す
+                setJoinFocus(join ?? null);
+                if (join) setTab('template');
+              }}
+              onShowResult={(id) => rv.showHistory(id)}
+            />
+          </div>
+
+          <div className="screen scroll" hidden={screen !== 'log'}>
+            <LogScreen api={api} active={screen === 'log'} target={logTarget} />
+          </div>
+
+          <div className="screen scroll" hidden={screen !== 'workspace'}>
+            <WorkspaceScreen
+              api={api}
+              conn={conn}
+              section={workspaceSection}
+              onSection={navigateWorkspace}
+              active={screen === 'workspace'}
+              onOpened={() => {
+                // 別のワークスペースは、statement・接続先・共通パラメータなどがすべて違うので、画面を読み込み直す
+                window.location.hash = '#/workspace';
+                window.location.reload();
+              }}
+              onSaved={conn.reload}
+            />
+          </div>
+
+          <ResultView
+            rv={rv}
             api={api}
-            conn={conn}
-            globalSets={globals.sets}
-            loc={relationLoc}
-            onNavigate={navigateRelation}
-            active={screen === 'relations'}
-            onOpen={(id, join) => {
+            target={
+              insertTarget && insertTarget.statementId === selected
+                ? `${pathLabel(insertTarget.path)}（${statementName(insertTarget.statementId)}）`
+                : null
+            }
+            onClearTarget={() => setInsertTarget(null)}
+            onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
+            onOpenStatement={(id) => {
               setScreen('query');
               select(id);
-              // 結合の根拠から開いたら、テンプレートでその場所を示す
-              setJoinFocus(join ?? null);
-              if (join) setTab('template');
             }}
-            onShowResult={(id) => rv.showHistory(id)}
-          />
-        </div>
-
-        <div className="screen scroll" hidden={screen !== 'workspace'}>
-          <WorkspaceScreen
-            api={api}
-            conn={conn}
-            section={workspaceSection}
-            onSection={navigateWorkspace}
-            active={screen === 'workspace'}
-            onOpened={() => {
-              // 別のワークスペースは、statement・接続先・共通パラメータなどがすべて違うので、画面を読み込み直す
-              window.location.hash = '#/workspace';
-              window.location.reload();
+            onRestoreParams={(id, parameters) => {
+              // 型付きの JSON をパラメータの値にして保存し、その statement を開く（開くときに保存した値を読む）
+              const v = parameters == null ? undefined : fromJson(JSON.stringify(parameters));
+              saveParams(id, v);
+              setScreen('query');
+              if (id === selected) setValue(v);
+              else select(id);
             }}
-            onSaved={conn.reload}
+            renderCandidate={(c, visible) => (
+              <CandidatePane
+                key={c.key}
+                conn={conn}
+                columns={c.columns}
+                relations={c.relations}
+                onOpenRelation={openRelation}
+                paramName={c.paramName}
+                onOpenRelationName={(name) => navigateRelation({ ...NO_RELATION, view: 'names', name })}
+                list={c.list}
+                current={c.statementId === selected ? getAt(effective, c.path) : undefined}
+                visible={visible}
+                onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
+                onRelated={rv.showRelated}
+              />
+            )}
           />
+          <Notices />
         </div>
-
-        <ResultView
-          rv={rv}
-          api={api}
-          target={
-            insertTarget && insertTarget.statementId === selected
-              ? `${pathLabel(insertTarget.path)}（${statementName(insertTarget.statementId)}）`
-              : null
-          }
-          onClearTarget={() => setInsertTarget(null)}
-          onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
-          onOpenStatement={(id) => {
-            setScreen('query');
-            select(id);
-          }}
-          onRestoreParams={(id, parameters) => {
-            // 型付きの JSON をパラメータの値にして保存し、その statement を開く（開くときに保存した値を読む）
-            const v = parameters == null ? undefined : fromJson(JSON.stringify(parameters));
-            saveParams(id, v);
-            setScreen('query');
-            if (id === selected) setValue(v);
-            else select(id);
-          }}
-          renderCandidate={(c, visible) => (
-            <CandidatePane
-              key={c.key}
-              conn={conn}
-              columns={c.columns}
-              relations={c.relations}
-              onOpenRelation={openRelation}
-              paramName={c.paramName}
-              onOpenRelationName={(name) => navigateRelation({ ...NO_RELATION, view: 'names', name })}
-              list={c.list}
-              current={c.statementId === selected ? getAt(effective, c.path) : undefined}
-              visible={visible}
-              onCell={insertTarget && insertTarget.statementId === selected ? insertCell : undefined}
-              onRelated={rv.showRelated}
-            />
-          )}
-        />
-      </div>
+      </ShowLogContext.Provider>
     </StatementNames.Provider>
   );
 }
@@ -1635,7 +1672,7 @@ function TemplateView({
     };
   }, [api, statementId, generation]);
 
-  if (error) return <pre className="render-error">{error}</pre>;
+  if (error) return <ErrorMark error={error} />;
   if (!template) return null;
   const lineCount = template.xml.split('\n').length;
   return (

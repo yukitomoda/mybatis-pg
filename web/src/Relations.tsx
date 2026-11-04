@@ -1,4 +1,5 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
+import { ErrorMark } from './ErrorMark';
 import { useStatementName } from './statementNames';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { JoinFocus } from './joinMarks';
@@ -404,7 +405,7 @@ export function RelationsScreen({
                 </label>
               )}
             </div>
-            {error && <p className="error-text">{error}</p>}
+            {error && <ErrorMark error={error} />}
             {result?.sharedFrom && (
               <p className="hint">
                 {conn.connections.find((c) => c.id === result.sharedFrom)?.name ?? result.sharedFrom} の結果を共有しています
@@ -1382,7 +1383,7 @@ function TraceView({ statement, a, b }: { statement: string; a: string; b: strin
   useEffect(() => {
     load?.(statement, a, b).then(setTraces, (e) => setError(message(e)));
   }, [statement, a, b]);
-  if (error) return <p className="error-text">{error}</p>;
+  if (error) return <ErrorMark error={error} />;
   if (!traces) return <p className="hint">読み込んでいます…</p>;
   if (traces.length === 0) return <p className="hint">計画の中に見つかりません</p>;
   return (

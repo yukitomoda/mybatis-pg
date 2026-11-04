@@ -3737,3 +3737,146 @@ div.relations-comment {
 .sql-group .popover-sql {
   margin-top: 0.1rem;
 }
+
+/* エラーの知らせ（画面の右下） */
+.notices {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: min(480px, calc(100vw - 32px));
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--error);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+}
+
+.notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 画面の中のエラーの印（文はマウスを乗せると出る） */
+.error-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--error);
+  font-size: 13px;
+}
+
+/* ログ */
+.log-screen .panel-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.log-screen .panel-header label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 13px;
+}
+
+.log-filter {
+  width: 18rem;
+  max-width: 100%;
+}
+
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.log-table td {
+  padding: 0.2rem 0.5rem 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.log-row {
+  cursor: pointer;
+}
+
+.log-row:hover {
+  background: var(--code-bg);
+}
+
+.log-row.focus {
+  background: var(--warn-bg);
+}
+
+.log-time {
+  width: 7.5rem;
+  font-family: var(--mono);
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.log-src {
+  width: 2.8rem;
+}
+
+.log-conn {
+  width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.log-kind {
+  width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-ms {
+  width: 4.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.log-text,
+.log-err {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-text.full,
+.log-err.full {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-err {
+  color: var(--error);
+}
+
+.log-values {
+  font-family: var(--mono);
+  color: var(--muted);
+}

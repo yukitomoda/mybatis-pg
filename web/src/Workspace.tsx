@@ -1,5 +1,6 @@
 // ワークスペース: 開いているワークスペースの名前とソース（プロジェクト・JAR・mapper のファイル）を変え、
 // ほかのワークスペースを開いたり、作ったり、消したりする
+import { ErrorMark } from './ErrorMark';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, WorkspaceSnapshot, WorkspaceSource } from './api';
 import type { Connections } from './Execution';
@@ -130,16 +131,13 @@ export function WorkspaceScreen({
     setNotice(null);
   };
 
-  if (!snap)
-    return (
-      <div className="workspace page">{error ? <p className="error-text">{error}</p> : <p className="hint">読み込んでいます…</p>}</div>
-    );
+  if (!snap) return <div className="workspace page">{error ? <ErrorMark error={error} /> : <p className="hint">読み込んでいます…</p>}</div>;
   if (!snap.current) return <div className="workspace page">ワークスペースを使っていません。</div>;
   const others = snap.workspaces.filter((w) => !w.current);
 
   const messages = (
     <>
-      {error && <pre className="render-error">{error}</pre>}
+      {error && <ErrorMark error={error} />}
       {notice && <p className="ok-text">{notice}</p>}
     </>
   );
@@ -466,7 +464,7 @@ function SchemasSection({
         <ConnectionPicker conn={conn} />
       </header>
       {messages}
-      {error && <pre className="render-error">{error}</pre>}
+      {error && <ErrorMark error={error} />}
       <div className="workspace-schemas-mode">
         <label>
           <input

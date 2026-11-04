@@ -1,5 +1,6 @@
 // 関連データ: ある行から、リレーションをたどって関連する行を集める（結果ビューの中に出す）。
 // 起点の親（その行が参照する行）は自動で集め、ほかは 1 段ずつ押してたどる。たどった 1 歩ごとに箱を作り、起点を中心にした図で見る
+import { ErrorMark } from './ErrorMark';
 import { useDragScroll } from './dragScroll';
 import { NAME_FONT, fitText } from './textFit';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -322,7 +323,7 @@ export function RelatedPane({
         </h3>
         {entry.busy && <span className="hint">集めています…</span>}
       </div>
-      {entry.error && <pre className="render-error">{entry.error}</pre>}
+      {entry.error && <ErrorMark error={entry.error} />}
       <div className="related-body">
         <RelatedGraph
           nodes={entry.nodes}

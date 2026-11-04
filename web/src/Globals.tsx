@@ -1,4 +1,5 @@
 // 共通パラメータ（複数の statement で共有する値の集まり）: 状態、共通パラメータの画面、クエリ画面の共通タブ
+import { ErrorMark } from './ErrorMark';
 import { useStatementName } from './statementNames';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -366,7 +367,7 @@ export function GlobalsScreen({
           )}
         />
         {sets.length === 0 && <p className="hint">まだありません。「新規」で作ってください。</p>}
-        {globals.error && <p className="error-text">{globals.error}</p>}
+        {globals.error && <ErrorMark error={globals.error} />}
       </aside>
       <SideSplitter label="共通パラメータの一覧の幅" side={side} />
 

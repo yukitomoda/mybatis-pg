@@ -26,13 +26,13 @@ class DbLogTest {
   @Test
   void 古い日のファイルを消す(@TempDir Path dir) throws Exception {
     LocalDate today = LocalDate.of(2026, 10, 27);
-    for (String name : new String[] {"db-2026-10-27.log", "db-2026-10-21.log", "db-2026-10-20.log", "db-2025-01-01.log", "other.log"}) {
+    for (String name : new String[] {"db-2026-10-27.log", "db-2026-10-21.jsonl", "db-2026-10-20.log", "db-2025-01-01.jsonl", "other.log"}) {
       Files.write(dir.resolve(name), new byte[0]);
     }
     // 7 日（10/21〜10/27）を残す
     assertEquals(2, DbLog.deleteOld(dir, today, 7));
     assertTrue(Files.exists(dir.resolve("db-2026-10-27.log")));
-    assertTrue(Files.exists(dir.resolve("db-2026-10-21.log")));
+    assertTrue(Files.exists(dir.resolve("db-2026-10-21.jsonl")));
     assertTrue(Files.exists(dir.resolve("other.log")));
     assertTrue(!Files.exists(dir.resolve("db-2026-10-20.log")));
   }
@@ -62,15 +62,25 @@ class DbLogTest {
       DbLog.event("test", "おわり");
       DbLog.stop();
     }
-    String log = new String(Files.readAllBytes(dir.resolve("db-" + LocalDate.now() + ".log")), StandardCharsets.UTF_8);
-    assertTrue(log.matches("(?s).*\\[#\\d+ test\\] connect 5ms\n.*"), log);
-    assertTrue(log.contains("setAutoCommit false"), log);
+    java.util.List<com.google.gson.JsonObject> lines = new java.util.ArrayList<>();
+    for (String l : Files.readAllLines(dir.resolve("db-" + LocalDate.now() + ".jsonl"), StandardCharsets.UTF_8)) {
+      lines.add(com.google.gson.JsonParser.parseString(l).getAsJsonObject());
+    }
+    String all = lines.toString();
+    com.google.gson.JsonObject connect = lines.get(0);
+    assertEquals("connect", connect.get("kind").getAsString());
+    assertEquals("test", connect.get("conn").getAsString());
+    assertEquals(5, connect.get("ms").getAsInt());
+    assertEquals("画面", connect.get("src").getAsString());
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("setAutoCommit false")), all);
     // 改行は 1 つの空白にする
-    assertTrue(log.matches("(?s).*\\[#\\d+ test\\] execute \\d+ms SELECT 1 AS one\n.*"), log);
-    assertTrue(log.matches("(?s).*query \\d+ms SELECT \\?::int \\+ \\?::int \\| 値: \\[2, 3\\]\n.*"), log);
-    assertTrue(log.matches("(?s).*query \\d+ms エラー \\(42P01\\) .*no_such_table_for_log.*"), log);
-    assertTrue(log.matches("(?s).*\\] rollback \\d+ms\n.*"), log);
-    assertTrue(log.matches("(?s).*\\] close \\d+ms\n.*"), log);
-    assertTrue(log.contains("[test] おわり"), log);
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("execute") && e.get("sql").getAsString().equals("SELECT 1 AS one")), all);
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("query") && e.has("values")
+        && e.get("values").toString().equals("[\"2\",\"3\"]")), all);
+    assertTrue(lines.stream().anyMatch(e -> e.has("err") && e.get("err").getAsString().contains("no_such_table_for_log")
+        && e.get("state").getAsString().equals("42P01")), all);
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("rollback")), all);
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("close")), all);
+    assertTrue(lines.stream().anyMatch(e -> e.get("kind").getAsString().equals("event") && e.get("msg").getAsString().equals("おわり")), all);
   }
 }

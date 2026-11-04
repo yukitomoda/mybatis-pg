@@ -758,6 +758,11 @@ public final class ToolServer {
           analyzeRelations(ex);
         }
         break;
+      case "/api/log":
+        if (requireMethod(ex, method, "POST")) {
+          log(ex);
+        }
+        break;
       case "/api/results/rerun":
         if (requireMethod(ex, method, "POST")) {
           rerun(ex);
@@ -1424,6 +1429,33 @@ public final class ToolServer {
       return;
     }
     execute(ex, req);
+  }
+
+  /** 1 回のログの検索で読む行数の上限（解析で何千行も書いた日でも、待たせすぎないように） */
+  private static final int LOG_MAX_SCAN = 200_000;
+
+  /**
+   * ログ（DB への操作と、画面の操作で起きたエラー）を新しい順に読む:
+   * {"cursor"?: 続きの位置, "focus"?: この行から, "limit"?, "errors"?: エラーだけ, "analysis"?: 解析も含める, "q"?: 文字} →
+   * {"entries", "next", "capped", "scanned"}
+   */
+  private void log(HttpExchange ex) throws IOException {
+    JsonObject req = readJson(ex);
+    if (req == null) {
+      return;
+    }
+    LogReader.Query q = new LogReader.Query();
+    q.errorsOnly = req.has("errors") && req.get("errors").getAsBoolean();
+    q.includeAnalysis = req.has("analysis") && req.get("analysis").getAsBoolean();
+    q.text = string(req, "q");
+    int limit = req.has("limit") ? Math.max(1, Math.min(500, req.get("limit").getAsInt())) : 100;
+    String cursor = string(req, "cursor");
+    String focus = string(req, "focus");
+    if (focus != null && focus.lastIndexOf(':') > 0) {
+      // その行を先頭に（その行より 1 バイト後ろから読むと、その行から読める）
+      cursor = focus.substring(0, focus.lastIndexOf(':') + 1) + (Long.parseLong(focus.substring(focus.lastIndexOf(':') + 1)) + 1);
+    }
+    sendJson(ex, 200, LogReader.read(DbLog.dir(), cursor, q, limit, LOG_MAX_SCAN));
   }
 
   /**
@@ -2556,6 +2588,8 @@ public final class ToolServer {
     SqlRenderer renderer = workspace.renderer();
     List<String> ids = new ArrayList<>(renderer.statementIds());
     Thread t = new Thread(() -> {
+      // 解析の操作は、ログで「解析」として分ける
+      DbLog.origin("解析");
       try (java.sql.Connection c = connections.open(connectionId)) {
         synchronized (store) {
           Relations.analyze(renderer, ids, parameters, c, store, progress);
@@ -3334,6 +3368,16 @@ public final class ToolServer {
   }
 
   private static void sendJson(HttpExchange ex, int status, Object body) throws IOException {
+    // 画面の操作で起きたエラーは、ログに書き、画面からその行へ移れるよう、行の id を返す
+    if (status >= 400 && body instanceof Map && ((Map<?, ?>) body).get("error") != null
+        && !"/api/log".equals(ex.getRequestURI().getPath())) {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> m = (Map<String, Object>) body;
+      String id = DbLog.apiError(ex.getRequestURI().getPath(), status, String.valueOf(m.get("error")));
+      if (id != null) {
+        m.put("logId", id);
+      }
+    }
     ex.getResponseHeaders().set("Cache-Control", "no-store");
     send(ex, status, "application/json; charset=utf-8", Json.GSON.toJson(body).getBytes(StandardCharsets.UTF_8));
   }

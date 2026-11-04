@@ -1,6 +1,5 @@
 package mybatispg;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
@@ -29,23 +28,26 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * DB への操作のログ。接続・切断、送ったすべての SQL（PreparedStatement の値も）、コミット・ロールバックなどを、
- * かかった時間とエラーと一緒に 1 行ずつ書く。遅いときや止まったときに、何をしていたかを追えるようにする。
+ * DB への操作と、画面の操作で起きたエラーのログ。接続・切断、送ったすべての SQL（PreparedStatement の値も）、コミット・
+ * ロールバックなどを、かかった時間とエラーと一緒に 1 件 1 行の JSON で書く。遅いときや止まったときに、何をしていたかを追えるようにし、
+ * 画面の「ログ」で読む（{@link LogReader}）。
  *
- * <p>~/.mybatis-pg/logs/db-YYYY-MM-DD.log に日ごとに書き、起動したときと日が変わったときに、古い日のファイルを消す。
- * SQL には値がそのまま入るので、ファイルは自分だけが読めるようにする。
+ * <p>~/.mybatis-pg/logs/db-YYYY-MM-DD.jsonl に日ごとに書き、起動したときと日が変わったときに、古い日のファイルを消す
+ * （前の版の db-YYYY-MM-DD.log も同じく消す）。SQL には値がそのまま入るので、ファイルは自分だけが読めるようにする。
  * <pre>
- * 2026-10-27 10:15:03.123 [#12 project:default] query 35ms SELECT ... | 値: [1, x]
- * 2026-10-27 10:15:03.200 [#12 project:default] rollback 1ms
- * 2026-10-27 10:15:04.000 [relations] 途中の結果を保存（50 件）
+ * {"t":"2026-10-27 10:15:03.123","src":"画面","kind":"query","conn":"project:default","n":12,"ms":35,"sql":"SELECT ...","values":["1","x"]}
+ * {"t":"...","src":"解析","kind":"execute","conn":"...","n":13,"ms":2,"sql":"...","err":"...","state":"42P01"}
+ * {"t":"...","src":"解析","kind":"event","who":"relations","msg":"途中の結果を保存（50 件）"}
+ * {"t":"...","src":"画面","kind":"api","path":"/api/execute","status":422,"err":"..."}
  * </pre>
+ * 1 件の id は「ファイル名:その行の先頭のバイト位置」。
  */
 final class DbLog {
 
   /** SQL を切る長さ */
   private static final int MAX_SQL = 20_000;
   private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-  private static final Pattern FILE = Pattern.compile("db-(\\d{4}-\\d{2}-\\d{2})\\.log");
+  static final Pattern FILE = Pattern.compile("db-(\\d{4}-\\d{2}-\\d{2})\\.(log|jsonl)");
   /** 時間を測ってログに書く Connection の操作 */
   private static final Set<String> CONNECTION_OPS = new HashSet<>(Arrays.asList(
       "commit", "rollback", "setAutoCommit", "setSavepoint", "releaseSavepoint", "close", "setReadOnly", "setTransactionIsolation"));
@@ -55,8 +57,18 @@ final class DbLog {
   private static Path dir;
   private static int keepDays;
   private static LocalDate today;
-  private static BufferedWriter out;
+  private static java.io.OutputStream out;
+  /** 今のファイルの名前と、次に書く行の先頭の位置 */
+  private static String fileName;
+  private static long size;
   private static final AtomicInteger SEQ = new AtomicInteger();
+  /** どこからの操作か（解析のスレッドでは「解析」。それ以外は「画面」） */
+  private static final ThreadLocal<String> ORIGIN = ThreadLocal.withInitial(() -> "画面");
+
+  /** このスレッドの操作を、どこからの操作として書くか（解析のスレッドで「解析」にする） */
+  static void origin(String source) {
+    ORIGIN.set(source);
+  }
 
   private DbLog() {
   }
@@ -91,26 +103,75 @@ final class DbLog {
     return dir != null;
   }
 
-  /** アプリの動き（解析の開始・途中の保存など）を書く */
-  static void event(String who, String message) {
-    write("[" + who + "] " + message);
+  /** ログのディレクトリ（書いていなければ null） */
+  static synchronized Path dir() {
+    return dir;
   }
 
-  private static synchronized void write(String line) {
+  /** アプリの動き（解析の開始・途中の保存など）を書く */
+  static void event(String who, String message) {
+    com.google.gson.JsonObject e = entry("event");
+    e.addProperty("who", who);
+    e.addProperty("msg", message);
+    write(e);
+  }
+
+  /** 画面の操作で起きたエラー（API がエラーを返した）を書く。書いた行の id を返す（書いていなければ null） */
+  static synchronized String apiError(String path, int status, String message) {
+    // 入力のたびに同じエラーになる（SQL を組み立てられないなど）ときは、続けて書かない
+    long now = System.currentTimeMillis();
+    String key = path + "\u0000" + message;
+    if (key.equals(lastApiError) && now - lastApiErrorAt < 30_000 && lastApiErrorId != null) {
+      lastApiErrorAt = now;
+      return lastApiErrorId;
+    }
+    com.google.gson.JsonObject e = entry("api");
+    e.addProperty("path", path);
+    e.addProperty("status", status);
+    e.addProperty("err", message);
+    lastApiError = key;
+    lastApiErrorAt = now;
+    lastApiErrorId = write(e);
+    return lastApiErrorId;
+  }
+
+  /** 最後に書いた、画面の操作のエラー（同じものを続けて書かないため） */
+  private static String lastApiError;
+  private static long lastApiErrorAt;
+  private static String lastApiErrorId;
+
+  private static com.google.gson.JsonObject entry(String kind) {
+    com.google.gson.JsonObject e = new com.google.gson.JsonObject();
+    e.addProperty("kind", kind);
+    return e;
+  }
+
+  /** 1 件を 1 行で書く。書いた行の id（ファイル名:位置）を返す。書いていなければ null */
+  private static synchronized String write(com.google.gson.JsonObject entry) {
     if (dir == null) {
-      return;
+      return null;
     }
     LocalDateTime now = LocalDateTime.now();
     try {
       if (!now.toLocalDate().equals(today)) {
         open(now.toLocalDate());
       }
-      out.write(TIME.format(now) + " " + line);
-      out.newLine();
+      com.google.gson.JsonObject line = new com.google.gson.JsonObject();
+      line.addProperty("t", TIME.format(now));
+      line.addProperty("src", ORIGIN.get());
+      for (java.util.Map.Entry<String, com.google.gson.JsonElement> x : entry.entrySet()) {
+        line.add(x.getKey(), x.getValue());
+      }
+      byte[] bytes = (Json.GSON.toJson(line) + "\n").getBytes(StandardCharsets.UTF_8);
+      String id = fileName + ":" + size;
+      out.write(bytes);
       // 止まったときにも、そこまでが読めるように、行ごとに書き出す
       out.flush();
+      size += bytes.length;
+      return id;
     } catch (IOException e) {
       // ログを書けなくても、操作は続ける
+      return null;
     }
   }
 
@@ -124,9 +185,11 @@ final class DbLog {
       }
     }
     today = date;
-    Path file = dir.resolve("db-" + date + ".log");
+    fileName = "db-" + date + ".jsonl";
+    Path file = dir.resolve(fileName);
     boolean created = !Files.exists(file);
-    out = Files.newBufferedWriter(file, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+    out = new java.io.BufferedOutputStream(Files.newOutputStream(file, StandardOpenOption.CREATE, StandardOpenOption.APPEND));
+    size = Files.size(file);
     if (created) {
       try {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
@@ -141,7 +204,7 @@ final class DbLog {
   static int deleteOld(Path logDir, LocalDate today, int keep) {
     int deleted = 0;
     LocalDate oldest = today.minusDays(keep - 1);
-    try (DirectoryStream<Path> files = Files.newDirectoryStream(logDir, "db-*.log")) {
+    try (DirectoryStream<Path> files = Files.newDirectoryStream(logDir, "db-*.{log,jsonl}")) {
       for (Path f : files) {
         Matcher m = FILE.matcher(f.getFileName().toString());
         if (m.matches()) {
@@ -168,20 +231,47 @@ final class DbLog {
     if (!enabled()) {
       return c;
     }
-    String tag = "#" + SEQ.incrementAndGet() + " " + connectionId;
-    write("[" + tag + "] connect " + openMillis + "ms");
+    Tag tag = new Tag(connectionId, SEQ.incrementAndGet());
+    com.google.gson.JsonObject en = tag.entry("connect");
+    en.addProperty("ms", openMillis);
+    write(en);
     return (Connection) Proxy.newProxyInstance(DbLog.class.getClassLoader(), new Class<?>[] {Connection.class},
         new ConnectionHandler(c, tag));
   }
 
   /** 接続を開けなかったことを書く */
   static void connectFailed(String connectionId, long millis, Exception e) {
-    write("[" + connectionId + "] connect 失敗 " + millis + "ms " + error(e));
+    com.google.gson.JsonObject en = entry("connect");
+    en.addProperty("conn", connectionId);
+    en.addProperty("ms", millis);
+    error(en, e);
+    write(en);
   }
 
-  private static String error(Throwable e) {
-    String state = e instanceof SQLException && ((SQLException) e).getSQLState() != null ? "(" + ((SQLException) e).getSQLState() + ") " : "";
-    return "エラー " + state + oneLine(String.valueOf(e.getMessage()));
+  /** エラーの文と SQLState を入れる */
+  private static void error(com.google.gson.JsonObject en, Throwable e) {
+    en.addProperty("err", String.valueOf(e.getMessage()));
+    if (e instanceof SQLException && ((SQLException) e).getSQLState() != null) {
+      en.addProperty("state", ((SQLException) e).getSQLState());
+    }
+  }
+
+  /** 接続先と、接続の通し番号 */
+  private static final class Tag {
+    final String connectionId;
+    final int n;
+
+    Tag(String connectionId, int n) {
+      this.connectionId = connectionId;
+      this.n = n;
+    }
+
+    com.google.gson.JsonObject entry(String kind) {
+      com.google.gson.JsonObject e = DbLog.entry(kind);
+      e.addProperty("conn", connectionId);
+      e.addProperty("n", n);
+      return e;
+    }
   }
 
   /** 改行と続く空白を 1 つの空白にし、長ければ切る */
@@ -200,9 +290,9 @@ final class DbLog {
 
   private static final class ConnectionHandler implements InvocationHandler {
     private final Connection c;
-    private final String tag;
+    private final Tag tag;
 
-    ConnectionHandler(Connection c, String tag) {
+    ConnectionHandler(Connection c, Tag tag) {
       this.c = c;
       this.tag = tag;
     }
@@ -226,12 +316,16 @@ final class DbLog {
       }
       String what = name + (args != null && args.length == 1 && !(args[0] instanceof java.sql.Savepoint) ? " " + args[0] : "");
       long t0 = System.nanoTime();
+      com.google.gson.JsonObject en = tag.entry(what);
       try {
         Object r = call(c, m, args);
-        write("[" + tag + "] " + what + " " + (System.nanoTime() - t0) / 1_000_000 + "ms");
+        en.addProperty("ms", (System.nanoTime() - t0) / 1_000_000);
+        write(en);
         return r;
       } catch (Throwable e) {
-        write("[" + tag + "] " + what + " " + (System.nanoTime() - t0) / 1_000_000 + "ms " + error(e));
+        en.addProperty("ms", (System.nanoTime() - t0) / 1_000_000);
+        error(en, e);
+        write(en);
         throw e;
       }
     }
@@ -239,13 +333,13 @@ final class DbLog {
 
   private static final class StatementHandler implements InvocationHandler {
     private final Statement s;
-    private final String tag;
+    private final Tag tag;
     /** PreparedStatement の SQL（Statement なら null） */
     private final String prepared;
     /** PreparedStatement に入れた値（番号順） */
     private final TreeMap<Integer, Object> values = new TreeMap<>();
 
-    StatementHandler(Statement s, String tag, String prepared) {
+    StatementHandler(Statement s, Tag tag, String prepared) {
       this.s = s;
       this.tag = tag;
       this.prepared = prepared;
@@ -263,15 +357,27 @@ final class DbLog {
         return call(s, m, args);
       }
       String sql = args != null && args.length >= 1 && args[0] instanceof String ? (String) args[0] : prepared;
-      String text = (name.equals("executeQuery") ? "query" : name.startsWith("executeUpdate") ? "update" : name) + " ";
-      String tail = sql == null ? "" : " " + oneLine(sql) + (prepared != null && sql == prepared && !values.isEmpty() ? " | 値: " + values.values() : "");
+      com.google.gson.JsonObject en = tag.entry(name.equals("executeQuery") ? "query" : name.startsWith("executeUpdate") ? "update" : name);
+      if (sql != null) {
+        en.addProperty("sql", oneLine(sql));
+        if (prepared != null && sql == prepared && !values.isEmpty()) {
+          com.google.gson.JsonArray vs = new com.google.gson.JsonArray();
+          for (Object v : values.values()) {
+            vs.add(v == null ? null : String.valueOf(v));
+          }
+          en.add("values", vs);
+        }
+      }
       long t0 = System.nanoTime();
       try {
         Object r = call(s, m, args);
-        write("[" + tag + "] " + text + (System.nanoTime() - t0) / 1_000_000 + "ms" + tail);
+        en.addProperty("ms", (System.nanoTime() - t0) / 1_000_000);
+        write(en);
         return r;
       } catch (Throwable e) {
-        write("[" + tag + "] " + text + (System.nanoTime() - t0) / 1_000_000 + "ms " + error(e) + " |" + tail);
+        en.addProperty("ms", (System.nanoTime() - t0) / 1_000_000);
+        error(en, e);
+        write(en);
         throw e;
       }
     }

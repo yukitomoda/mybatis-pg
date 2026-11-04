@@ -1,5 +1,6 @@
 // 結果ビュー: クエリの実行結果（実行タブ・サブクエリの部分）と値の候補を、非モーダルの浮いたウィンドウにまとめて表で出す。
 // 実行の履歴（サーバに直近の 50 件）と、それぞれの結果がどこから得られたものかも出す。
+import { ErrorMark } from './ErrorMark';
 import { useStatementName } from './statementNames';
 import { useDbComments } from './comments';
 import type { PointerEvent, ReactNode } from 'react';
@@ -525,7 +526,7 @@ function HistoryDetail({
       active = false;
     };
   }, [api, id]);
-  if (error) return <p className="error-text">{error}</p>;
+  if (error) return <ErrorMark error={error} />;
   if (!entry) return <p className="hint">読み込んでいます…</p>;
   const sets = entry.resultSets;
   const t = typeof tab === 'number' ? sets[Math.min(tab, sets.length - 1)] : undefined;
@@ -588,13 +589,13 @@ function HistoryDetail({
       </div>
       {typeof tab === 'number' && (
         <>
-          {entry.error && <pre className="render-error">{entry.error}</pre>}
+          {entry.error && <ErrorMark error={entry.error} label="実行に失敗しました" />}
           {entry.error && entry.kind === 'execute' && (
             <div className="rerun">
               <button type="button" disabled={rerunning} onClick={rerun}>
                 {rerunning ? '実行しています…' : '再実行'}
               </button>
-              {rerunError && <span className="error-text">{rerunError}</span>}
+              {rerunError && <ErrorMark error={rerunError} />}
             </div>
           )}
           {entry.warnings.length > 0 && (
@@ -606,7 +607,7 @@ function HistoryDetail({
           )}
           {t && (
             <>
-              {fetchError && <pre className="render-error">{fetchError}</pre>}
+              {fetchError && <ErrorMark error={fetchError} />}
               <DataTable
                 columns={t.columns}
                 types={t.columnTypes}

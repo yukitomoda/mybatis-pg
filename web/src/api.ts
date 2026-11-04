@@ -1,6 +1,7 @@
 // Java サーバの API クライアント
 // リバースプロキシの配下（/proxy/7171/ など）でも動くよう、API は相対パスで呼ぶ
 import { track } from './busy';
+import { notifyError } from './notices';
 import type { ParamSchema, PValue } from './params';
 import { fromJson, getAt, toJson } from './params';
 import type { GlobalSet, StatementSettings, StatementsSettings } from './globalModel';
@@ -253,6 +254,8 @@ export class ApiError extends Error {
     message: string,
     /** 実行の履歴に残したときの id（失敗した実行も、結果ビューで見られるように） */
     readonly historyId: string | null = null,
+    /** ログの行の id（画面からその行へ移るため） */
+    readonly logId: string | null = null,
   ) {
     super(message);
   }
@@ -346,6 +349,19 @@ export function createApi(token: string) {
   }
 
   /** 応答の本文をそのまま返す。エラーなら ApiError */
+  /** エラーを右下に知らせない問い合わせ（入力に合わせて裏で呼ぶもの、その場で知らせるもの） */
+  const QUIET = [
+    'api/render',
+    'api/parameters',
+    'api/param-sources',
+    'api/draft/check',
+    'api/relations/trace',
+    'api/relations/statement-tables',
+    'api/db-comments',
+    'api/vault',
+    'api/log',
+  ];
+
   async function callText(path: string, init?: RequestInit): Promise<string> {
     // 変更の通知を待つ問い合わせは、ずっと開いたままなので「読み込み中」に数えない
     return path.startsWith('api/changes') ? send(path, init) : track(send(path, init));
@@ -360,14 +376,18 @@ export function createApi(token: string) {
     if (!res.ok) {
       let message = text || res.statusText;
       let historyId: string | null = null;
+      let logId: string | null = null;
       try {
-        const body = JSON.parse(text) as { error?: string; historyId?: string | null };
+        const body = JSON.parse(text) as { error?: string; historyId?: string | null; logId?: string | null };
         message = body.error ?? res.statusText;
         historyId = body.historyId ?? null;
+        logId = body.logId ?? null;
       } catch {
         // JSON でなければ本文をそのまま使う
       }
-      throw new ApiError(res.status, message, historyId);
+      // 画面の右下に知らせる（入力に合わせて裏で呼ぶ問い合わせなどは、ログの行だけ覚えて、その場の印で見せる）
+      if (res.status !== 401) notifyError(message, logId, !QUIET.some((q) => path.startsWith(q)));
+      throw new ApiError(res.status, message, historyId, logId);
     }
     return text;
   }
@@ -636,6 +656,9 @@ export function createApi(token: string) {
       call<{ columns: string[] }>('api/db-columns', post(JSON.stringify({ connectionId, table }))),
     /** リレーション（試作）の解析の結果。解析中なら進み具合だけ */
     relations: (connectionId: string) => call<RelationsResult>('api/relations', post(JSON.stringify({ connectionId }))),
+    /** ログ（DB への操作と、画面の操作で起きたエラー）を新しい順に読む */
+    log: (q: { cursor?: string | null; focus?: string | null; limit?: number; errors?: boolean; analysis?: boolean; q?: string }) =>
+      call<LogPage>('api/log', post(JSON.stringify(q))),
     /** statement が使う表（リレーションの解析で、計画に出てきた表。解析していなければ null） */
     statementTables: (connectionId: string, statement: string) =>
       call<{ tables: string[] | null }>('api/relations/statement-tables', post(JSON.stringify({ connectionId, statement }))),
@@ -793,6 +816,39 @@ export interface RelationsResult {
 }
 
 /** 1 つの statement で、解析で検出したもの */
+/** ログの 1 件 */
+export interface LogEntry {
+  /** ファイル名:位置 */
+  id: string;
+  /** 時刻（yyyy-MM-dd HH:mm:ss.SSS） */
+  t: string;
+  /** 画面・解析（前の版のログにはない） */
+  src?: string;
+  /** connect・query・execute・update・commit・rollback・event・api・text（前の版のログ）など */
+  kind: string;
+  conn?: string;
+  /** 接続の通し番号 */
+  n?: number;
+  ms?: number;
+  sql?: string;
+  values?: (string | null)[];
+  err?: string;
+  state?: string;
+  who?: string;
+  msg?: string;
+  path?: string;
+  status?: number;
+}
+
+export interface LogPage {
+  entries: LogEntry[];
+  /** 続きの位置（もうなければ null） */
+  next: string | null;
+  /** 読む行数の上限で止めた */
+  capped: boolean;
+  scanned: number;
+}
+
 /** 推定の根拠（1 か所） */
 export interface JoinTrace {
   /** 計画の根からの段 */

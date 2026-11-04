@@ -1,5 +1,6 @@
 // テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない。
 // プレイグラウンド（このアプリだけで使う mapper XML）は下書きを使わず、編集したら自動で保存する
+import { ErrorMark } from './ErrorMark';
 import { useStatementName } from './statementNames';
 import { findJoinRanges, type JoinFocus } from './joinMarks';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
@@ -215,7 +216,7 @@ export function FileEditor({
           ? { key: statementId, line: focusLine }
           : null;
 
-  if (loadError) return <pre className="render-error">{loadError}</pre>;
+  if (loadError) return <ErrorMark error={loadError} />;
   if (content === null) return null;
   const stale = draft && saved !== null && draft.base !== saved;
   return (
@@ -300,7 +301,7 @@ export function FileEditor({
         {saveMessage ? (
           <span className={saveMessage.ok ? 'ok-text' : 'error-text'}>{saveMessage.text}</span>
         ) : drafts.error ? (
-          <span className="error-text">{drafts.error}</span>
+          <ErrorMark error={drafts.error} />
         ) : errors.length > 0 ? (
           <button
             type="button"

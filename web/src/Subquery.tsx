@@ -1,4 +1,5 @@
 // サブクエリのタブ: SQL の中のサブクエリ・CTE を木で見せ、部分ごとに本番と同じバインド変数で実行する（読み取り専用、必ずロールバック）
+import { ErrorMark } from './ErrorMark';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DraftParam, RenderResponse } from './api';
 import type { Connections } from './Execution';
@@ -286,7 +287,7 @@ export function PartsPanel({
                 <pre className="sql">{partSql(numbered, selected, values)}</pre>
               </details>
               {/* 結果は結果ビューで見る。「すべての部分を実行」のエラーは、履歴に残さないのでここに出す */}
-              {result && !result.ok && !result.historyId && <pre className="render-error">{result.error}</pre>}
+              {result && !result.ok && !result.historyId && <ErrorMark error={result.error ?? ''} label="実行に失敗しました" />}
             </>
           )}
         </div>

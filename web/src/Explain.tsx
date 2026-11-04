@@ -1,4 +1,5 @@
 // EXPLAIN タブ: 計画を取得（または貼り付け）して、ツリーで表示する
+import { ErrorMark } from './ErrorMark';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { Snapshot } from './compare';
 import { loadSnapshots, ratioTo, saveSnapshots, summarize } from './compare';
@@ -300,7 +301,7 @@ export function ExplainPanel({
         <Comparison snapshots={compared} />
       ) : (
         <>
-          {error && <pre className="render-error">{error}</pre>}
+          {error && <ErrorMark error={error} />}
           {shown && !error && (
             <>
               <PlanView shown={shown} onKeep={() => keep(shown)} />
@@ -689,7 +690,7 @@ function Tables({ conn, plan, auto }: { conn: Connections; plan: Plan; auto: boo
       {!auto && !info && (
         <p className="hint">貼り付けた計画の表の情報を、選んでいる接続先から読みます（本番とはデータ量が違うことに注意）。</p>
       )}
-      {error && <pre className="render-error">{error}</pre>}
+      {error && <ErrorMark error={error} />}
       {info?.notFound.length ? <p className="hint">見つからない表: {info.notFound.join(', ')}</p> : null}
       {info?.tables.map((t) => (
         <TableCard key={`${t.schema}.${t.name}`} t={t} />

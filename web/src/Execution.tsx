@@ -1,4 +1,5 @@
 // DB での実行と、接続先の設定
+import { ErrorMark } from './ErrorMark';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, ConnectionInput, ConnectionProfile, DraftParam, VaultStatus } from './api';
 import { ApiError } from './api';
@@ -316,9 +317,9 @@ export function ExecutePanel({
           {running ? '実行中…' : commit ? '実行してコミット' : '実行（ロールバック）'}
         </button>
       </div>
-      {!ready && current && <p className="hint">SQL を組み立てられないため実行できません。SQL タブに出ているエラーを直してください。</p>}
+      {!ready && current && <p className="hint">SQL を組み立てられないため実行できません。SQL タブのエラーを直してください。</p>}
 
-      {error && <pre className="render-error">{error}</pre>}
+      {error && <ErrorMark error={error} label="実行に失敗しました" />}
     </div>
   );
 }
