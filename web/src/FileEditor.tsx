@@ -1,5 +1,6 @@
 // テンプレートのタブ: statement を含む mapper XML ファイル全体を編集する。編集した内容は下書きとして保存し、元のファイルは変えない。
 // プレイグラウンド（このアプリだけで使う mapper XML）は下書きを使わず、編集したら自動で保存する
+import { useStatementName } from './statementNames';
 import { findJoinRanges, type JoinFocus } from './joinMarks';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Api, OpenTarget } from './api';
@@ -44,6 +45,7 @@ export function FileEditor({
   /** リレーションの画面から開いた結合（XML でその場所に印を付けて移る） */
   join?: JoinFocus | null;
 }) {
+  const statementName = useStatementName();
   // プレイグラウンドは JAR から読み込んだときも保存できる
   const cannotSave = !!readOnly && !playground;
   /** 保存されているファイルの内容（どのファイルのものかも持ち、別のファイルの内容を取り違えないようにする） */
@@ -312,7 +314,7 @@ export function FileEditor({
           </button>
         ) : missing ? (
           <span className="warn-text">
-            {playground ? 'この XML に' : '編集中の XML に'}、この statement（{statementId}）がありません
+            {playground ? 'この XML に' : '編集中の XML に'}、この statement（{statementName(statementId)}）がありません
           </span>
         ) : null}
       </div>

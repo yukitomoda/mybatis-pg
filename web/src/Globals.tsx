@@ -1,4 +1,5 @@
 // 共通パラメータ（複数の statement で共有する値の集まり）: 状態、共通パラメータの画面、クエリ画面の共通タブ
+import { useStatementName } from './statementNames';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Api, GlobalsResponse, ParameterName } from './api';
@@ -329,6 +330,7 @@ export function GlobalsScreen({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const statementName = useStatementName();
   const side = useSideWidth('globals');
   const setSelectedId = onSelect;
   const { sets } = globals;
@@ -408,7 +410,7 @@ export function GlobalsScreen({
                   const st = globals.statements[id];
                   return (
                     <li key={id}>
-                      <code>{id}</code>
+                      <code title={id}>{statementName(id)}</code>
                       <button
                         type="button"
                         className="link"

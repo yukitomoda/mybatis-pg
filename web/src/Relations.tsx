@@ -1,4 +1,5 @@
 // リレーション（試作）: statement の結合の条件から推し量った、テーブルどうしのつながりを見る
+import { useStatementName } from './statementNames';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { JoinFocus } from './joinMarks';
 import type { JoinTrace } from './api';
@@ -99,6 +100,7 @@ export function RelationsScreen({
   /** 実行の履歴を、結果ビューで開く（表の中身を見たとき） */
   onShowResult: (historyId: string) => void;
 }) {
+  const statementName = useStatementName();
   const side = useSideWidth('relations');
   const connectionId = conn.current?.id;
   // 表の中身を読んで、結果ビューで見る
@@ -483,7 +485,7 @@ export function RelationsScreen({
                             onClick={() => setStatement(d.id)}
                             title={d.id}
                           >
-                            <span>{d.id}</span>
+                            <span>{statementName(d.id)}</span>
                             <span className="count">{d.error ? '⚠' : `${d.joins.length}・${Object.keys(d.params).length}`}</span>
                           </button>
                         </li>
@@ -963,6 +965,7 @@ function StatementDetail({
   onOpen: (id: string, join?: JoinFocus) => void;
   onGoColumn: (col: string) => void;
 }) {
+  const statementName = useStatementName();
   const col = (c: string) => (
     <>
       <button type="button" className="link" onClick={() => onGoColumn(c)}>
@@ -975,8 +978,8 @@ function StatementDetail({
   return (
     <>
       <h3>
-        <button type="button" className="link" onClick={() => onOpen(detail.id)}>
-          {detail.id}
+        <button type="button" className="link" onClick={() => onOpen(detail.id)} title={detail.id}>
+          {statementName(detail.id)}
         </button>
       </h3>
       {detail.error && <p className="error-text">解析できませんでした: {detail.error.split('\n')[0]}</p>}
@@ -1041,6 +1044,7 @@ function NameDetail({
   onOpen: (id: string, join?: JoinFocus) => void;
   onGoColumn: (col: string) => void;
 }) {
+  const statementName = useStatementName();
   const col = (c: string) => (
     <button type="button" className="link" onClick={() => onGoColumn(c)}>
       <code>{s(c)}</code>
@@ -1069,8 +1073,8 @@ function NameDetail({
           {uses.map((u) => (
             <tr key={`${u.statement} ${u.property}`}>
               <td>
-                <button type="button" className="link" onClick={() => onOpen(u.statement)}>
-                  {u.statement}
+                <button type="button" className="link" onClick={() => onOpen(u.statement)} title={u.statement}>
+                  {statementName(u.statement)}
                 </button>
               </td>
               <td>
@@ -1376,6 +1380,7 @@ function SqlList({
   items: { id: string; note: string | null; join?: JoinFocus }[];
   onOpen: (id: string, join?: JoinFocus) => void;
 }) {
+  const statementName = useStatementName();
   const sourceOf = useContext(SourceContext);
   const canTrace = useContext(TraceContext) !== null;
   /** 推定の根拠を開いている行 */
@@ -1387,8 +1392,8 @@ function SqlList({
         {items.map((it) => (
           <li key={`${it.id} ${it.note}`}>
             {sourceOf.get(it.id) && <span className="badge muted">{sourceOf.get(it.id)}</span>}
-            <button type="button" className="link" onClick={() => onOpen(it.id, it.join)}>
-              {it.id}
+            <button type="button" className="link" onClick={() => onOpen(it.id, it.join)} title={it.id}>
+              {statementName(it.id)}
             </button>
             {it.note &&
               (it.join && canTrace ? (

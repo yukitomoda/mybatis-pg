@@ -1,5 +1,6 @@
 // 結果ビュー: クエリの実行結果（実行タブ・サブクエリの部分）と値の候補を、非モーダルの浮いたウィンドウにまとめて表で出す。
 // 実行の履歴（サーバに直近の 50 件）と、それぞれの結果がどこから得られたものかも出す。
+import { useStatementName } from './statementNames';
 import { useDbComments } from './comments';
 import type { PointerEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -206,6 +207,7 @@ export function ResultView({
   renderCandidate: (c: CandidateEntry, visible: boolean) => ReactNode;
 }) {
   const drag = useRef<{ x: number; y: number; gx: number; gy: number } | null>(null);
+  const statementName = useStatementName();
   const box = useRef<HTMLDivElement>(null);
   // 画面の大きさが変わったら、題名の帯が見える所に戻す（はみ出しはそのまま）
   const [, setViewport] = useState(0);
@@ -331,7 +333,7 @@ export function ResultView({
                       title={`${c.statementId} の ${c.label}`}
                     >
                       <span className="result-view-item-title">{c.label}</span>
-                      <span className="hint">{shortId(c.statementId)}</span>
+                      <span className="hint">{statementName(c.statementId)}</span>
                     </button>
                   </li>
                 ))}
@@ -384,7 +386,7 @@ export function ResultView({
                         {h.label}
                       </>
                     ) : (
-                      shortId(h.statementId ?? '')
+                      statementName(h.statementId ?? '')
                     )}
                     {h.kind === 'part' && <span className="hint"> {h.label ?? '部分'}</span>}
                   </span>
@@ -408,7 +410,10 @@ export function ResultView({
           ) : candidate ? (
             <>
               <h3>
-                <code>{candidate.label}</code> の値の候補 <span className="hint">{candidate.statementId}</span>
+                <code>{candidate.label}</code> の値の候補{' '}
+                <span className="hint" title={candidate.statementId}>
+                  {statementName(candidate.statementId)}
+                </span>
               </h3>
               {renderCandidate(candidate, true)}
             </>
@@ -434,7 +439,6 @@ export function ResultView({
 }
 
 /** statement の id の最後の 2 つ（OrderMapper.findById） */
-const shortId = (id: string) => id.split('.').slice(-2).join('.');
 
 /** 実行の履歴の 1 件: どこから得た結果かと、結果の表 */
 function HistoryDetail({
@@ -460,6 +464,7 @@ function HistoryDetail({
   onRelated: (connectionId: string, table: string, row: Record<string, string | null>, label: string) => void;
 }) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null);
+  const statementName = useStatementName();
   /** 同じ条件でやり直している */
   const [rerunning, setRerunning] = useState(false);
   const [rerunError, setRerunError] = useState<string | null>(null);
@@ -531,8 +536,8 @@ function HistoryDetail({
           {entry.kind === 'part' ? `サブクエリ: ${entry.label ?? '部分'}` : entry.kind === 'table' ? '表' : '実行'}
         </span>
         {entry.statementId ? (
-          <button type="button" className="link" onClick={() => onOpenStatement(entry.statementId!)} title="この statement を開く">
-            {entry.statementId}
+          <button type="button" className="link" onClick={() => onOpenStatement(entry.statementId!)} title={entry.statementId}>
+            {statementName(entry.statementId)}
           </button>
         ) : (
           <code>{entry.label}</code>
