@@ -328,8 +328,8 @@ class ToolServerTest {
       // マスターパスワードを設定していなければ、保存できない
       api("POST", "/api/connections/save",
           "{\"name\":\"v\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"password\":\"pw\",\"remember\":true}", 400);
-      assertEquals("{\"exists\":false,\"unlocked\":false,\"minLength\":8}", api("GET", "/api/vault", null, 200).toString());
-      api("POST", "/api/vault/setup", "{\"password\":\"short\"}", 400);
+      assertEquals("{\"exists\":false,\"unlocked\":false}", api("GET", "/api/vault", null, 200).toString());
+      api("POST", "/api/vault/setup", "{\"password\":\"\"}", 400);
       api("POST", "/api/vault/setup", "{\"password\":\"correct horse\"}", 200);
       JsonObject saved = api("POST", "/api/connections/save",
           "{\"name\":\"vault\",\"host\":\"h\",\"port\":5432,\"database\":\"d\",\"user\":\"u\",\"password\":\"pw\",\"remember\":true}", 200);
@@ -343,7 +343,7 @@ class ToolServerTest {
       assertFalse(locked.get("hasPassword").getAsBoolean());
       assertTrue(locked.get("passwordSaved").getAsBoolean());
       api("POST", "/api/vault/unlock", "{\"password\":\"wrong password\"}", 400);
-      assertEquals("{\"exists\":true,\"unlocked\":true,\"minLength\":8}", api("POST", "/api/vault/unlock", "{\"password\":\"correct horse\"}", 200).toString());
+      assertEquals("{\"exists\":true,\"unlocked\":true}", api("POST", "/api/vault/unlock", "{\"password\":\"correct horse\"}", 200).toString());
       assertTrue(connection(id).get("hasPassword").getAsBoolean());
 
       // 保存しないにすると消す。接続先を消しても消す
@@ -355,7 +355,7 @@ class ToolServerTest {
           .get("passwordSaved").getAsBoolean());
       api("POST", "/api/connections/delete", "{\"id\":\"" + id + "\"}", 200);
       api("POST", "/api/vault/reset", "{}", 200);
-      assertEquals("{\"exists\":false,\"unlocked\":false,\"minLength\":8}", api("GET", "/api/vault", null, 200).toString());
+      assertEquals("{\"exists\":false,\"unlocked\":false}", api("GET", "/api/vault", null, 200).toString());
     } finally {
       server.useVault(PasswordVault.inMemory());
     }

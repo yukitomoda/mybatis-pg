@@ -210,7 +210,6 @@ export interface VaultStatus {
   exists: boolean;
   /** 開いている（保存したパスワードを使える） */
   unlocked: boolean;
-  minLength: number;
 }
 
 /** 接続先の保存。id がなければ追加。password は省略で今のまま、空文字で消す */

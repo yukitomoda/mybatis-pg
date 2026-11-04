@@ -26,7 +26,8 @@ class PasswordVaultTest {
     Path file = dir.resolve("secrets.json");
     PasswordVault v = PasswordVault.load(file);
     assertFalse(v.exists());
-    assertThrows(IllegalArgumentException.class, () -> v.setup("short".toCharArray()));
+    // 文字数の制限はない（空だけは断る）
+    assertThrows(IllegalArgumentException.class, () -> v.setup("".toCharArray()));
     v.setup("correct horse".toCharArray());
     assertTrue(v.isUnlocked());
     v.put("conn-a", "pg-secret-あ");
@@ -77,5 +78,16 @@ class PasswordVaultTest {
     assertFalse(Files.exists(file));
     assertFalse(reopened.exists());
     assertFalse(reopened.isUnlocked());
+  }
+
+  @Test
+  void 短いマスターパスワードでも設定して開ける() throws Exception {
+    Path file = dir.resolve("short.json");
+    PasswordVault v = PasswordVault.load(file);
+    v.setup("a".toCharArray());
+    v.put("conn", "secret");
+    PasswordVault reopened = PasswordVault.load(file);
+    assertFalse(reopened.isUnlocked());
+    assertEquals("secret", reopened.unlock("a".toCharArray()).get("conn"));
   }
 }

@@ -1112,12 +1112,11 @@ public final class ToolServer {
 
   // ---- パスワードの保存（マスターパスワードで暗号化） ----
 
-  /** {"exists": マスターパスワードを設定済みか, "unlocked": 開いているか, "minLength"} */
+  /** {"exists": マスターパスワードを設定済みか, "unlocked": 開いているか} */
   private Map<String, Object> vaultStatus() {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("exists", vault.exists());
     m.put("unlocked", vault.isUnlocked());
-    m.put("minLength", PasswordVault.MIN_LENGTH);
     return m;
   }
 

@@ -49,8 +49,6 @@ public final class PasswordVault {
   private static final int TAG_BITS = 128;
   private static final String CHECK_AAD = "mybatis-pg:check";
   private static final String CHECK_VALUE = "mybatis-pg";
-  /** マスターパスワードの最低の長さ */
-  public static final int MIN_LENGTH = 8;
 
   private final SecureRandom random = new SecureRandom();
   /** null ならファイルに保存しない（テスト用） */
@@ -204,8 +202,9 @@ public final class PasswordVault {
   }
 
   private static void validMaster(char[] master) {
-    if (master == null || master.length < MIN_LENGTH) {
-      throw new IllegalArgumentException("マスターパスワードは " + MIN_LENGTH + " 文字以上にしてください");
+    // 文字数などの制限は設けない（空だけは、設定したことにならないので断る）
+    if (master == null || master.length == 0) {
+      throw new IllegalArgumentException("マスターパスワードを入れてください");
     }
   }
 

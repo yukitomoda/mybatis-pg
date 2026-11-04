@@ -165,7 +165,7 @@ function VaultPanel({ conn }: { conn: Connections }) {
       <input
         type="password"
         aria-label="新しいマスターパスワード"
-        placeholder={`新しいマスターパスワード（${vault.minLength} 文字以上）`}
+        placeholder="新しいマスターパスワード"
         autoComplete="new-password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
@@ -196,7 +196,7 @@ function VaultPanel({ conn }: { conn: Connections }) {
             回入れて開きます。
           </p>
           {newPassword}
-          <button type="submit" disabled={password.length < vault.minLength || password !== confirm}>
+          <button type="submit" disabled={password === '' || password !== confirm}>
             設定
           </button>
         </form>
@@ -232,7 +232,7 @@ function VaultPanel({ conn }: { conn: Connections }) {
             onChange={(e) => setCurrent(e.target.value)}
           />
           {newPassword}
-          <button type="submit" disabled={current === '' || password.length < vault.minLength || password !== confirm}>
+          <button type="submit" disabled={current === '' || password === '' || password !== confirm}>
             変更
           </button>
           <button type="button" className="link" onClick={() => setChanging(false)}>
