@@ -612,7 +612,7 @@ export function createApi(token: string) {
       change:
         | { action: 'add' | 'remove'; a: string; b: string; connectionId?: string }
         | { action: 'table'; child: string; parent: string; kind: 'parent' | 'one-to-one' | 'sibling' | null }
-        | { action: 'disable' | 'enable' | 'ignore' | 'unignore'; a: string; b: string },
+        | { action: 'disable' | 'enable'; a: string; b: string },
     ) => call<{ ok: boolean }>('api/relations/manual', post(JSON.stringify(change))),
     /** DB の表（schema.table）の一覧 */
     dbTables: (connectionId: string) => call<{ tables: string[] }>('api/db-columns', post(JSON.stringify({ connectionId }))),
@@ -739,24 +739,7 @@ export interface RelationLink {
   compositeKey?: string | null;
 }
 
-/** 疑わしい結合 */
-export interface RelationSuspicion {
-  a: string;
-  b: string;
-  kind: 'parent' | 'one-to-one' | 'sibling';
-  statements: string[];
-  /** 源流が食い違う、違う表の、同じ名前の主キーどうし */
-  reason: string;
-  /** 両側の源流（一意の列なら、その列自身） */
-  rootsA: string[];
-  rootsB: string[];
-  /** 問題なしとして隠した */
-  ignored: boolean;
-}
-
 export interface RelationsResult {
-  /** 疑わしい結合 */
-  suspicious?: RelationSuspicion[];
   /** 手で決めた表の関係（parent: parent が child の親） */
   tableKinds?: { child: string; parent: string; kind: 'parent' | 'one-to-one' | 'sibling' }[];
   /** ほかの接続先の解析の結果を使っているとき、その接続先の id（ワークスペースの設定） */

@@ -83,17 +83,15 @@ const SCREENS: [Screen, string][] = [
 
 /** リレーションの画面で見ているもの */
 export type RelationLoc = {
-  view: 'tables' | 'statements' | 'names' | 'suspicious';
+  view: 'tables' | 'statements' | 'names';
   table: string | null;
   /** 強調する列（schema.table.column） */
   column: string | null;
   statement: string | null;
   name: string | null;
-  /** 疑わしい結合の組（a|b） */
-  pair: string | null;
 };
 
-const NO_RELATION: RelationLoc = { view: 'tables', table: null, column: null, statement: null, name: null, pair: null };
+const NO_RELATION: RelationLoc = { view: 'tables', table: null, column: null, statement: null, name: null };
 
 /** schema.table.column の表の部分 */
 const tableOfColumn = (col: string) => col.slice(0, col.lastIndexOf('.'));
@@ -136,7 +134,8 @@ function parseHash(): {
             : kind === 'names' || kind === 'name'
               ? { ...NO_RELATION, view: 'names', name: value }
               : kind === 'suspicious'
-                ? { ...NO_RELATION, view: 'suspicious', pair: value }
+                ? // 前の版の「疑わしい結合」（廃止）のアドレスは、表の一覧にする
+                  NO_RELATION
                 : arg
                   ? { ...NO_RELATION, table: tableOfColumn(arg), column: arg }
                   : NO_RELATION;
@@ -161,7 +160,6 @@ function hashOf(
     const r = relation;
     if (r.view === 'statements') return r.statement ? `#/relations/statement/${enc(r.statement)}` : '#/relations/statements';
     if (r.view === 'names') return r.name ? `#/relations/name/${enc(r.name)}` : '#/relations/names';
-    if (r.view === 'suspicious') return r.pair ? `#/relations/suspicious/${enc(r.pair)}` : '#/relations/suspicious';
     if (r.column) return `#/relations/column/${enc(r.column)}`;
     return r.table ? `#/relations/table/${enc(r.table)}` : '#/relations';
   }

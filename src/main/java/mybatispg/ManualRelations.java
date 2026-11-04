@@ -36,7 +36,7 @@ import com.google.gson.JsonParser;
  *  "relations": [{"a": "schema.table.column", "b": "schema.table.column"}]（前の版は {"child", "parent"}。列の組として読む）,
  *  "tables": [{"child": "schema.table", "parent": "schema.table"} か {"a", "b", "kind": "one-to-one" | "sibling"}]（表の関係）,
  *  "disabled": [{"a": "schema.table.column", "b": "schema.table.column"}],
- *  "ignored": [{"a", "b"}]（疑わしい結合のうち、問題なしとして隠した組）}
+ *  前の版の "ignored"（疑わしい結合のうち、隠した組）は読まない（書き直すときに消える）}
  * </pre>
  */
 final class ManualRelations {
@@ -73,8 +73,6 @@ final class ManualRelations {
   final List<TableKind> tables = new ArrayList<>();
   /** 無効にしたつながり（[a, b]。向きは問わない） */
   final List<String[]> disabled = new ArrayList<>();
-  /** 疑わしい結合のうち、問題なしとして隠した組（[a, b]。向きは問わない） */
-  final List<String[]> ignored = new ArrayList<>();
   /** 変えるたびに増やす（まとめたリレーションを作り直すため） */
   long version;
 
@@ -108,12 +106,6 @@ final class ManualRelations {
         for (JsonElement e : o.getAsJsonArray("disabled")) {
           JsonObject r = e.getAsJsonObject();
           m.disabled.add(new String[] {r.get("a").getAsString(), r.get("b").getAsString()});
-        }
-        if (o.has("ignored")) {
-          for (JsonElement e : o.getAsJsonArray("ignored")) {
-            JsonObject r = e.getAsJsonObject();
-            m.ignored.add(new String[] {r.get("a").getAsString(), r.get("b").getAsString()});
-          }
         }
       } catch (JsonParseException | IllegalStateException | NullPointerException e) {
         throw new IOException("手で設定したリレーションのファイルを読み込めません: " + file + "\n" + e.getMessage(), e);
@@ -234,32 +226,6 @@ final class ManualRelations {
     }
   }
 
-  /** 疑わしい結合を、問題なしとして隠す */
-  synchronized void ignore(String a, String b) throws IOException {
-    check(a);
-    check(b);
-    if (ignored.stream().noneMatch(d -> samePair(d[0], d[1], a, b))) {
-      ignored.add(new String[] {a, b});
-      save();
-    }
-  }
-
-  synchronized void unignore(String a, String b) throws IOException {
-    if (ignored.removeIf(d -> samePair(d[0], d[1], a, b))) {
-      save();
-    }
-  }
-
-  /** 疑わしい結合を、問題なしとして隠しているか */
-  synchronized boolean isIgnored(String a, String b) {
-    for (String[] d : ignored) {
-      if (samePair(d[0], d[1], a, b)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /** 列の組（向きは問わない）を無効にしているか */
   synchronized boolean isDisabled(String a, String b) {
     for (String[] d : disabled) {
@@ -334,14 +300,6 @@ final class ManualRelations {
       ds.add(j);
     }
     o.add("disabled", ds);
-    JsonArray is = new JsonArray();
-    for (String[] d : ignored) {
-      JsonObject j = new JsonObject();
-      j.addProperty("a", d[0]);
-      j.addProperty("b", d[1]);
-      is.add(j);
-    }
-    o.add("ignored", is);
     Files.createDirectories(file.getParent());
     Path tmp = Files.createTempFile(file.getParent(), "manual", ".tmp");
     try {

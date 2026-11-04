@@ -155,7 +155,6 @@ public final class ToolServer {
     relationLast.clear();
     relationGraphs.clear();
     relationBodies.clear();
-    suspiciousCache.clear();
     manualRelations = null;
     connections.useProjects(workspace.projectDirs());
   }
@@ -1884,23 +1883,6 @@ public final class ToolServer {
     return "\"" + name.replace("\"", "\"\"") + "\"";
   }
 
-  /** 接続先ごとの、疑わしい結合（解析の結果の更新時刻・件数と、手で設定したものの版が変わらなければ使い回す） */
-  private final Map<String, Object[]> suspiciousCache = new java.util.concurrent.ConcurrentHashMap<>();
-
-  private List<SuspiciousJoins.Suspicion> suspicious(String connectionId, Relations.Store store, ManualRelations manual) {
-    String key = relationKey(connectionId);
-    Object[] cached = suspiciousCache.get(key);
-    if (cached != null && (Long) cached[0] == store.updatedAt && (Integer) cached[1] == store.statements.size()
-        && (Long) cached[2] == manual.version) {
-      @SuppressWarnings("unchecked")
-      List<SuspiciousJoins.Suspicion> list = (List<SuspiciousJoins.Suspicion>) cached[3];
-      return list;
-    }
-    List<SuspiciousJoins.Suspicion> list = SuspiciousJoins.find(col -> Relations.unique(store, col), Relations.links(store, manual), manual);
-    suspiciousCache.put(key, new Object[] {store.updatedAt, store.statements.size(), manual.version, list});
-    return list;
-  }
-
   /** 画面に返す履歴の 1 件（編集中の XML の中身は返さない） */
   private static JsonObject forClient(JsonObject o) {
     JsonObject c = o.deepCopy();
@@ -2589,8 +2571,8 @@ public final class ToolServer {
         } catch (java.sql.SQLException | RuntimeException e) {
           // 読めなければ、次に画面が読むときに読む
         }
-        // 画面に返す結果（源流・疑わしい結合など。組の数によっては重い）を、ここでまとめて覚えておく
-        progress.step = "つながり・源流・疑わしい結合をまとめる";
+        // 画面に返す結果（つながり・源流など。組の数によっては重い）を、ここでまとめて覚えておく
+        progress.step = "つながり・源流をまとめる";
         relationsBody(connectionId, store);
       } catch (Exception e) {
         progress.current = "エラー: " + Errors.describe(e);
@@ -2621,7 +2603,6 @@ public final class ToolServer {
   /**
    * 手で設定したリレーションを変える。{"action": "add" | "remove", "a", "b"}（列と列）か {"action": "disable" | "enable", "a", "b"}、
    * 表の関係を決めるなら {"action": "table", "child", "parent", "kind": "parent" | "one-to-one" | "sibling" | null（自動）}（表は schema.table）、
-   * 疑わしい結合を問題なしとして隠す・戻すなら {"action": "ignore" | "unignore", "a", "b"}。
    * 列は schema.table.column
    */
   private void changeManualRelation(HttpExchange ex) throws IOException {
@@ -2664,12 +2645,8 @@ public final class ToolServer {
         manual.disable(string(req, "a"), string(req, "b"));
       } else if ("enable".equals(action)) {
         manual.enable(string(req, "a"), string(req, "b"));
-      } else if ("ignore".equals(action)) {
-        manual.ignore(string(req, "a"), string(req, "b"));
-      } else if ("unignore".equals(action)) {
-        manual.unignore(string(req, "a"), string(req, "b"));
       } else {
-        sendJson(ex, 400, error("action は add・remove・table・disable・enable・ignore・unignore のどれかにしてください"));
+        sendJson(ex, 400, error("action は add・remove・table・disable・enable のどれかにしてください"));
         return;
       }
     } catch (IllegalArgumentException e) {
@@ -2848,7 +2825,7 @@ public final class ToolServer {
   /** 接続先ごとの、画面に返すリレーションの結果（解析の結果・手で設定したもの・読み込んだ mapper が変わらなければ使い回す） */
   private final Map<String, Object[]> relationBodies = new java.util.concurrent.ConcurrentHashMap<>();
 
-  /** 画面に返すリレーションの結果（源流・疑わしい結合など）。解析の結果と手で設定したものと mapper が前と同じなら、前のものを使う */
+  /** 画面に返すリレーションの結果（つながり・源流など）。解析の結果と手で設定したものと mapper が前と同じなら、前のものを使う */
   private Map<String, Object> relationsBody(String connectionId, Relations.Store store) throws IOException {
     ManualRelations manual = manualRelations();
     SqlRenderer renderer = workspace.renderer();
@@ -2887,8 +2864,6 @@ public final class ToolServer {
       // 解析で推し量ったものに、手で設定したもの（追加・無効）を重ねる
       List<Relations.Link> all = Relations.links(store, manual);
       Relations.Graph graph = new Relations.Graph(store, all, manual);
-      // 疑わしい結合（組の数の 2 乗に比例するので、解析の結果と手で設定したものが変わらなければ前のものを使う）
-      body.put("suspicious", suspicious(connectionId, store, manual));
       List<Map<String, Object>> links = new ArrayList<>();
       for (Relations.Link l : all) {
         Map<String, Object> m = new LinkedHashMap<>();

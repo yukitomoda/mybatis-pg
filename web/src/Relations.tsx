@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { JoinFocus } from './joinMarks';
 import type { JoinTrace } from './api';
-import type { Api, RelationLink, RelationStatement, RelationsResult, RelationSuspicion, RelationsTiming } from './api';
+import type { Api, RelationLink, RelationStatement, RelationsResult, RelationsTiming } from './api';
 import { ApiError } from './api';
 import type { RelationLoc } from './App';
 import type { Connections } from './Execution';
@@ -123,15 +123,12 @@ export function RelationsScreen({
   const [result, setResult] = useState<RelationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
-  const { view, table, column, statement, name, pair } = loc;
+  const { view, table, column, statement, name } = loc;
   const focus = column;
   const setTable = (t: string) => onNavigate({ ...loc, view: 'tables', table: t, column: null });
   const setView = (v: RelationLoc['view']) => onNavigate({ ...loc, view: v });
   const setStatement = (id: string) => onNavigate({ ...loc, view: 'statements', statement: id });
   const setName = (n: string) => onNavigate({ ...loc, view: 'names', name: n });
-  const setPair = (p: string) => onNavigate({ ...loc, view: 'suspicious', pair: p });
-  /** 問題なしとして隠したものも出す */
-  const [showIgnored, setShowIgnored] = useState(false);
   /** 列の表を開く */
   const goColumn = (col: string) => onNavigate({ ...loc, view: 'tables', table: tableOf(col), column: col });
   /** 手で設定したリレーションを変えて、読み直す */
@@ -284,13 +281,6 @@ export function RelationsScreen({
   const shownNames = Object.keys(names).filter((n) => n.toLowerCase().includes(q));
   // 選んだ表を使う statement（計画に出てきたもの）
   const usingTable = table ? details.filter((d) => d.tables?.includes(table)).map((d) => d.id) : [];
-  // 疑わしい結合（隠したものは、選んだときだけ出す）
-  const suspicions = result?.suspicious ?? [];
-  const activeSuspicions = suspicions.filter((x) => !x.ignored);
-  const shownSuspicions = (showIgnored ? suspicions : activeSuspicions).filter(
-    (x) => x.a.toLowerCase().includes(q) || x.b.toLowerCase().includes(q),
-  );
-  const shortCol = (c: string) => c.slice(c.indexOf('.') + 1);
   const detailOf = useMemo(() => new Map(allDetails.map((d) => [d.id, d])), [allDetails]);
   // 「表と列」の右側を、列ごとの一覧で見るか、関係図で見るか（ブラウザに覚える）
   const [tableMode, setTableModeState] = useState<'columns' | 'diagram'>(() => {
@@ -428,7 +418,6 @@ export function RelationsScreen({
                         ['tables', '表と列'],
                         ['statements', 'statement'],
                         ['names', 'パラメータ名'],
-                        ['suspicious', '疑わしい結合'],
                       ] as const
                     ).map(([v, label]) => (
                       <button
@@ -440,20 +429,13 @@ export function RelationsScreen({
                         onClick={() => setView(v)}
                       >
                         {label}
-                        {v === 'suspicious' && activeSuspicions.length > 0 && <span className="badge warn">{activeSuspicions.length}</span>}
                       </button>
                     ))}
                   </div>
                   <input
                     type="search"
                     placeholder={
-                      view === 'tables'
-                        ? '表を絞り込む'
-                        : view === 'statements'
-                          ? 'statement を絞り込む'
-                          : view === 'suspicious'
-                            ? '列で絞り込む'
-                            : 'パラメータ名を絞り込む'
+                      view === 'tables' ? '表を絞り込む' : view === 'statements' ? 'statement を絞り込む' : 'パラメータ名を絞り込む'
                     }
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
@@ -506,24 +488,6 @@ export function RelationsScreen({
                           </button>
                         </li>
                       ))}
-                    {view === 'suspicious' &&
-                      shownSuspicions.map((x) => (
-                        <li key={pairKey(x)}>
-                          <button
-                            type="button"
-                            className={
-                              [pairKey(x) === pair ? 'selected' : '', x.ignored ? 'ignored' : ''].filter(Boolean).join(' ') || undefined
-                            }
-                            onClick={() => setPair(pairKey(x))}
-                            title={`${x.a} = ${x.b}`}
-                          >
-                            <span>
-                              {shortCol(x.a)} = {shortCol(x.b)}
-                            </span>
-                            <span className="count">{x.statements.length}</span>
-                          </button>
-                        </li>
-                      ))}
                     {view === 'names' &&
                       shownNames.map((n) => (
                         <li key={n}>
@@ -535,11 +499,6 @@ export function RelationsScreen({
                       ))}
                   </ul>
                   {view === 'statements' && <p className="hint">数は「結合の組・パラメータ」。⚠ は解析できなかったもの</p>}
-                  {view === 'suspicious' && (
-                    <label className="hint relations-show-ignored">
-                      <input type="checkbox" checked={showIgnored} onChange={(e) => setShowIgnored(e.target.checked)} /> 隠したものも出す
-                    </label>
-                  )}
                 </div>
                 <SideSplitter label="一覧の幅" side={side} />
                 <div className={view === 'tables' && table && tableMode === 'diagram' ? 'relations-detail diagram' : 'relations-detail'}>
@@ -629,21 +588,6 @@ export function RelationsScreen({
                       <StatementDetail detail={detailOf.get(statement)!} keys={keys} s={s} onOpen={onOpen} onGoColumn={goColumn} />
                     ) : (
                       <p className="hint">statement を選んでください</p>
-                    ))}
-                  {view === 'suspicious' &&
-                    (pair && suspicions.find((x) => pairKey(x) === pair) ? (
-                      <SuspicionDetail
-                        x={suspicions.find((x) => pairKey(x) === pair)!}
-                        s={s}
-                        detailOf={detailOf}
-                        onOpen={onOpen}
-                        onGoColumn={goColumn}
-                        onChange={change}
-                      />
-                    ) : (
-                      <p className="hint">
-                        {activeSuspicions.length === 0 ? 'ほかの根拠と食い違う結合は、見つかっていません' : '左の一覧から選んでください'}
-                      </p>
                     ))}
                   {view === 'names' &&
                     (name && names[name] ? (
@@ -1467,86 +1411,6 @@ function SqlList({
           </li>
         ))}
       </ul>
-    </>
-  );
-}
-
-/** 疑わしい結合の組の鍵（アドレスに入れる） */
-const pairKey = (x: { a: string; b: string }) => `${x.a}|${x.b}`;
-
-/** 疑わしい結合の、理由・根拠の SQL・操作 */
-function SuspicionDetail({
-  x,
-  s,
-  detailOf,
-  onOpen,
-  onGoColumn,
-  onChange,
-}: {
-  x: RelationSuspicion;
-  s: (col: string) => string;
-  detailOf: Map<string, RelationStatement>;
-  onOpen: (id: string, join?: JoinFocus) => void;
-  onGoColumn: (col: string) => void;
-  onChange: (c: Parameters<Api['changeManualRelation']>[0]) => Promise<void>;
-}) {
-  const col = (c: string) => (
-    <button type="button" className="link" onClick={() => onGoColumn(c)}>
-      <code>{s(c)}</code>
-    </button>
-  );
-  const roots = (c: string, rs: string[]) =>
-    rs.length === 1 && rs[0] === c ? <span className="hint">（この列が主キー）</span> : rs.map((r) => <span key={r}>{col(r)} </span>);
-  return (
-    <>
-      <h2 className="relations-detail-title">
-        <code>
-          {s(x.a)} = {s(x.b)}
-        </code>
-        {x.ignored && <span className="badge muted">隠した</span>}
-      </h2>
-      <p className="suspicion-reason">{x.reason}</p>
-      <table className="relations-grid suspicion-roots">
-        <thead>
-          <tr>
-            <th>列</th>
-            <th>源流（この結合のほかの根拠から）</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>{col(x.a)}</td>
-            <td>{roots(x.a, x.rootsA)}</td>
-          </tr>
-          <tr>
-            <td>{col(x.b)}</td>
-            <td>{roots(x.b, x.rootsB)}</td>
-          </tr>
-        </tbody>
-      </table>
-      <SqlList
-        title={`この結合をしている SQL（${x.statements.length} 件）`}
-        items={x.statements.map((id) => joinItem(detailOf.get(id), id, x.a, x.b))}
-        onOpen={onOpen}
-      />
-      <div className="suspicion-actions">
-        <button
-          type="button"
-          onClick={() => onChange({ action: 'disable', a: x.a, b: x.b })}
-          title="このつながりを、源流を探すときに使わないようにします"
-        >
-          誤りなので無効にする
-        </button>
-        {x.ignored ? (
-          <button type="button" className="link" onClick={() => onChange({ action: 'unignore', a: x.a, b: x.b })}>
-            隠すのをやめる
-          </button>
-        ) : (
-          <button type="button" className="link" onClick={() => onChange({ action: 'ignore', a: x.a, b: x.b })}>
-            問題なしとして隠す
-          </button>
-        )}
-      </div>
     </>
   );
 }
