@@ -3880,3 +3880,14 @@ div.relations-comment {
   font-family: var(--mono);
   color: var(--muted);
 }
+
+.relations-plain {
+  margin: 12px 0;
+}
+.relations-plain summary {
+  cursor: pointer;
+}
+.relations-plain ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}

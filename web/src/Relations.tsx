@@ -766,6 +766,23 @@ function TableRelations({
   ].sort((x, y) => (x === focus ? -1 : y === focus ? 1 : x.localeCompare(y)));
   const name = (c: string) => c.slice(c.lastIndexOf('.') + 1);
 
+  // DB にある列のうち、つながりもパラメータもない列（折り畳んで出す）
+  const [dbColumns, setDbColumns] = useState<string[]>([]);
+  useEffect(() => {
+    setDbColumns([]);
+    if (!connectionId) return;
+    let active = true;
+    api.dbColumns(connectionId, table).then(
+      (r) => active && setDbColumns(r.columns),
+      () => active && setDbColumns([]),
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, connectionId, table]);
+  const shown = new Set(columns.map(name));
+  const plainColumns = dbColumns.filter((c) => !shown.has(c));
+
   /** つながりの理由と根拠（「i」の小窓） */
   const linkInfo = (l: RelationLink, other: string, d: { label: string; reason: string }) => (
     <InfoButton title="判定の理由と根拠の SQL">
@@ -970,6 +987,19 @@ function TableRelations({
             );
           })}
         </table>
+      )}
+      {plainColumns.length > 0 && (
+        <details className="relations-plain">
+          <summary>リレーションのない列（{plainColumns.length} 件）</summary>
+          <ul>
+            {plainColumns.map((c) => (
+              <li key={c}>
+                <code>{c}</code>
+                {comments.columns[`${table}.${c}`] && <span className="hint"> {comments.columns[`${table}.${c}`]}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       <h3 className="relations-add-head">リレーションを追加</h3>
       <AddLink
