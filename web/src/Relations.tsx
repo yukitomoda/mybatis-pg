@@ -419,21 +419,6 @@ export function RelationsScreen({
                   : 'まだ解析していません。statement を EXPLAIN（実行はしない）して、結合の条件を集めます。'}
               </p>
             )}
-            {result?.errors && result.errors.length > 0 && !running && (
-              <details className="relations-errors">
-                <summary>解析できなかった statement（{result.errors.length} 件）</summary>
-                <ul>
-                  {result.errors.map((e) => (
-                    <li key={e.id}>
-                      <button type="button" className="link" onClick={() => onOpen(e.id)}>
-                        {e.id}
-                      </button>
-                      <span className="hint"> {e.error.split('\n')[0]}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
             {connectionId && !running && (
               <div className="relations-body" style={side.style}>
                 <div className="relations-tables">
@@ -646,6 +631,21 @@ export function RelationsScreen({
                     ))}
                 </div>
               </div>
+            )}
+            {result?.errors && result.errors.length > 0 && !running && (
+              <details className="relations-errors">
+                <summary>解析できなかった statement（{result.errors.length} 件）</summary>
+                <ul>
+                  {result.errors.map((e) => (
+                    <li key={e.id}>
+                      <button type="button" className="link" onClick={() => onOpen(e.id)}>
+                        {e.id}
+                      </button>
+                      <span className="hint"> {e.error.split('\n')[0]}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </div>
         </TraceContext.Provider>
